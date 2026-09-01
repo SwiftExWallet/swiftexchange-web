@@ -2,7 +2,6 @@ import { BrowserProvider, getAddress, hexlify, toUtf8Bytes } from 'ethers';
 
 import { sendCustomNotification } from '../../../../service/notificationService';
 
-
 export async function signDydxMessage(evmAddress: string, provider: unknown): Promise<string> {
   const typedData = {
     domain: { name: 'dYdX Chain', chainId: 1 },
@@ -65,7 +64,6 @@ export async function signDydxMessage(evmAddress: string, provider: unknown): Pr
   throw new Error('Wallet provider is missing or invalid.');
 }
 
-
 // ---------------------------------------------------------------------------
 // SIWE (EIP-4361) personal_sign — multi-fallback
 // ---------------------------------------------------------------------------
@@ -91,13 +89,7 @@ export async function signSiweMessage(
   const lowerAddr = evmAddress.toLowerCase();
   const checksumAddr = getAddress(evmAddress);
 
-  console.log('[SIWE] SIGN START', {
-    providerInstanceId: (provider as any)?.__debugProviderId,
-    topic: (provider as any)?.session?.topic,
-    address: evmAddress,
-    message,
-    client: (provider as any)?.client,
-  });
+  console.info(`[Auth:SIWE] Requesting SIWE personal_sign for ${evmAddress}`);
 
   if (provider && typeof (provider as any).request === 'function') {
     try {
@@ -105,15 +97,10 @@ export async function signSiweMessage(
         method: 'personal_sign',
         params: [hexMsg, lowerAddr],
       });
-      console.log('[SIWE] SIGN SUCCESS', {
-        providerInstanceId: (provider as any)?.__debugProviderId,
-        topic: (provider as any)?.session?.topic,
-        signature,
-      });
+      console.info(`[Auth:SIWE] ✓ SIWE signature verified for ${evmAddress}`);
       return signature;
     } catch (err1: any) {
       if (err1?.message === 'USER_REJECTED') {
-        console.error('[SIWE] SIGN ERROR (USER_REJECTED)', err1);
         throw err1;
       }
       try {
@@ -121,15 +108,10 @@ export async function signSiweMessage(
           method: 'personal_sign',
           params: [hexMsg, checksumAddr],
         });
-        console.log('[SIWE] SIGN SUCCESS', {
-          providerInstanceId: (provider as any)?.__debugProviderId,
-          topic: (provider as any)?.session?.topic,
-          signature,
-        });
+        console.info(`[Auth:SIWE] ✓ SIWE signature verified (checksum) for ${evmAddress}`);
         return signature;
       } catch (err2: any) {
         if (err2?.message === 'USER_REJECTED') {
-          console.error('[SIWE] SIGN ERROR (USER_REJECTED)', err2);
           throw err2;
         }
         try {
@@ -137,14 +119,9 @@ export async function signSiweMessage(
             method: 'personal_sign',
             params: [lowerAddr, hexMsg],
           });
-          console.log('[SIWE] SIGN SUCCESS', {
-            providerInstanceId: (provider as any)?.__debugProviderId,
-            topic: (provider as any)?.session?.topic,
-            signature,
-          });
+          console.info(`[Auth:SIWE] ✓ SIWE signature verified (swapped params) for ${evmAddress}`);
           return signature;
         } catch (err3: any) {
-          console.error('[SIWE] SIGN ERROR', err3);
           if (err3?.message === 'USER_REJECTED') throw err3;
         }
       }
@@ -155,10 +132,10 @@ export async function signSiweMessage(
     const browserProvider = new BrowserProvider(provider as any);
     const signer = await browserProvider.getSigner(evmAddress);
     const signature = await signer.signMessage(message);
-    console.log('[SIWE] SIGN SUCCESS (BrowserProvider)', { signature });
+    console.info(`[Auth:SIWE] ✓ SIWE signature verified (BrowserProvider) for ${evmAddress}`);
     return signature;
   } catch (error) {
-    console.error('[SIWE] SIGN ERROR (BrowserProvider)', error);
+    console.error('[Auth:SIWE] ✕ SIWE signature failed:', error);
     throw error;
   }
 }

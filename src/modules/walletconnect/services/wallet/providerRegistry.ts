@@ -27,14 +27,10 @@ for (const [walletId, rdnsList] of Object.entries(EIP6963_RDNS_MAP)) {
 }
 
 // ---------------------------------------------------------------------------
-// EIP-6963 listener setup
-// ---------------------------------------------------------------------------
-
 export function setupEIP6963Listener(ctx: WalletServiceContext): void {
   if (typeof window === 'undefined') return;
   window.addEventListener('eip6963:announceProvider', (event: any) => {
     const detail = event.detail;
-    console.log('eip6963:announceProvider', detail);
     if (detail?.info?.rdns && detail.provider) {
       ctx.eip6963Providers.set(detail.info.rdns, detail.provider);
     }
@@ -116,7 +112,7 @@ export async function resolveEvmProvider(
 
 /**
  * Scans the EIP-5749 providers[] array with spoofer-aware flag checks.
-  */
+ */
 function findInProvidersArray(providers: any[], walletId: string): any | null {
   switch (walletId) {
     case 'metamask':
@@ -208,9 +204,6 @@ async function loadUniversalProvider(): Promise<typeof UniversalProviderType> {
 }
 
 export async function getOrCreateProvider(ctx: WalletServiceContext, key: string): Promise<any> {
-  const debugProviderId = crypto.randomUUID();
-  console.log('[WC] PROVIDER INIT', { key, providerInstanceId: debugProviderId });
-
   const existing = ctx.providers.get(key);
   if (existing && (existing as any).__providerKey === key) {
     if (existing.session) {
@@ -262,7 +255,7 @@ export async function getOrCreateProvider(ctx: WalletServiceContext, key: string
 
   wrapProviderRequests(ctx, provider);
 
-  console.log('[WC] provider created', debugProviderId);
+  const debugProviderId = crypto.randomUUID();
   (provider as any).__debugProviderId = debugProviderId;
   (provider as any).__providerKey = key;
 
@@ -300,6 +293,21 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           signingType = 'evm';
         }
 
+        const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+        const activeSession = ctx.sessions.get(signingType);
+        const chainIdentifier =
+          signingType === 'evm'
+            ? activeSession?.evmChainId
+              ? `EVM Chain ${activeSession.evmChainId}`
+              : 'EVM'
+            : activeSession?.stellarChainId
+              ? `Stellar (${activeSession.stellarChainId})`
+              : 'Stellar';
+
+        console.info(
+          `[WalletRequest:${networkTag}] ➔ Dispatching '${method}' on ${chainIdentifier} (${activeSession?.walletId || 'wallet'})`
+        );
+
         if (ctx.isSignRequestInFlight.get(signingType)) {
           const error = new Error(
             'A signing request is already in progress. Please wait or check your wallet.'
@@ -326,7 +334,7 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
                 : redirect.universal || redirect.native;
 
               if (href) {
-                console.log('[WalletService] Opening wallet for signing', method, '::', href);
+                console.info(`[WalletRequest:${networkTag}] Directing mobile wallet to: ${href}`);
                 try {
                   window.open(href, '_blank', 'noopener');
                 } catch {
@@ -343,14 +351,24 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           );
 
           const result = await Promise.race([originalRequest.apply(this, args), timeoutPromise]);
+          console.info(
+            `[WalletRequest:${networkTag}] ✓ '${method}' confirmed on ${chainIdentifier}`
+          );
           return result;
         } catch (error: any) {
           if (isUserRejection(error)) {
+            console.warn(
+              `[WalletRequest:${networkTag}] ✕ User rejected '${method}' on ${chainIdentifier}`
+            );
             const rejectError = new Error('USER_REJECTED') as any;
             rejectError.code = 4001;
             throw rejectError;
           }
           const cleanMsg = extractErrorMessage(error);
+          console.error(
+            `[WalletRequest:${networkTag}] ✕ Error during '${method}' on ${chainIdentifier}:`,
+            cleanMsg
+          );
           const newErr = new Error(cleanMsg) as any;
           newErr.code = error?.code || -32603;
           throw newErr;

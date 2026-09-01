@@ -33,6 +33,7 @@ vi.mock('../../services/Siweauthservice', () => ({
   }),
   restoreAuthSession: vi.fn().mockResolvedValue(null),
   setAccessToken: vi.fn(),
+  getAccessToken: vi.fn().mockReturnValue(null),
   buildStellarChallenge: vi
     .fn()
     .mockResolvedValue({ xdr: 'mock-xdr', networkPassphrase: 'mock-passphrase' }),

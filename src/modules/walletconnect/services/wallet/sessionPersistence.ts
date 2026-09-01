@@ -1,6 +1,5 @@
 import { getStellarConfig } from '../../config/chains';
 import { WALLET_METADATA_MAP } from '../../constants/Wallet';
-
 import { setupEVMListeners, setupWalletConnectListeners } from './eventListeners';
 import { resolveEvmProvider } from './providerRegistry';
 import { getOrCreateProvider } from './providerRegistry';
@@ -96,7 +95,6 @@ async function restoreSession(
     }
   }
 
-  console.log(provider?.session, '---------- provider session');
   if (!provider?.session) return null;
 
   const expiry = provider.session?.expiry ?? 0;

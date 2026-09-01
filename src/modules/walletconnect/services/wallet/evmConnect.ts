@@ -43,16 +43,12 @@ export async function connectChainWallet(
     let peerIcon: string | undefined;
     let peerRedirect: { native?: string; universal?: string } | undefined;
 
-    const isWalletConnectOrSwiftEx = walletId === 'walletconnect' || walletId === 'swiftex';
+    const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
     const isExtension = isExtensionInstalled(ctx, walletId);
 
-    // If the extension isn't installed, fall back to WalletConnect QR instead of throwing.
-    // The user can scan the QR code with the mobile app of the wallet they clicked.
-    if (!isWalletConnectOrSwiftEx && !isExtension) {
-      console.info(
-        `[WalletService] ${walletId} extension not detected — falling back to WalletConnect QR`
-      );
-    }
+    console.info(
+      `[WalletConnect:${networkTag}] Connecting EVM wallet: ${walletId} (Method: ${isExtension ? 'Injected Extension' : 'WalletConnect QR'})`
+    );
 
     // Use the extension if it's installed; otherwise fall through to WalletConnect QR.
     if (isExtension) {
@@ -84,6 +80,10 @@ export async function connectChainWallet(
       peerIcon,
       peerRedirect,
     };
+
+    console.info(
+      `[WalletConnect:${networkTag}] ✓ EVM Wallet connected: ${evmAddress} on Chain ${evmChainId}`
+    );
 
     ctx.sessions.set(type, session);
     ctx.providers.set(type, provider);

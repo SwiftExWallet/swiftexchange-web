@@ -53,9 +53,10 @@ export async function connectUnified(
     });
     ctx.modals.set('unified', modal);
 
-    console.log('[WC] CONNECT START', {
-      providerInstanceId: (provider as any).__debugProviderId,
-    });
+    const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+    console.info(
+      `[WalletConnect:${networkTag}] Initializing unified pairing for wallet: ${walletId}`
+    );
 
     const session = await new Promise<any>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -107,12 +108,6 @@ export async function connectUnified(
         });
     });
 
-    console.log('[WC] CONNECT SUCCESS', {
-      providerInstanceId: (provider as any).__debugProviderId,
-      topic: session?.topic,
-      namespaces: session?.namespaces,
-    });
-
     const result: UnifiedConnectionResult = {};
     const peerMetadata = session.peer?.metadata;
     const meta = getSessionMetadata(walletId, peerMetadata);
@@ -154,6 +149,14 @@ export async function connectUnified(
       result.stellar = stellarSession;
       ctx.emitState('stellar', 'connected');
     }
+
+    console.info(`[WalletConnect:${networkTag}] ✓ Unified session established:`, {
+      peer: meta.peerName,
+      evm: result.evm ? `${result.evm.evmAddress} (Chain ${result.evm.evmChainId})` : 'none',
+      stellar: result.stellar
+        ? `${result.stellar.stellarAddress} (${result.stellar.stellarChainId})`
+        : 'none',
+    });
 
     ctx.saveSession();
     return result;

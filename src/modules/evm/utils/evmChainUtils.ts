@@ -38,6 +38,10 @@ export async function switchOrAddChain(provider: any, chainId: number | string):
       : Number(chainId);
   const hexChainId = `0x${numChainId.toString(16)}`;
 
+  console.info(
+    `[EVM:ChainSwitch] [${targetChain.networkType.toUpperCase()}] Switching active chain to Chain ${numChainId} (${targetChain.name})`
+  );
+
   // WalletConnect UniversalProvider exposes setDefaultChain to switch the
   // active chain. We call it but do NOT return early — we also send
   // wallet_switchEthereumChain so the wallet's UI reflects the switch and
@@ -57,6 +61,9 @@ export async function switchOrAddChain(provider: any, chainId: number | string):
     });
   } catch (error: any) {
     if (error.code === 4902) {
+      console.info(
+        `[EVM:ChainSwitch] [${targetChain.networkType.toUpperCase()}] Requesting wallet_addEthereumChain for Chain ${numChainId} (${targetChain.name})`
+      );
       // Chain not added to the wallet — add it first
       try {
         await provider.request({

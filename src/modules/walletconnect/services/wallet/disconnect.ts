@@ -1,4 +1,3 @@
-
 import { saveSession } from './sessionPersistence';
 import type { WalletServiceContext, WalletType } from './types';
 
@@ -25,10 +24,8 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
     }
   }
 
-  console.log('[WC] DISCONNECT START', {
-    providerInstanceId: (provider as any)?.__debugProviderId,
-    topic: provider?.session?.topic,
-  });
+  const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+  console.info(`[WalletConnect:${networkTag}] Disconnecting session: ${type}`);
 
   if (provider) {
     ctx.registeredProviders.delete(provider);
@@ -40,11 +37,6 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
         console.warn('[WalletService] Error during provider disconnect:', err);
       }
     }
-
-    console.log('[WC] DISCONNECT COMPLETE', {
-      providerInstanceId: (provider as any).__debugProviderId,
-      topic: provider.session?.topic,
-    });
   }
 
   // Clear per-type in-flight signing flags for all affected types.
@@ -77,7 +69,8 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
 // ---------------------------------------------------------------------------
 
 export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
-  console.log('[WalletService] Disconnecting all wallets...');
+  const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+  console.info(`[WalletConnect:${networkTag}] Disconnecting all connected wallets`);
 
   const providers = new Set(ctx.providers.values());
   for (const provider of providers) {
@@ -138,5 +131,4 @@ export async function clearAppData(): Promise<void> {
   } catch (error) {
     console.error('[WalletService] Failed to clear IndexedDB:', error);
   }
-
 }

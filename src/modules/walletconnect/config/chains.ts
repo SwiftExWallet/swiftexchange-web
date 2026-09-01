@@ -13,6 +13,7 @@ export interface EVMChainConfig {
   };
   blockExplorerUrl: string;
   logoUrl: string;
+  minGasGwei?: number;
 }
 
 export interface StellarChainConfig {
@@ -43,6 +44,7 @@ export const getEVMChains = (network: NetworkType): EVMChainConfig[] => {
     },
     blockExplorerUrl: c.blockExplorerUrl,
     logoUrl: c.logoURI || 'https://coin-images.coingecko.com/coins/images/279/large/ethereum.png',
+    minGasGwei: c.minGasGwei,
   }));
 };
 
