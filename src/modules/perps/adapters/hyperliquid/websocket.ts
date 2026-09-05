@@ -97,15 +97,13 @@ export class HyperliquidWebSocket extends WebSocketManager {
       if (data.channel === 'pong') return;
 
       if (data.channel === 'l2Book' && data.data) {
-        const raw = data.data;
-        const symbol = `${raw.coin}-USDC`;
-        const rawBids = raw.levels[0] || [];
-        const rawAsks = raw.levels[1] || [];
-
-        const bids = rawBids.map((lvl: any) => ({ price: lvl.px, size: lvl.sz }));
-        const asks = rawAsks.map((lvl: any) => ({ price: lvl.px, size: lvl.sz }));
-
-        orderBookStore.applySnapshot(symbol, bids, asks, raw.time || Date.now());
+        const mappedBook = HyperliquidMapper.mapOrderBook(data.data);
+        orderBookStore.applySnapshot(
+          mappedBook.symbol,
+          mappedBook.bids,
+          mappedBook.asks,
+          mappedBook.updateId ?? data.data.time ?? 0
+        );
       }
 
       if (data.channel === 'trades' && data.data) {
