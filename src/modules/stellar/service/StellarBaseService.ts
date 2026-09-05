@@ -25,6 +25,18 @@ export class StellarBaseService {
     accountCache.clear();
   }
 
+  static invalidateAccountCache(address: string, networkPassphrase?: string) {
+    if (networkPassphrase) {
+      accountCache.delete(`${networkPassphrase}-${address}`);
+    } else {
+      for (const key of accountCache.keys()) {
+        if (key.endsWith(`-${address}`)) {
+          accountCache.delete(key);
+        }
+      }
+    }
+  }
+
   async getAccountData(address: string): Promise<{ tokens: TokenInfo[]; subentryCount: number }> {
     if (!StellarSDK.StrKey.isValidEd25519PublicKey(address)) {
       throw new Error('Invalid Stellar address');
@@ -99,10 +111,7 @@ export class StellarBaseService {
   ): Promise<{ tokens: TokenInfo[]; subentryCount: number }> {
     const isMainnet = this.networkPassphrase.includes('Public Global Stellar Network');
     const chainId = isMainnet ? 'pubnet' : 'testnet';
-    let chainConfig = getChainById(chainId);
-    if (!chainConfig && !isMainnet) {
-      chainConfig = getChainById('pubnet');
-    }
+    const chainConfig = getChainById(chainId);
 
     if (!chainConfig) return { tokens: [], subentryCount: 0 };
 

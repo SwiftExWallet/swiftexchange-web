@@ -267,6 +267,18 @@ export async function getOrCreateProvider(ctx: WalletServiceContext, key: string
 // Request wrapping (signing intercept + redirect + in-flight guard)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Chain-related RPC methods that trigger wallet approval popups
+// ---------------------------------------------------------------------------
+const CHAIN_APPROVAL_METHODS = [
+  'wallet_switchEthereumChain',
+  'wallet_addEthereumChain',
+  'wallet_watchAsset',
+  'wallet_requestPermissions',
+  'wallet_getPermissions',
+  'eth_requestAccounts',
+];
+
 export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): void {
   if (!provider) return;
 
@@ -275,7 +287,73 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
     const originalRequest = target.request;
 
     target.request = async function (this: any, ...args: any[]) {
-      const method = args[0]?.method;
+      let method = typeof args[0] === 'string' ? args[0] : args[0]?.method;
+      let params = typeof args[0] === 'string' ? args[1] : args[0]?.params;
+
+      // Handle WalletConnect client.request format: { topic, chainId, request: { id, method, params } }
+      if (!method && args[0]?.request?.method) {
+        method = args[0].request.method;
+        params = args[0].request.params;
+      }
+
+      const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+
+      // ─── Chain Approval / Switch Requests ───────────────────────────────────
+      if (CHAIN_APPROVAL_METHODS.includes(method)) {
+        if (method === 'wallet_switchEthereumChain') {
+          const chainIdHex = params?.[0]?.chainId ?? params?.[0] ?? 'unknown';
+          const chainIdDec = chainIdHex !== 'unknown' ? parseInt(chainIdHex, 16) : 'unknown';
+          console.group(
+            `%c[ChainRequest:${networkTag}] 🔗 wallet_switchEthereumChain`,
+            'color: #f59e0b; font-weight: bold;'
+          );
+          console.log('  Chain ID (hex)    :', chainIdHex);
+          console.log('  Chain ID (decimal):', chainIdDec);
+          console.log('  Full params       :', params);
+          console.groupEnd();
+        } else if (method === 'wallet_addEthereumChain') {
+          const chainParams = params?.[0] ?? {};
+          const chainIdHex = chainParams.chainId ?? 'unknown';
+          const chainIdDec = chainIdHex !== 'unknown' ? parseInt(chainIdHex, 16) : 'unknown';
+          console.group(
+            `%c[ChainRequest:${networkTag}] ➕ wallet_addEthereumChain`,
+            'color: #10b981; font-weight: bold;'
+          );
+          console.log('  Chain ID (hex)    :', chainIdHex);
+          console.log('  Chain ID (decimal):', chainIdDec);
+          console.log('  Chain Name        :', chainParams.chainName ?? 'unknown');
+          console.log('  RPC URLs          :', chainParams.rpcUrls ?? []);
+          console.log('  Native Currency   :', chainParams.nativeCurrency ?? {});
+          console.log('  Block Explorer    :', chainParams.blockExplorerUrls ?? []);
+          console.log('  Full params       :', chainParams);
+          console.groupEnd();
+        } else {
+          console.group(
+            `%c[ChainRequest:${networkTag}] 📋 ${method}`,
+            'color: #818cf8; font-weight: bold;'
+          );
+          console.log('  Params:', params);
+          console.groupEnd();
+        }
+
+        try {
+          const result = await originalRequest.apply(this, args);
+          console.info(`[ChainRequest:${networkTag}] ✓ '${method}' approved by wallet`);
+          return result;
+        } catch (error: any) {
+          if (isUserRejection(error)) {
+            console.warn(`[ChainRequest:${networkTag}] ✕ User rejected '${method}'`);
+          } else {
+            console.error(
+              `[ChainRequest:${networkTag}] ✕ Error during '${method}':`,
+              extractErrorMessage(error)
+            );
+          }
+          throw error;
+        }
+      }
+
+      // ─── Signing Requests ────────────────────────────────────────────────────
       const SIGNING_METHODS = [
         'eth_sendTransaction',
         'eth_signTypedData_v4',
@@ -293,7 +371,6 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           signingType = 'evm';
         }
 
-        const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
         const activeSession = ctx.sessions.get(signingType);
         const chainIdentifier =
           signingType === 'evm'
@@ -309,11 +386,10 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
         );
 
         if (ctx.isSignRequestInFlight.get(signingType)) {
-          const error = new Error(
-            'A signing request is already in progress. Please wait or check your wallet.'
-          ) as any;
-          error.code = -32002;
-          throw error;
+          console.debug(
+            `[WalletRequest:${networkTag}] Re-entrant / parallel signing request '${method}' — delegating directly without duplicate lock`
+          );
+          return originalRequest.apply(this, args);
         }
         ctx.isSignRequestInFlight.set(signingType, true);
 
@@ -376,6 +452,12 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           ctx.isSignRequestInFlight.set(signingType, false);
         }
       }
+
+      // ─── All Other Requests (eth_chainId, eth_accounts, etc.) ───────────────
+      console.debug(
+        `[WalletRequest:${networkTag}] ○ '${method}'`,
+        params !== undefined ? { params } : ''
+      );
 
       return originalRequest.apply(this, args);
     };

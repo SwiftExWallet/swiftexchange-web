@@ -1,4 +1,5 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
+import BigNumber from 'bignumber.js';
 
 import type {
   LargeOrderOptions,
@@ -11,12 +12,12 @@ import { StellarBaseService } from './StellarBaseService';
 
 export class OrderBookSwapService extends StellarBaseService {
   calculateTotal(amount: string, price: string): string {
-    const amt = parseFloat(amount);
-    const prc = parseFloat(price);
-    if (isNaN(amt) || isNaN(prc)) {
-      throw new Error('Invalid amount or price');
+    const amt = new BigNumber(amount || '0');
+    const prc = new BigNumber(price || '0');
+    if (amt.isNaN() || prc.isNaN() || amt.isLessThanOrEqualTo(0) || prc.isLessThanOrEqualTo(0)) {
+      return '0';
     }
-    return (amt * prc).toFixed(7);
+    return amt.times(prc).toFixed(7, BigNumber.ROUND_DOWN);
   }
 
   async getOrderQuote(
@@ -66,18 +67,18 @@ export class OrderBookSwapService extends StellarBaseService {
         networkPassphrase: this.networkPassphrase,
       });
 
-      this.ensureTrustline(txBuilder, accountResponse, quote.toAsset);
-
       let operation;
       if (isBuy) {
+        this.ensureTrustline(txBuilder, accountResponse, quote.fromAsset);
         operation = StellarSDK.Operation.manageBuyOffer({
-          selling: quote.fromAsset,
-          buying: quote.toAsset,
+          selling: quote.toAsset,
+          buying: quote.fromAsset,
           buyAmount: quote.amount,
           price: quote.price,
           offerId: '0',
         });
       } else {
+        this.ensureTrustline(txBuilder, accountResponse, quote.toAsset);
         operation = StellarSDK.Operation.manageSellOffer({
           selling: quote.fromAsset,
           buying: quote.toAsset,

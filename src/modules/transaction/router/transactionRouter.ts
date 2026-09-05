@@ -3,11 +3,6 @@ import { ethers } from 'ethers';
 import { sendCustomNotification } from '../../../service/notificationService';
 import { sendEVMTransaction } from '../../../utils/walletConnectUtils';
 import { WalletType } from '../../walletconnect/constants/Wallet';
-import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
-
-function isMainnet(): boolean {
-  return useWalletStore.getState().network === 'mainnet';
-}
 
 export interface TransactionRequest {
   type: 'evm' | 'stellar';
@@ -324,6 +319,7 @@ class TransactionRouter {
         }
 
         txParams.gasLimit = '0x' + gasLimitBigInt.toString(16);
+        txParams.gas = txParams.gasLimit;
       }
 
       // Enforce minGasGwei safety check on txParams
@@ -358,21 +354,8 @@ class TransactionRouter {
         console.warn('[Router] Failed to enforce minGasGwei check:', minGasError);
       }
 
-      let lastTxHash: string;
-
-      if (isMainnet()) {
-        lastTxHash = await sendEVMTransaction(provider, chainId, txParams);
-      } else {
-        const ethersProvider = new ethers.BrowserProvider(provider);
-        const signer = await ethersProvider.getSigner();
-        const txResponse = await signer.sendTransaction(txParams);
-        const receipt = await txResponse.wait();
-
-        if (!receipt || receipt.status === 0) {
-          throw new Error('Transaction failed on-chain');
-        }
-        lastTxHash = txResponse.hash;
-      }
+      // Send EVM transaction via unified provider dispatcher (supports both WalletConnect and Injected on all networks)
+      const lastTxHash = await sendEVMTransaction(provider, chainId, txParams);
 
       return { hash: lastTxHash, status: 'success' };
     } catch (error: any) {

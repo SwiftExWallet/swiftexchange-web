@@ -26,37 +26,17 @@ const OrderbookRow = memo(function OrderbookRow({
   formatPrice,
   formatVal,
 }: OrderbookRowProps) {
-  const prevSizeRef = useRef(displaySize);
-  const sizeRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (prevSizeRef.current !== displaySize && sizeRef.current) {
-      const el = sizeRef.current;
-      const flashClass = displaySize > prevSizeRef.current ? 'size-flash-up' : 'size-flash-down';
-      el.classList.remove('size-flash-up', 'size-flash-down');
-      const rafId = requestAnimationFrame(() => {
-        el.classList.add(flashClass);
-      });
-      prevSizeRef.current = displaySize;
-      const t = setTimeout(() => el.classList.remove('size-flash-up', 'size-flash-down'), 450);
-      return () => {
-        cancelAnimationFrame(rafId);
-        clearTimeout(t);
-      };
-    }
-  }, [displaySize]);
-
   return (
     <div
-      className="ob-row-enter flex justify-between items-center px-2 py-0.5 my-[1px] hover:bg-hover cursor-pointer relative leading-none shrink-0 group select-none"
+      className="ob-row-enter flex justify-between items-center px-2 py-0.5 my-[1px] hover:bg-hover cursor-pointer relative leading-none shrink-0 group select-none transition-colors duration-100"
       onClick={() => useOrderEntryStore.getState().setPrice(price.toString())}
     >
       <div
-        className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar ${isAsk ? 'ob-depth-bar--ask-soft' : 'ob-depth-bar--bid-soft'}`}
+        className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar transition-all duration-150 ${isAsk ? 'ob-depth-bar--ask-soft' : 'ob-depth-bar--bid-soft'}`}
         style={{ width: `calc((var(--cum-total) / var(--max-cum)) * 100%)` }}
       />
       <div
-        className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar ${isAsk ? 'ob-depth-bar--ask-strong' : 'ob-depth-bar--bid-strong'}`}
+        className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar transition-all duration-150 ${isAsk ? 'ob-depth-bar--ask-strong' : 'ob-depth-bar--bid-strong'}`}
         style={{ width: `calc((var(--row-size) / var(--max-size)) * 100%)` }}
       />
       <span
@@ -65,10 +45,7 @@ const OrderbookRow = memo(function OrderbookRow({
         {formatPrice(price)}
       </span>
       <div className="flex items-center z-10">
-        <span
-          ref={sizeRef}
-          className="font-mono-tabular text-[11px] text-primary opacity-80 w-[68px] text-right"
-        >
+        <span className="font-mono-tabular text-[11px] text-primary opacity-85 w-[68px] text-right">
           {formatVal(displaySize, isUsdtUnit)}
         </span>
         <span className="font-mono-tabular text-[11px] text-secondary w-[68px] text-right">
@@ -152,11 +129,17 @@ export const OrderbookPanel: React.FC = () => {
 
   const rowsPerSide = viewMode === 'both' ? 14 : 35;
 
-  const rawAsks = (orderbook.asks || []).slice(0, viewMode === 'bids' ? 0 : rowsPerSide);
-  const rawBids = (orderbook.bids || []).slice(0, viewMode === 'asks' ? 0 : rowsPerSide);
+  const rawAsks = useMemo(
+    () => (orderbook.asks || []).slice(0, viewMode === 'bids' ? 0 : rowsPerSide),
+    [orderbook.asks, viewMode, rowsPerSide]
+  );
+  const rawBids = useMemo(
+    () => (orderbook.bids || []).slice(0, viewMode === 'asks' ? 0 : rowsPerSide),
+    [orderbook.bids, viewMode, rowsPerSide]
+  );
 
-  const askRows = buildCumulative(rawAsks).reverse();
-  const bidRows = buildCumulative(rawBids);
+  const askRows = useMemo(() => buildCumulative(rawAsks).reverse(), [rawAsks]);
+  const bidRows = useMemo(() => buildCumulative(rawBids), [rawBids]);
 
   const isUsdtUnit = unit === 'USDT';
 

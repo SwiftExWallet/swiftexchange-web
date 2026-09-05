@@ -66,6 +66,14 @@ export const STELLAR_CONFIG_TESTNET: StellarChainConfig = {
     'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/stellar/info/logo.png',
 };
 
+export const STELLAR_CHAIN_IDS = {
+  MAINNET: 'pubnet',
+  TESTNET: 'testnet',
+} as const;
+
+export const isStellarChainId = (chainId: string | number | null | undefined): boolean =>
+  chainId === 'pubnet' || chainId === 'testnet' || chainId === 'stellar';
+
 export const getStellarConfig = (network: NetworkType | string): StellarChainConfig => {
   return network === 'mainnet' || network === 'pubnet'
     ? STELLAR_CONFIG_MAINNET
@@ -92,7 +100,14 @@ export const buildUnifiedNamespaces = (
   const stellarChain = `stellar:${stellarConfig.chainId}`;
 
   const evmNamespace = {
-    methods: ['eth_sendTransaction', 'eth_signTypedData_v4', 'eth_signTypedData', 'personal_sign'],
+    methods: [
+      'eth_sendTransaction',
+      'eth_signTypedData_v4',
+      'eth_signTypedData',
+      'personal_sign',
+      'wallet_switchEthereumChain',
+      'wallet_addEthereumChain',
+    ],
     chains: evmChains,
     events: ['chainChanged', 'accountsChanged'],
   };

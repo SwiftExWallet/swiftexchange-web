@@ -1,26 +1,49 @@
+import { useExchangeManager } from '../../core/ExchangeManager';
+import { type PerpNetwork, getAsterConfig } from '../../core/config/networks';
+
+export function getCurrentPerpNetwork(): PerpNetwork {
+  return useExchangeManager.getState().currentNetwork;
+}
+
+export function getAsterRestUrl(network?: PerpNetwork): string {
+  return getAsterConfig(network || getCurrentPerpNetwork()).restUrl;
+}
+
+export function getAsterSpotRestUrl(network?: PerpNetwork): string {
+  return getAsterConfig(network || getCurrentPerpNetwork()).spotRestUrl;
+}
+
+export function getAsterWsUrl(network?: PerpNetwork): string {
+  return getAsterConfig(network || getCurrentPerpNetwork()).wsUrl;
+}
+
+export function getAsterBapiUrl(network?: PerpNetwork): string {
+  return getAsterConfig(network || getCurrentPerpNetwork()).bapiFuturesUrl;
+}
+
 export const IS_ASTER_TESTNET = false;
 
-export const ASTER_REST_URL = IS_ASTER_TESTNET
-  ? 'https://fapi.asterdex-testnet.com'
-  : 'https://fapi.asterdex.com';
-
-export const ASTER_SPOT_REST_URL = IS_ASTER_TESTNET
-  ? 'https://sapi.asterdex-testnet.com'
-  : 'https://sapi.asterdex.com';
-
-export const ASTER_WS_URL = IS_ASTER_TESTNET
-  ? 'wss://fstream.asterdex-testnet.com/ws'
-  : 'wss://fstream.asterdex.com/ws';
-
-export const ASTER_BAPI_URL = IS_ASTER_TESTNET
-  ? 'https://www.asterdex-testnet.com/bapi/futures/v1/public/future'
-  : 'https://www.asterdex.com/bapi/futures/v1/public/future';
-
+// Dynamic URL getters as property getters or defaults
+export const ASTER_REST_URL = 'https://fapi.asterdex.com';
+export const ASTER_SPOT_REST_URL = 'https://sapi.asterdex.com';
+export const ASTER_WS_URL = 'wss://fstream.asterdex.com/ws';
+export const ASTER_BAPI_URL = 'https://www.asterdex.com/bapi/futures/v1/public/future';
 export const ASTER_CHAIN_ID = 1666;
+
+export function getAsterChainId(network?: PerpNetwork): number {
+  return getAsterConfig(network || getCurrentPerpNetwork()).chainId;
+}
 
 export const EVM_CHAINS: Record<
   number,
-  { id: number; name: string; symbol: string; chainName: string; explorer: string }
+  {
+    id: number;
+    name: string;
+    symbol: string;
+    chainName: string;
+    explorer: string;
+    isTestnet?: boolean;
+  }
 > = {
   1: { id: 1, name: 'Ethereum', symbol: 'ETH', chainName: 'ETH', explorer: 'https://etherscan.io' },
   56: {
@@ -37,16 +60,44 @@ export const EVM_CHAINS: Record<
     chainName: 'Arbitrum',
     explorer: 'https://arbiscan.io',
   },
+  97: {
+    id: 97,
+    name: 'BNB Testnet',
+    symbol: 'tBNB',
+    chainName: 'BSC Testnet',
+    explorer: 'https://testnet.bscscan.com',
+    isTestnet: true,
+  },
+  421614: {
+    id: 421614,
+    name: 'Arbitrum Sepolia',
+    symbol: 'ETH',
+    chainName: 'Arb Sepolia',
+    explorer: 'https://sepolia.arbiscan.io',
+    isTestnet: true,
+  },
+  11155111: {
+    id: 11155111,
+    name: 'Sepolia',
+    symbol: 'ETH',
+    chainName: 'Sepolia',
+    explorer: 'https://sepolia.etherscan.io',
+    isTestnet: true,
+  },
 };
 
 export const ASTER_DEPOSIT_BRIDGES: Record<number, string> = {
   56: '0x128463A60784c4D3f46c23Af3f65Ed859Ba87974', // BNB Chain
   42161: '0x9E36CB86a159d479cEd94Fa05036f235Ac40E1d5', // Arbitrum
   1: '0x604DD02d620633Ae427888d41bfd15e38483736E', // Ethereum
+  97: '0x128463A60784c4D3f46c23Af3f65Ed859Ba87974', // BNB Testnet
+  421614: '0x9E36CB86a159d479cEd94Fa05036f235Ac40E1d5', // Arb Sepolia
+  11155111: '0x604DD02d620633Ae427888d41bfd15e38483736E', // Sepolia
 };
 
-export function getAsterDepositBridge(chainId: number): string {
-  const bridge = ASTER_DEPOSIT_BRIDGES[chainId];
+export function getAsterDepositBridge(chainId: number, network?: PerpNetwork): string {
+  const config = getAsterConfig(network || getCurrentPerpNetwork());
+  const bridge = config.depositBridges[chainId] || ASTER_DEPOSIT_BRIDGES[chainId];
   if (!bridge) {
     throw new Error(`Unsupported EVM chain ${chainId} for Aster deposits.`);
   }

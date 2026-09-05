@@ -21,6 +21,7 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
     hasMore: false,
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const mapOperationToTransaction = useCallback(
@@ -65,6 +66,35 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
             from: op.source_account,
             details: 'Account Created',
           };
+        } else if (op.source_account === accountId || op.funder === accountId) {
+          return {
+            ...base,
+            type: 'SEND',
+            assetCode: 'XLM',
+            amount: op.starting_balance,
+            to: op.account,
+            details: 'Account Funded / Created',
+          };
+        }
+      }
+
+      if (op.type === 'account_merge') {
+        if (op.account === accountId) {
+          return {
+            ...base,
+            type: 'SEND',
+            assetCode: 'XLM',
+            to: op.into,
+            details: 'Account Merged',
+          };
+        } else if (op.into === accountId) {
+          return {
+            ...base,
+            type: 'RECEIVE',
+            assetCode: 'XLM',
+            from: op.account,
+            details: 'Account Merged Into',
+          };
         }
       }
 
@@ -88,26 +118,8 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
         let amount = 'N/A';
         let assetCode = 'N/A';
 
-        console.group('🔍 BRIDGE TRANSACTION DEBUG');
-        console.log('Operation:', op);
-        console.log('Account:', accountId);
-        console.log('Asset Balance Changes:', op.asset_balance_changes);
-
         if (op.asset_balance_changes?.length > 0) {
-          console.table(
-            op.asset_balance_changes.map((c: any) => ({
-              from: c.from,
-              to: c.to,
-              amount: c.amount,
-              asset: c.asset_code,
-              assetType: c.asset_type,
-            }))
-          );
-
-          // All outgoing transfers from current user
           const outgoingChanges = op.asset_balance_changes.filter((c: any) => c.from === accountId);
-
-          console.log('Outgoing Changes:', outgoingChanges);
 
           if (outgoingChanges.length > 0) {
             const primaryAsset =
@@ -127,9 +139,7 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
             amount = totalAmount.toFixed(7);
             assetCode = primaryAsset;
           } else {
-            // fallback
             const firstChange = op.asset_balance_changes[0];
-
             amount = firstChange.amount ?? 'N/A';
             assetCode =
               firstChange.asset_type === 'native' ? 'XLM' : (firstChange.asset_code ?? 'N/A');
@@ -138,17 +148,11 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
 
         if (op.function === 'HostFunctionTypeHostFunctionTypeInvokeContract') {
           details = 'Smart Contract Call';
-
           const contractId = (op as any).contract_id ?? (op as any).contract ?? 'Unknown Contract';
-
           if (contractId !== 'Unknown Contract') {
             toAsset = contractId.length > 12 ? `${contractId.slice(0, 12)}...` : contractId;
           }
         }
-
-        console.log('Final Amount:', amount);
-        console.log('Final Asset:', assetCode);
-        console.groupEnd();
 
         return {
           ...base,
@@ -192,8 +196,9 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
       }
 
       if (op.type === 'create_claimable_balance') {
-        const assetParts = op.asset.split(':');
-        const assetCode = assetParts.length > 1 ? assetParts[0] : 'Unknown';
+        const assetParts = (op.asset || '').split(':');
+        const assetCode =
+          assetParts.length > 1 ? assetParts[0] : op.asset === 'native' ? 'XLM' : 'Unknown';
 
         return {
           ...base,
@@ -227,10 +232,15 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
     async (cursor?: string) => {
       if (!userAddress) {
         setIsLoading(false);
+        setIsLoadingMore(false);
         return;
       }
 
-      setIsLoading(true);
+      if (cursor) {
+        setIsLoadingMore(true);
+      } else {
+        setIsLoading(true);
+      }
       setError(null);
 
       try {
@@ -251,6 +261,7 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
         setError('Failed to load transaction history');
       } finally {
         setIsLoading(false);
+        setIsLoadingMore(false);
       }
     },
     [userAddress, service, mapOperationToTransaction]
@@ -258,7 +269,6 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
 
   useEffect(() => {
     if (userAddress) {
-      setIsLoading(true);
       fetchTransactions();
     } else {
       setIsLoading(false);
@@ -266,10 +276,10 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
   }, [userAddress, fetchTransactions]);
 
   const loadMore = useCallback(() => {
-    if (pagination.hasMore && pagination.cursor) {
+    if (pagination.hasMore && pagination.cursor && !isLoadingMore) {
       fetchTransactions(pagination.cursor);
     }
-  }, [pagination.hasMore, pagination.cursor, fetchTransactions]);
+  }, [pagination.hasMore, pagination.cursor, isLoadingMore, fetchTransactions]);
 
   const refresh = useCallback(() => {
     fetchTransactions();
@@ -278,6 +288,7 @@ export function useAllTransactions({ userAddress }: UseAllTransactionsProps) {
   return {
     transactions,
     isLoading,
+    isLoadingMore,
     error,
     hasMore: pagination.hasMore,
     loadMore,

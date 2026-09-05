@@ -2,6 +2,7 @@ import * as StellarSDK from '@stellar/stellar-sdk';
 
 import { sendCustomNotification } from '../../../service/notificationService';
 import { getStellarConfig } from '../../walletconnect/config/chains';
+import { StellarBaseService } from '../service/StellarBaseService';
 import { StellarSequenceTracker } from './StellarSequenceTracker';
 
 export interface SignAndSubmitParams {
@@ -115,85 +116,158 @@ export const signAndSubmitTransaction = async (
   }
 
   try {
+    const isTestnet =
+      network.toLowerCase().includes('test') || networkPassphrase.includes('Test SDF Network');
+    const stellarNetworkEnum = isTestnet ? 'TESTNET' : 'PUBLIC';
+    const canonicalPassphrase = isTestnet
+      ? 'Test SDF Network ; September 2015'
+      : 'Public Global Stellar Network ; September 2015';
+    const config = getStellarConfig(isTestnet ? 'testnet' : 'mainnet');
+
     if (provider && typeof provider.signTransaction === 'function') {
-      console.log('[StellarTransactionService] Using Native Extension');
       const extension = provider;
 
       await notifyWalletSignRequest();
-      const signResult = await extension.signTransaction(finalXdr, { network, networkPassphrase });
-      const signedXdr = typeof signResult === 'string' ? signResult : signResult?.signedTxXdr;
+      const signResult = await extension.signTransaction(finalXdr, {
+        network: stellarNetworkEnum,
+        networkPassphrase: canonicalPassphrase,
+        networkUrl: config.horizonUrl,
+        accountToSign: sourceAddress,
+      });
+
+      if (signResult && typeof signResult === 'object' && signResult.error) {
+        throw new Error(signResult.error);
+      }
+
+      const signedXdr =
+        typeof signResult === 'string'
+          ? signResult
+          : signResult?.signedTxXdr || (signResult as any)?.signedXDR;
 
       if (!signedXdr) {
         throw new Error('Extension failed to sign the transaction');
       }
 
-      const config = getStellarConfig(network.toLowerCase() as any);
       const hash = await submitToHorizon(signedXdr, config.horizonUrl);
+      if (sourceAddress)
+        StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
       return { success: true, hash };
     }
 
     if (provider?.client && provider?.session) {
-      console.log('[StellarTransactionService] Using WalletConnect');
-      const config = getStellarConfig(network.toLowerCase() as any);
       const stellarNetwork = config.chainId;
       const topic = provider.session.topic;
       const chainId = `stellar:${stellarNetwork}`;
 
       const signParams = {
         xdr: finalXdr,
-        network: stellarNetwork.toUpperCase(),
-        networkPassphrase,
+        network: stellarNetworkEnum,
+        networkPassphrase: canonicalPassphrase,
       };
 
-      console.log('[StellarTransactionService] signParams:', signParams);
-
       await notifyWalletSignRequest();
-      const result = await provider.client.request({
-        topic,
-        chainId,
-        request: {
-          method: 'stellar_signAndSubmitXDR',
-          params: signParams,
-        },
-      });
+
+      let result: any;
+      try {
+        result = await provider.client.request({
+          topic,
+          chainId,
+          request: {
+            method: 'stellar_signAndSubmitXDR',
+            params: signParams,
+          },
+        });
+      } catch (submitErr: any) {
+        const isUnsupported =
+          submitErr?.message?.includes('Method not supported') ||
+          submitErr?.message?.includes('not found') ||
+          submitErr?.code === 5001 ||
+          submitErr?.code === -32601;
+
+        if (isUnsupported) {
+          result = await provider.client.request({
+            topic,
+            chainId,
+            request: {
+              method: 'stellar_signXDR',
+              params: signParams,
+            },
+          });
+        } else {
+          throw submitErr;
+        }
+      }
 
       if (result?.status === 'success' || result?.hash) {
-        const computedHash = new StellarSDK.Transaction(finalXdr, networkPassphrase)
+        const computedHash = new StellarSDK.Transaction(finalXdr, canonicalPassphrase)
           .hash()
           .toString('hex');
+        if (sourceAddress)
+          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
         return { success: true, hash: result.hash || computedHash };
       }
 
-      if (result?.signedXDR) {
-        const hash = await submitToHorizon(result.signedXDR, config.horizonUrl);
+      const signedXdr =
+        result?.signedXDR || result?.signedTxXdr || (typeof result === 'string' ? result : null);
+      if (signedXdr) {
+        const hash = await submitToHorizon(signedXdr, config.horizonUrl);
+        if (sourceAddress)
+          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
         return { success: true, hash };
-      }
-
-      if (typeof result === 'string') {
-        return { success: true, hash: result };
       }
 
       throw new Error('Transaction signing/submission failed or was cancelled');
     }
 
     if (typeof provider?.request === 'function') {
-      console.log('[StellarTransactionService] Using generic provider.request');
-
       await notifyWalletSignRequest();
-      const result = await provider.request({
-        method: 'stellar_signAndSubmitXDR',
-        params: {
-          xdr: finalXdr,
-          network: network.toUpperCase(),
-          networkPassphrase,
-        },
-      });
+      let result: any;
+      try {
+        result = await provider.request({
+          method: 'stellar_signAndSubmitXDR',
+          params: {
+            xdr: finalXdr,
+            network: stellarNetworkEnum,
+            networkPassphrase: canonicalPassphrase,
+          },
+        });
+      } catch (reqErr: any) {
+        const isUnsupported =
+          reqErr?.message?.includes('Method not supported') ||
+          reqErr?.message?.includes('not found') ||
+          reqErr?.code === 5001 ||
+          reqErr?.code === -32601;
+
+        if (isUnsupported) {
+          result = await provider.request({
+            method: 'stellar_signXDR',
+            params: {
+              xdr: finalXdr,
+              network: stellarNetworkEnum,
+              networkPassphrase: canonicalPassphrase,
+            },
+          });
+        } else {
+          throw reqErr;
+        }
+      }
 
       if (result?.status === 'success' || result?.hash) {
-        const computedHash = new StellarSDK.Transaction(finalXdr, networkPassphrase)
+        const computedHash = new StellarSDK.Transaction(finalXdr, canonicalPassphrase)
           .hash()
           .toString('hex');
+        if (sourceAddress)
+          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
         return { success: true, hash: result.hash || computedHash };
+      }
+
+      const signedXdr =
+        result?.signedXDR || result?.signedTxXdr || (typeof result === 'string' ? result : null);
+      if (signedXdr) {
+        const hash = await submitToHorizon(signedXdr, config.horizonUrl);
+        if (sourceAddress)
+          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        return { success: true, hash };
       }
 
       throw new Error('Transaction failed');

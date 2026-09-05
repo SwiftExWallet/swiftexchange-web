@@ -107,10 +107,18 @@ export async function sendCryptoStellarBuild(
   to: string,
   amount: string,
   options: StellarTransactionOptions = {},
-  asset: { code: string; issuer?: string; isNative?: boolean; chainId?: string } = { code: 'XLM', isNative: true }
+  asset: { code: string; issuer?: string; isNative?: boolean; chainId?: string } = {
+    code: 'XLM',
+    isNative: true,
+  }
 ): Promise<StellarSendTransaction> {
   const currentNetwork = useWalletStore.getState().network;
-  const networkToUse = asset.chainId === 'testnet' ? 'testnet' : (asset.chainId === 'pubnet' ? 'mainnet' : currentNetwork);
+  const networkToUse =
+    asset.chainId === 'testnet'
+      ? 'testnet'
+      : asset.chainId === 'pubnet'
+        ? 'mainnet'
+        : currentNetwork;
   const config = getStellarConfig(networkToUse);
 
   const server = new StellarSDK.Horizon.Server(config.horizonUrl);
@@ -156,11 +164,12 @@ export async function sendCryptoStellarBuild(
   // 1. Ensure sender has trustline
   ensureTrustlineOp(txBuilder, accountResponse, stellarAsset);
 
-  // 2. Check if recipient has trustline (for non-native assets)
+  let isNewAccount = false;
   let useClaimableBalance = false;
-  if (!stellarAsset.isNative()) {
-    try {
-      const destAccount = await server.loadAccount(to);
+
+  try {
+    const destAccount = await server.loadAccount(to);
+    if (!stellarAsset.isNative()) {
       const hasDestTrust = destAccount.balances.some(
         (b: any) =>
           b.asset_code === stellarAsset.getCode() && b.asset_issuer === stellarAsset.getIssuer()
@@ -168,12 +177,23 @@ export async function sendCryptoStellarBuild(
       if (!hasDestTrust) {
         useClaimableBalance = true;
       }
-    } catch {
+    }
+  } catch {
+    if (stellarAsset.isNative()) {
+      isNewAccount = true;
+    } else {
       useClaimableBalance = true;
     }
   }
 
-  if (useClaimableBalance) {
+  if (isNewAccount && stellarAsset.isNative()) {
+    txBuilder.addOperation(
+      StellarSDK.Operation.createAccount({
+        destination: to,
+        startingBalance: stellarAmount,
+      })
+    );
+  } else if (useClaimableBalance) {
     txBuilder.addOperation(
       StellarSDK.Operation.createClaimableBalance({
         asset: stellarAsset,
@@ -198,7 +218,7 @@ export async function sendCryptoStellarBuild(
     txBuilder.addMemo(memo);
   }
 
-  txBuilder.setTimeout(30);
+  txBuilder.setTimeout(180);
 
   const builtTransaction = txBuilder.build();
   const xdr = builtTransaction.toXDR();

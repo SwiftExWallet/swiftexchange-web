@@ -13,6 +13,7 @@ import {
   QrCode,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   Wallet as WalletIcon,
   X,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ import QRCode from 'qrcode';
 import { useNotificationStore } from '../../../../store/notificationStore';
 import { switchOrAddChain } from '../../../evm/utils/evmChainUtils';
 import { walletService } from '../../../walletconnect/services/walletService';
+import { useWalletStore } from '../../../walletconnect/store/walletConnectStore';
 import {
   type DepositAsset,
   type DepositWithdrawRecord,
@@ -62,10 +64,8 @@ import { Modal } from '../ui/Modal';
 interface AccountModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'deposit' | 'withdraw' | 'transfer' | 'history';
+  initialTab?: 'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet';
 }
-
-const EVM_SUPPORTED_CHAINS = [EVM_CHAINS[56], EVM_CHAINS[42161], EVM_CHAINS[1]];
 
 const AccountToggle: React.FC<{
   value: 'perp' | 'spot';
@@ -92,25 +92,42 @@ const AccountToggle: React.FC<{
 const ChainSelector: React.FC<{
   value: number;
   onChange: (v: number) => void;
-}> = ({ value, onChange }) => (
-  <div className="relative">
-    <select
-      value={value}
-      onChange={e => onChange(Number(e.target.value))}
-      className="w-full appearance-none bg-tertiary border border-color rounded-lg pl-3 pr-8 py-2 text-primary text-[12px] font-medium outline-none cursor-pointer h-9 hover:border-brand/40 transition-colors"
-    >
-      {EVM_SUPPORTED_CHAINS.map(c => (
-        <option key={c.id} value={c.id}>
-          {c.name} ({c.chainName})
-        </option>
-      ))}
-    </select>
-    <ChevronDown
-      size={13}
-      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary pointer-events-none"
-    />
-  </div>
-);
+}> = ({ value, onChange }) => {
+  const currentNetwork = useExchangeManager(state => state.currentNetwork);
+  const supportedChains = useMemo(() => {
+    if (currentNetwork === 'testnet') {
+      return [
+        EVM_CHAINS[97],
+        EVM_CHAINS[421614],
+        EVM_CHAINS[11155111],
+        EVM_CHAINS[56],
+        EVM_CHAINS[42161],
+        EVM_CHAINS[1],
+      ].filter(Boolean);
+    }
+    return [EVM_CHAINS[56], EVM_CHAINS[42161], EVM_CHAINS[1]].filter(Boolean);
+  }, [currentNetwork]);
+
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        className="w-full appearance-none bg-tertiary border border-color rounded-lg pl-3 pr-8 py-2 text-primary text-[12px] font-medium outline-none cursor-pointer h-9 hover:border-brand/40 transition-colors"
+      >
+        {supportedChains.map(c => (
+          <option key={c.id} value={c.id}>
+            {c.name} ({c.chainName}) {c.isTestnet ? '• Testnet' : ''}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        size={13}
+        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary pointer-events-none"
+      />
+    </div>
+  );
+};
 
 const AssetOptionRow: React.FC<{ asset: DepositAsset }> = ({ asset }) => {
   const iconUrl = getCoinIconUrl(asset.name);
@@ -265,17 +282,40 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     }
   }, [asterSigner, userAddr]);
 
-  const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'transfer' | 'history'>(
-    initialTab
+  const currentNetwork = useExchangeManager(state => state.currentNetwork);
+
+  const connectedWallets = useWalletStore(state => state.connectedWallets);
+  const isEvmConnected = !!connectedWallets.evm?.address;
+  const evmAddress = connectedWallets.evm?.address;
+  const openWalletModal = useWalletStore(state => state.openModal);
+
+  const [activeTab, setActiveTab] = useState<
+    'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet'
+  >(
+    currentNetwork === 'testnet'
+      ? 'faucet'
+      : initialTab === 'faucet'
+        ? 'deposit'
+        : initialTab || 'deposit'
   );
 
   useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab]);
+    if (currentNetwork === 'testnet') {
+      setActiveTab('faucet');
+    } else {
+      setActiveTab(initialTab === 'faucet' ? 'deposit' : initialTab || 'deposit');
+    }
+  }, [initialTab, currentNetwork]);
 
   const [accountType, setAccountType] = useState<'perp' | 'spot'>('perp');
   const [selectedChainId, setSelectedChainId] = useState<number>(
-    currentExchange === 'hyperliquid' ? 42161 : 56
+    currentExchange === 'hyperliquid'
+      ? currentNetwork === 'testnet'
+        ? 421614
+        : 42161
+      : currentNetwork === 'testnet'
+        ? 97
+        : 56
   );
 
   // Deposit State
@@ -753,37 +793,191 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Deposit & Withdraw" width="w-[450px]">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={currentNetwork === 'testnet' ? 'Testnet Faucet' : 'Deposit & Withdraw'}
+      width="w-[450px]"
+    >
       <div className="space-y-4">
-        {/* ── Top Tabs ─────────────────────────────────────────────── */}
-        <div className="flex bg-tertiary rounded-lg p-0.5 border border-color">
-          {[
-            { key: 'deposit', label: 'Deposit', icon: ArrowDownToLine },
-            { key: 'withdraw', label: 'Withdraw', icon: ArrowUpFromLine },
-            { key: 'transfer', label: 'Transfer', icon: ArrowRightLeft },
-            { key: 'history', label: 'History', icon: History },
-          ].map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => {
-                setActiveTab(key as any);
-                setShowWithdrawConfirm(false);
-                setDepositProgress(null);
-              }}
-              className={`flex-1 py-1.5 text-[12px] font-medium rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === key
-                  ? 'bg-secondary text-primary shadow-sm border border-color font-semibold'
-                  : 'text-secondary hover:text-primary'
-              }`}
-            >
-              <Icon size={13} />
-              {label}
-            </button>
-          ))}
-        </div>
+        {/* ── Top Tabs (Mainnet Only) ─────────────────────────────────────────────── */}
+        {currentNetwork !== 'testnet' && (
+          <div className="flex bg-tertiary rounded-lg p-0.5 border border-color">
+            {[
+              { key: 'deposit', label: 'Deposit', icon: ArrowDownToLine },
+              { key: 'withdraw', label: 'Withdraw', icon: ArrowUpFromLine },
+              { key: 'transfer', label: 'Transfer', icon: ArrowRightLeft },
+              { key: 'history', label: 'History', icon: History },
+            ].map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => {
+                  setActiveTab(key as any);
+                  setShowWithdrawConfirm(false);
+                  setDepositProgress(null);
+                }}
+                className={`flex-1 py-1.5 text-[12px] font-medium rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  activeTab === key
+                    ? 'bg-secondary text-primary shadow-sm border border-color font-semibold'
+                    : 'text-secondary hover:text-primary'
+                }`}
+              >
+                <Icon size={13} />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
-        {/* ----------DEPOSIT TAB ---------- */}
-        {activeTab === 'deposit' && (
+        {/* ---------- FAUCET TAB (TESTNET ONLY) ---------- */}
+        {currentNetwork === 'testnet' && (
+          <div className="space-y-4">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-amber-400 font-semibold text-[13px]">
+                  <Sparkles size={16} />
+                  <span>Testnet Faucet</span>
+                </div>
+                {isEvmConnected ? (
+                  <span className="text-[10px] font-mono bg-success/15 text-success border border-success/30 px-2 py-0.5 rounded-full font-medium">
+                    {evmAddress?.slice(0, 6)}...{evmAddress?.slice(-4)}
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-brand/15 text-brand border border-brand/30 px-2 py-0.5 rounded-full font-semibold">
+                    EVM Wallet Required
+                  </span>
+                )}
+              </div>
+              <p className="text-[12px] text-secondary leading-relaxed">
+                Get free testnet funds to trade risk-free on{' '}
+                <strong className="text-primary">
+                  {currentExchange === 'hyperliquid' ? 'Hyperliquid Testnet' : 'Aster V3 Testnet'}
+                </strong>
+                . Claim tokens below using your connected EVM wallet:
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              {currentExchange === 'hyperliquid' ? (
+                <a
+                  href="https://app.hyperliquid-testnet.xyz"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 bg-tertiary hover:bg-hover border border-color hover:border-brand/40 rounded-xl transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-brand/15 flex items-center justify-center text-lg">
+                      💧
+                    </div>
+                    <div>
+                      <div className="font-semibold text-primary text-[13px]">
+                        Hyperliquid Testnet Faucet
+                      </div>
+                      <div className="text-[11px] text-secondary">
+                        Claim free testnet USDC on Arbitrum Sepolia
+                      </div>
+                    </div>
+                  </div>
+                  <ExternalLink
+                    size={14}
+                    className="text-secondary group-hover:text-primary transition-colors shrink-0"
+                  />
+                </a>
+              ) : (
+                <a
+                  href="https://www.asterdex-testnet.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 bg-tertiary hover:bg-hover border border-color hover:border-amber-500/40 rounded-xl transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center text-lg">
+                      ⚡
+                    </div>
+                    <div>
+                      <div className="font-semibold text-primary text-[13px]">
+                        Aster DEX Official Testnet Faucet
+                      </div>
+                      <div className="text-[11px] text-secondary">
+                        Claim 1,000 USDT + 1,000 ASTER testnet tokens
+                      </div>
+                    </div>
+                  </div>
+                  <ExternalLink
+                    size={14}
+                    className="text-secondary group-hover:text-primary transition-colors shrink-0"
+                  />
+                </a>
+              )}
+
+              <a
+                href="https://www.bnbchain.org/en/testnet-faucet"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between p-3 bg-tertiary hover:bg-hover border border-color hover:border-yellow-500/40 rounded-xl transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-yellow-500/15 flex items-center justify-center text-lg">
+                    ⛽
+                  </div>
+                  <div>
+                    <div className="font-semibold text-primary text-[13px]">
+                      BNB Chain Gas Faucet (tBNB)
+                    </div>
+                    <div className="text-[11px] text-secondary">
+                      Required for network gas fees on BSC Testnet (97)
+                    </div>
+                  </div>
+                </div>
+                <ExternalLink
+                  size={14}
+                  className="text-secondary group-hover:text-primary transition-colors shrink-0"
+                />
+              </a>
+
+              {currentExchange === 'hyperliquid' && (
+                <a
+                  href="https://faucets.chain.link/arbitrum-sepolia"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 bg-tertiary hover:bg-hover border border-color hover:border-brand/40 rounded-xl transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-brand/15 flex items-center justify-center text-lg">
+                      ⛽
+                    </div>
+                    <div>
+                      <div className="font-semibold text-primary text-[13px]">
+                        Arbitrum Sepolia Faucet (Gas ETH)
+                      </div>
+                      <div className="text-[11px] text-secondary">
+                        Gas fees for Arbitrum Sepolia network
+                      </div>
+                    </div>
+                  </div>
+                  <ExternalLink
+                    size={14}
+                    className="text-secondary group-hover:text-primary transition-colors shrink-0"
+                  />
+                </a>
+              )}
+            </div>
+
+            <div className="bg-secondary/60 border border-color/60 rounded-xl p-3 text-[11px] text-secondary leading-relaxed space-y-1">
+              <div className="flex items-center gap-1.5 font-medium text-primary">
+                <Info size={13} className="text-secondary shrink-0" />
+                <span>About Testnet Faucets</span>
+              </div>
+              <p>
+                Testnet tokens are strictly for testing purposes and have no real-world financial
+                value. Once claimed on the official faucet, connect your wallet to trade.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- DEPOSIT TAB (MAINNET ONLY) ---------- */}
+        {activeTab === 'deposit' && currentNetwork !== 'testnet' && (
           <div className="space-y-3.5">
             {pendingDeposits.length > 0 && (
               <div className="space-y-2">
@@ -1177,22 +1371,36 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   onSelect={setDepositAmount}
                 />
 
-                <button
-                  type="button"
-                  onClick={handleDirectDeposit}
-                  disabled={
-                    isDepositing ||
-                    !isPositiveNumber(depositAmount) ||
-                    parseFloat(depositAmount) > parseFloat(walletTokenBalance || '0')
-                  }
-                  className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-                >
-                  {isDepositing
-                    ? 'Processing Deposit...'
-                    : parseFloat(depositAmount) > parseFloat(walletTokenBalance || '0')
-                      ? 'Insufficient Wallet Balance'
-                      : `Deposit ${selectedDepositAsset?.name || ''}`}
-                </button>
+                {isEvmConnected ? (
+                  <button
+                    type="button"
+                    onClick={handleDirectDeposit}
+                    disabled={
+                      isDepositing ||
+                      !isPositiveNumber(depositAmount) ||
+                      parseFloat(depositAmount) > parseFloat(walletTokenBalance || '0')
+                    }
+                    className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                  >
+                    {isDepositing
+                      ? 'Processing Deposit...'
+                      : parseFloat(depositAmount) > parseFloat(walletTokenBalance || '0')
+                        ? 'Insufficient Wallet Balance'
+                        : `Deposit ${selectedDepositAsset?.name || ''}`}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      openWalletModal();
+                    }}
+                    className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-2"
+                  >
+                    <WalletIcon size={15} />
+                    Connect EVM Wallet to Deposit
+                  </button>
+                )}
 
                 <div className="flex items-center gap-1.5 text-[10px] text-secondary justify-center pt-0.5">
                   <Info size={11} className="text-secondary shrink-0" />
@@ -1248,7 +1456,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         )}
 
         {/* ---------- WITHDRAW TAB ----------*/}
-        {activeTab === 'withdraw' && !showWithdrawConfirm && (
+        {activeTab === 'withdraw' && currentNetwork !== 'testnet' && !showWithdrawConfirm && (
           <div className="space-y-3.5">
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -1376,19 +1584,35 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleOpenWithdrawConfirm}
-              disabled={!isPositiveNumber(withdrawAmount) || !ethers.isAddress(destinationAddress)}
-              className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-            >
-              Review Withdrawal
-            </button>
+            {isEvmConnected ? (
+              <button
+                type="button"
+                onClick={handleOpenWithdrawConfirm}
+                disabled={
+                  !isPositiveNumber(withdrawAmount) || !ethers.isAddress(destinationAddress)
+                }
+                className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+              >
+                Review Withdrawal
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  openWalletModal();
+                }}
+                className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-2"
+              >
+                <WalletIcon size={15} />
+                Connect EVM Wallet to Withdraw
+              </button>
+            )}
           </div>
         )}
 
         {/* ---------- WITHDRAW CONFIRMATION STEP ---------- */}
-        {activeTab === 'withdraw' && showWithdrawConfirm && (
+        {activeTab === 'withdraw' && currentNetwork !== 'testnet' && showWithdrawConfirm && (
           <div className="space-y-4">
             <div className="text-center py-1">
               <ShieldCheck size={28} className="text-brand mx-auto mb-1.5" />
@@ -1448,7 +1672,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         )}
 
         {/* ---------- TRANSFER TAB ---------- */}
-        {activeTab === 'transfer' && (
+        {activeTab === 'transfer' && currentNetwork !== 'testnet' && (
           <div className="space-y-3.5">
             <div className="flex items-center gap-2 bg-tertiary border border-color rounded-lg p-3">
               <div className="flex-1">
@@ -1527,19 +1751,33 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               />
             </div>
 
-            <button
-              type="button"
-              onClick={handleExecuteTransfer}
-              disabled={!isPositiveNumber(transferAmount) || isTransferring}
-              className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-            >
-              {isTransferring ? 'Processing Transfer...' : 'Transfer Asset'}
-            </button>
+            {isEvmConnected ? (
+              <button
+                type="button"
+                onClick={handleExecuteTransfer}
+                disabled={!isPositiveNumber(transferAmount) || isTransferring}
+                className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+              >
+                {isTransferring ? 'Processing Transfer...' : 'Transfer Asset'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  openWalletModal();
+                }}
+                className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-2"
+              >
+                <WalletIcon size={15} />
+                Connect EVM Wallet to Transfer
+              </button>
+            )}
           </div>
         )}
 
         {/* ---------- HISTORY TAB ---------- */}
-        {activeTab === 'history' && (
+        {activeTab === 'history' && currentNetwork !== 'testnet' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex bg-tertiary p-0.5 rounded-lg border border-color text-[11px]">

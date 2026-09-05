@@ -1,5 +1,5 @@
 import { orderBookStore } from '../../core/stores/orderbookStore';
-import { ASTER_ENDPOINTS, ASTER_REST_URL } from './constants';
+import { ASTER_ENDPOINTS, getAsterRestUrl } from './constants';
 
 interface DiffEvent {
   U: number; // First update ID in event
@@ -51,7 +51,7 @@ export class OrderbookEngine {
   private async fetchSnapshot(): Promise<void> {
     try {
       const res = await fetch(
-        `${ASTER_REST_URL}${ASTER_ENDPOINTS.DEPTH}?symbol=${this.symbol}&limit=1000`
+        `${getAsterRestUrl()}${ASTER_ENDPOINTS.DEPTH}?symbol=${this.symbol}&limit=1000`
       );
       const snap = await res.json();
       this.applySnapshot(snap);

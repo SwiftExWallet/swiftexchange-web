@@ -24,6 +24,7 @@ import { prepareSwapTransaction } from '../services/evmSwapService';
 import { build1InchFusionOrder, submit1InchFusionOrder } from '../services/fusionOrderService';
 import type { FusionQuote, SwapQuote } from '../types/swap.types';
 import { toPlainString } from '../utils/swapAmountUtils';
+import { matchesAddress } from '../utils/swapAssetUtils';
 import { parseSwapError } from '../utils/swapErrorHandler';
 
 export { toPlainString };
@@ -143,11 +144,9 @@ export const useEvmSwap = ({
       const tokensWithBalances = tokens.map(token => {
         const storeAsset = storeAssets.find(
           a =>
-            a.chainId === chainId &&
-            a.symbol === token.symbol &&
-            (token.isNative
-              ? a.isNative
-              : (a.address || '').toLowerCase() === (token.address || '').toLowerCase())
+            String(a.chainId) === String(chainId) &&
+            a.symbol?.toUpperCase() === token.symbol?.toUpperCase() &&
+            (token.isNative ? a.isNative : matchesAddress(a, token.address))
         );
         return {
           ...token,
@@ -224,14 +223,12 @@ export const useEvmSwap = ({
 
             const storeAsset = storeAssets.find(
               a =>
-                a.chainId === chainId &&
-                a.symbol === token.symbol &&
-                (token.isNative
-                  ? a.isNative
-                  : (a.address || '').toLowerCase() === (token.address || '').toLowerCase())
+                String(a.chainId) === String(chainId) &&
+                a.symbol?.toUpperCase() === token.symbol?.toUpperCase() &&
+                (token.isNative ? a.isNative : matchesAddress(a, token.address))
             );
 
-            if (storeAsset && storeAsset.balance !== null) {
+            if (storeAsset && storeAsset.balance !== null && storeAsset.balance !== undefined) {
               bal = toPlainString(storeAsset.balance);
               if (bal !== '0') return { address: token.address, balance: bal };
             }
@@ -247,6 +244,26 @@ export const useEvmSwap = ({
                   token.decimals
                 )
               );
+
+              if (bal && bal !== '0') {
+                // Keep portfolioStore in sync with newly fetched RPC balance
+                const numChainId = Number(chainId);
+                usePortfolioStore.getState().updateAsset({
+                  id: `evm-${numChainId}-${token.address}`,
+                  symbol: token.symbol,
+                  name: token.name,
+                  image: token.logoURI || '',
+                  balance: parseFloat(bal),
+                  current_price: 0,
+                  price_change_percentage_24h: 0,
+                  chainId: numChainId,
+                  chainName: config.name,
+                  chainType: 'evm',
+                  address: token.address,
+                  decimals: token.decimals,
+                  isNative: token.isNative,
+                });
+              }
             } catch (err) {
               console.error(`Final RPC fallback failed for ${token.symbol}:`, err);
             }
@@ -262,7 +279,11 @@ export const useEvmSwap = ({
           let hasChanges = false;
 
           updates.forEach(({ address, balance }) => {
-            const index = newAssets.findIndex(a => a.address === address);
+            const index = newAssets.findIndex(
+              a =>
+                matchesAddress(a, address) ||
+                (a.address && a.address.toLowerCase() === address.toLowerCase())
+            );
             if (index !== -1 && newAssets[index].balance !== balance) {
               newAssets[index] = { ...newAssets[index], balance };
               hasChanges = true;
@@ -363,7 +384,6 @@ export const useEvmSwap = ({
         );
 
         if (activeSwapId.current === swapId) {
-          activeSwapId.current = null;
           updateState({ txHash: hash, loading: false });
         }
 
@@ -377,13 +397,13 @@ export const useEvmSwap = ({
       } catch (err: any) {
         const errorMsg = parseSwapError(err);
         if (activeSwapId.current === swapId) {
-          activeSwapId.current = null;
           updateState({ error: errorMsg, loading: false, txHash: null });
         }
         throw new Error(errorMsg);
       } finally {
+        isSubmittingRef.current = false;
         if (activeSwapId.current === swapId) {
-          isSubmittingRef.current = false;
+          activeSwapId.current = null;
         }
       }
     },
@@ -482,7 +502,6 @@ export const useEvmSwap = ({
         }
 
         if (activeSwapId.current === swapId) {
-          activeSwapId.current = null;
           updateState({ txHash: hash, loading: false });
         }
 
@@ -496,13 +515,13 @@ export const useEvmSwap = ({
       } catch (err: any) {
         const errorMsg = parseSwapError(err);
         if (activeSwapId.current === swapId) {
-          activeSwapId.current = null;
           updateState({ error: errorMsg, loading: false, txHash: null });
         }
         throw new Error(errorMsg);
       } finally {
+        isSubmittingRef.current = false;
         if (activeSwapId.current === swapId) {
-          isSubmittingRef.current = false;
+          activeSwapId.current = null;
         }
       }
     },
@@ -511,6 +530,7 @@ export const useEvmSwap = ({
 
   const reset = useCallback(() => {
     activeSwapId.current = null;
+    isSubmittingRef.current = false;
     latestQuoteRequestId.current++;
     quoteAbortController.current?.abort();
 

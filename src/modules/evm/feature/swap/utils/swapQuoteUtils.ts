@@ -16,24 +16,50 @@ export function getCalculatedBuyAmount(params: BuyAmountParams): string {
     selectedBuyAsset,
     activeQuoteSource,
     activeQuoteData,
+    swapQuote,
+    fusionQuote,
     isSameAssetSelected,
+    feePayType,
   } = params;
 
   if (isSameAssetSelected) return 'SELECT DIFFERENT PAIR';
 
+  const data = isGasless && fusionQuote ? fusionQuote : activeQuoteData || swapQuote || fusionQuote;
+  if (!data) return '0.00';
+
+  const source = activeQuoteSource ? String(activeQuoteSource).toUpperCase() : null;
+
   if (actionType === 'SWAP') {
-    if (isGasless && activeQuoteSource === 'FUSION_PLUS' && showFusionScreen) {
+    if (
+      isGasless &&
+      (source === 'FUSION_PLUS' || source === 'FUSION' || fusionQuote) &&
+      (showFusionScreen || fusionQuote)
+    ) {
+      const fusionData = fusionQuote || data;
       const decimals = selectedBuyAsset?.decimals || 18;
-      return ethers.formatUnits(activeQuoteData.toTokenAmount || '0', decimals);
+      return ethers.formatUnits(
+        fusionData.toTokenAmount || fusionData.outputAmount || '0',
+        decimals
+      );
     }
-    if (activeQuoteSource === 'STELLAR_SWAP') return activeQuoteData?.estimatedOutput || '0.00';
-    return activeQuoteData?.outputAmount || '0.00';
+    if (source === 'STELLAR_SWAP' || source === 'STELLAR') {
+      return data?.estimatedOutput || data?.outputAmount || '0.00';
+    }
+    return data?.outputAmount || data?.estimatedOutput || '0.00';
   }
 
   // BRIDGE mode
-  if (activeQuoteSource === 'FUSION_PLUS' && activeQuoteData) {
+  if (source === 'BRIDGE' && data.minimumAmountOut) {
+    if (feePayType === 'stablecoin' && data.fee?.stablecoin?.amount) {
+      const netAmount = parseFloat(data.minimumAmountOut) - parseFloat(data.fee.stablecoin.amount);
+      return netAmount > 0 ? netAmount.toString() : '0.00';
+    }
+    return data.minimumAmountOut;
+  }
+
+  if ((source === 'FUSION_PLUS' || source === 'FUSION') && data) {
     const decimals = selectedBuyAsset?.decimals || 18;
-    const amtRaw = activeQuoteData.toTokenAmount || activeQuoteData.dstTokenAmount || '0';
+    const amtRaw = data.toTokenAmount || data.dstTokenAmount || data.outputAmount || '0';
     try {
       return ethers.formatUnits(amtRaw, decimals);
     } catch {
@@ -41,20 +67,24 @@ export function getCalculatedBuyAmount(params: BuyAmountParams): string {
     }
   }
 
-  if (activeQuoteSource === 'NEAR_INTENT' && activeQuoteData) {
-    if (activeQuoteData.amountOutFormatted) {
-      return activeQuoteData.amountOutFormatted;
+  if (source === 'NEAR_INTENT' && data) {
+    if (data.amountOutFormatted) {
+      return data.amountOutFormatted;
     }
-    if (activeQuoteData.amountOut) {
+    if (data.amountOut) {
       const decimals = selectedBuyAsset?.decimals || 6;
       try {
-        return ethers.formatUnits(activeQuoteData.amountOut, decimals);
+        return ethers.formatUnits(data.amountOut, decimals);
       } catch {
-        return activeQuoteData.amountOut;
+        return data.amountOut;
       }
     }
     return '0.00';
   }
+
+  if (data.outputAmount) return data.outputAmount;
+  if (data.estimatedOutput) return data.estimatedOutput;
+  if (data.minimumAmountOut) return data.minimumAmountOut;
 
   return '0.00';
 }
@@ -64,15 +94,24 @@ export function getMinimumReceived(params: MinReceivedParams): string {
     actionType,
     activeQuoteSource,
     activeQuoteData,
+    swapQuote,
     fromChainId,
     selectedBuyAsset,
     userSlippageTolerance,
     calculatedBuyAmount,
   } = params;
 
+  const data = activeQuoteData || swapQuote;
+  if (!data) return '0.00';
+
+  const source = activeQuoteSource ? String(activeQuoteSource).toUpperCase() : null;
+
   if (actionType === 'BRIDGE') {
-    if (activeQuoteSource === 'FUSION_PLUS' && activeQuoteData) {
-      const q = activeQuoteData;
+    if (source === 'BRIDGE' && data.minimumAmountOut) {
+      return data.minimumAmountOut;
+    }
+    if ((source === 'FUSION_PLUS' || source === 'FUSION') && data) {
+      const q = data;
       const preset = (q.recommended_preset || 'fast') as 'fast' | 'medium' | 'slow';
       const presetData = q.presets?.[preset];
       if (presetData) {
@@ -84,10 +123,10 @@ export function getMinimumReceived(params: MinReceivedParams): string {
         }
       }
     }
-    if (activeQuoteSource === 'NEAR_INTENT' && activeQuoteData) {
-      if (activeQuoteData.minAmountOut) {
+    if (source === 'NEAR_INTENT' && data) {
+      if (data.minAmountOut) {
         try {
-          return ethers.formatUnits(activeQuoteData.minAmountOut, selectedBuyAsset?.decimals || 18);
+          return ethers.formatUnits(data.minAmountOut, selectedBuyAsset?.decimals || 18);
         } catch {
           return '0.00';
         }
@@ -96,15 +135,21 @@ export function getMinimumReceived(params: MinReceivedParams): string {
     }
   }
 
-  if (isStellar(fromChainId) && activeQuoteSource === 'STELLAR_SWAP')
-    return activeQuoteData?.minimumOutput || '0.00';
+  if (
+    (isStellar(fromChainId) || source === 'STELLAR_SWAP' || source === 'STELLAR') &&
+    data?.minimumOutput
+  ) {
+    return data.minimumOutput;
+  }
 
-  if (activeQuoteData?.minimumReceived) return activeQuoteData.minimumReceived;
-  if (!activeQuoteData?.outputAmount || !selectedBuyAsset) return '0.00';
+  if (data?.minimumReceived) return data.minimumReceived;
+  if (data?.minimumAmountOut) return data.minimumAmountOut;
+  if (data?.minimumOutput) return data.minimumOutput;
+  if (!data?.outputAmount || !selectedBuyAsset) return '0.00';
 
   try {
     const decimals = selectedBuyAsset.decimals || 18;
-    const amountBN = ethers.parseUnits(activeQuoteData.outputAmount, decimals);
+    const amountBN = ethers.parseUnits(data.outputAmount, decimals);
     const slippageBips = BigInt(Math.floor(userSlippageTolerance * 100));
     const minReceivedBN = (amountBN * (10000n - slippageBips)) / 10000n;
     return ethers.formatUnits(minReceivedBN, decimals);

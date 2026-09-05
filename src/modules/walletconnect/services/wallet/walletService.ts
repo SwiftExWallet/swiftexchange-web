@@ -154,8 +154,13 @@ class WalletService {
   // Signing pass-throughs
   // ---------------------------------------------------------------------------
 
-  async signSiweMessage(evmAddress: string, provider: unknown, message: string): Promise<string> {
-    return signSiweMessage(evmAddress, provider, message);
+  async signSiweMessage(
+    evmAddress: string,
+    provider: unknown,
+    message: string,
+    chainId?: number | string
+  ): Promise<string> {
+    return signSiweMessage(evmAddress, provider, message, chainId);
   }
 
   async signStellarChallenge(

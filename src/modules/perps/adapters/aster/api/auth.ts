@@ -1,14 +1,16 @@
-import type { Signer } from 'ethers';
+import { type Signer, getAddress } from 'ethers';
 
-import { ASTER_CHAIN_ID, ASTER_REST_URL } from '../constants';
+import { getAsterChainId, getAsterRestUrl } from '../constants';
 import { parseAsterError } from './errors';
 
-const EIP712_DOMAIN = {
-  name: 'AsterSignTransaction',
-  version: '1',
-  chainId: ASTER_CHAIN_ID,
-  verifyingContract: '0x0000000000000000000000000000000000000000',
-} as const;
+export function getAsterDomain(chainId: number = getAsterChainId()) {
+  return {
+    name: 'AsterSignTransaction',
+    version: '1',
+    chainId,
+    verifyingContract: '0x0000000000000000000000000000000000000000',
+  } as const;
+}
 
 const EIP712_TYPES = {
   Message: [{ name: 'msg', type: 'string' }],
@@ -20,11 +22,11 @@ export interface TypedDataPayload {
     Message: { name: string; type: string }[];
   };
   primaryType: 'Message';
-  domain: typeof EIP712_DOMAIN;
+  domain: ReturnType<typeof getAsterDomain>;
   message: { msg: string };
 }
 
-export function buildTypedData(msg: string): TypedDataPayload {
+export function buildTypedData(msg: string, chainId: number = getAsterChainId()): TypedDataPayload {
   return {
     types: {
       EIP712Domain: [
@@ -36,7 +38,7 @@ export function buildTypedData(msg: string): TypedDataPayload {
       Message: [{ name: 'msg', type: 'string' }],
     },
     primaryType: 'Message',
-    domain: EIP712_DOMAIN,
+    domain: getAsterDomain(chainId),
     message: { msg },
   };
 }
@@ -64,13 +66,14 @@ function throwIfApiError(data: any): void {
 let serverTimeOffset = 0;
 let lastTimeSync = 0;
 
-export async function getSyncedServerTime(): Promise<number> {
+export async function getSyncedServerTime(baseUrl?: string): Promise<number> {
+  const restUrl = baseUrl || getAsterRestUrl();
   const now = Date.now();
   if (now - lastTimeSync < 60000 && lastTimeSync > 0) {
     return now + serverTimeOffset;
   }
   try {
-    const res = await fetch(`${ASTER_REST_URL}/fapi/v3/time`);
+    const res = await fetch(`${restUrl}/fapi/v3/time`);
     const data = await res.json();
     if (data && typeof data.serverTime === 'number') {
       serverTimeOffset = data.serverTime - Date.now();
@@ -89,21 +92,23 @@ export async function signedRequest(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   params: Record<string, string> = {},
-  baseUrl: string = ASTER_REST_URL
+  baseUrl?: string
 ): Promise<any> {
+  const effectiveBaseUrl = baseUrl || getAsterRestUrl();
+  const chainId = getAsterChainId();
   const signerAddr = await signer.getAddress();
-  const serverTime = await getSyncedServerTime();
+  const serverTime = await getSyncedServerTime(effectiveBaseUrl);
   const nonce = String(serverTime * 1000);
 
   const ordered: Record<string, string> = {
-    user: userAddr,
-    signer: signerAddr,
+    user: getAddress(userAddr),
+    signer: getAddress(signerAddr),
     ...params,
     nonce,
   };
 
   const qs = new URLSearchParams(ordered).toString();
-  const typedData = buildTypedData(qs);
+  const typedData = buildTypedData(qs, chainId);
 
   const signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
 
@@ -113,10 +118,10 @@ export async function signedRequest(
   let fetchOptions: RequestInit;
 
   if (method === 'GET') {
-    url = `${baseUrl}${path}?${finalQs}`;
+    url = `${effectiveBaseUrl}${path}?${finalQs}`;
     fetchOptions = { method: 'GET' };
   } else {
-    url = `${baseUrl}${path}`;
+    url = `${effectiveBaseUrl}${path}`;
     fetchOptions = {
       method,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

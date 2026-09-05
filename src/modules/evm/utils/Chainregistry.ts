@@ -1,3 +1,4 @@
+import { getTestnetTokensForChain } from '../../../data/testnet/evm-testnet-tokens';
 import { CHAINS } from './assetmanagement/chains';
 import {
   AGGREGATOR_NATIVE_ADDRESS,
@@ -239,7 +240,26 @@ export function getAssetByAddress(
     };
   }
 
-  return chain.assets.find(a => a.address.toLowerCase() === addr);
+  const found = chain.assets.find(a => a.address.toLowerCase() === addr);
+  if (found) return found;
+
+  const testnetMatch = getTestnetTokensForChain(Number(chainId)).find(
+    t => t.address.toLowerCase() === addr
+  );
+  if (testnetMatch) {
+    return {
+      asset: testnetMatch.symbol,
+      type: testnetMatch.isNative ? 'NATIVE' : 'ERC20',
+      name: testnetMatch.name,
+      symbol: testnetMatch.symbol,
+      decimals: testnetMatch.decimals,
+      address: testnetMatch.address,
+      logoURI: testnetMatch.logoURI,
+      isNative: testnetMatch.isNative,
+    };
+  }
+
+  return undefined;
 }
 
 export function getChainName(chainId: number | string): string {

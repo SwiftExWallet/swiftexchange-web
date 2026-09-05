@@ -13,7 +13,6 @@ import { StellarTickerBar } from './StellarTickerBar';
 const AmmSwapUI = lazy(() => import('../amm/AmmSwapUI'));
 const OrderBookSwapUI = lazy(() => import('../orderbook/OrderBookSwapUI'));
 const AssetManager = lazy(() => import('../stellarassets/AssetManager'));
-const TradeTransactionUI = lazy(() => import('../TradeTransactionUI'));
 
 const StellarTradeScreen = () => {
   const navigate = useNavigate();
@@ -85,7 +84,7 @@ const StellarTradeScreen = () => {
   }, [stellarWallet?.address, hasCheckedClaims]);
 
   return (
-    <div className="bg-[var(--color-bg-primary)] max-w-[100vw] px-3 sm:px-4 md:px-6 py-2 sm:py-4 lg:p-4 lg:pb-0 min-h-screen overflow-x-hidden relative transition-colors">
+    <div className="bg-[var(--color-bg-primary)] max-w-[100vw] px-3 sm:px-4 md:px-6 py-2 sm:py-4 lg:p-4 lg:pb-0 min-h-screen overflow-x-clip relative transition-colors">
       <StellarActivationBanner className="mb-2" />
       {activeTab !== 'assets' && <StellarTickerBar />}
       {showClaimModal && <ClaimableBalanceModal onClose={() => setShowClaimModal(false)} />}
@@ -101,7 +100,7 @@ const StellarTradeScreen = () => {
         }
       `}</style>
 
-      <div className="animate-fade-in pb-20">
+      <div className="animate-fade-in pb-10">
         <Suspense
           fallback={
             <div className="w-full h-[400px] flex items-center justify-center bg-[var(--color-bg-secondary)] lg:rounded-2xl border border-[var(--color-border)]/60 shadow-xl">
@@ -114,7 +113,6 @@ const StellarTradeScreen = () => {
             {activeTab === 'orderbook' && <OrderBookSwapUI />}
             {activeTab === 'assets' && <AssetManager />}
           </div>
-          {activeTab !== 'assets' && <TradeTransactionUI />}
         </Suspense>
       </div>
 

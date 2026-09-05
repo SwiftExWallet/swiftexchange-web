@@ -2,6 +2,7 @@ import {
   Infinity as InfinityIcon,
   BarChart2,
   CandlestickChart,
+  Flame,
   History,
   Landmark,
   LayoutDashboard,
@@ -27,6 +28,7 @@ interface NavItem {
   isRestricted?: boolean;
   badge?: string;
   badgeColor?: string;
+  isHot?: boolean;
 }
 
 interface NavSection {
@@ -110,8 +112,7 @@ const Sidebar: FC = () => {
           label: 'Perps',
           icon: <InfinityIcon className="w-[17px] h-[17px]" />,
           isRestricted: isDydxRestricted,
-          badge: '20x',
-          badgeColor: 'bg-amber-500/20 text-amber-400 border border-amber-500/30',
+          isHot: true,
         },
       ],
     },
@@ -166,11 +167,15 @@ const Sidebar: FC = () => {
             style={{ background: 'var(--color-bg-secondary)' }}
             className="relative w-full flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-[6.5px] bg-gradient-to-b from-[var(--color-bg-secondary)] to-[var(--color-bg-tertiary)]/90 backdrop-blur-sm select-none"
           >
-            {item.badge && !item.isRestricted && (
+            {item.isHot && !item.isRestricted ? (
+              <span className="absolute top-1 right-1 leading-none text-orange-500 drop-shadow-[0_0_8px_rgba(249,115,22,0.9)] animate-pulse">
+                <Flame className="w-3.5 h-3.5 fill-orange-500 text-orange-500" />
+              </span>
+            ) : item.badge && !item.isRestricted ? (
               <span className="absolute top-1 right-1 text-[8px] font-mono font-bold px-1 py-0.5 rounded-full leading-none scale-90 bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-xs">
                 {item.badge}
               </span>
-            )}
+            ) : null}
             <span className="shrink-0 scale-110 text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.7)] transition-transform">
               {item.icon}
             </span>
@@ -214,8 +219,12 @@ const Sidebar: FC = () => {
         {/* Restricted overlay icon */}
         {item.isRestricted && <X className="w-3.5 h-3.5 absolute top-1 right-1 text-rose-400" />}
 
-        {/* Micro badge (e.g. 20x for Perps) */}
-        {item.badge && !item.isRestricted && (
+        {/* Micro badge or Hot Flame */}
+        {item.isHot && !item.isRestricted ? (
+          <span className="absolute top-1 right-1 leading-none text-orange-500 drop-shadow-[0_0_6px_rgba(249,115,22,0.8)] animate-pulse">
+            <Flame className="w-3.5 h-3.5 fill-orange-500 text-orange-500" />
+          </span>
+        ) : item.badge && !item.isRestricted ? (
           <span
             className={`absolute top-1 right-1 text-[8px] font-mono font-bold px-1 py-0.5 rounded-full leading-none scale-90 ${
               item.badgeColor || 'bg-brand-primary/20 text-brand-primary'
@@ -223,7 +232,7 @@ const Sidebar: FC = () => {
           >
             {item.badge}
           </span>
-        )}
+        ) : null}
 
         <span className="shrink-0 transition-transform duration-200 group-hover:scale-105">
           {item.icon}

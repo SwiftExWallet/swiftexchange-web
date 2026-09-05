@@ -12,7 +12,7 @@ import { validateAddress } from '../../../validator/AddressValidator';
 import { toPlainString } from '../../evm/feature/swap/utils/swapAmountUtils';
 import { estimateEVMFees, sendCryptoEVMPrepare } from '../../evm/service/evmService';
 import { storeSwapOrder } from '../../evm/service/evmTransactionStatusService';
-import { fetchSingleTokenBalance } from '../../evm/service/tokenListService';
+import { fetchSingleTokenBalance, getTokensForChain } from '../../evm/service/tokenListService';
 import { CHAIN_REGISTRY, getChainById, getExplorerUrl } from '../../evm/utils/Chainregistry';
 import { getEVMNetworkConfig } from '../../evm/utils/evmUtils';
 import { rpcManager } from '../../evm/utils/rpcProvider';
@@ -89,82 +89,148 @@ export const useSendAsset = (onBack?: () => void) => {
   const isConfirmingRef = useRef(false);
 
   const allAssets: EnhancedSendAsset[] = useMemo(() => {
-    const activeFromStore = storeAssets
-      .filter(a => (a.balance || 0) > 0)
-      .map(asset => {
-        const type: 'evm' | 'stellar' = asset.chainType === 'stellar' ? 'stellar' : 'evm';
-        const chainId = asset.chainId || (type === 'stellar' ? 'pubnet' : 0);
-        return {
-          value: asset.id,
-          symbol: asset.symbol,
-          label: `${asset.symbol} (${asset.chainName})`,
-          logo: asset.image,
-          network: asset.chainName,
-          chainId,
-          addressType: type,
-          walletType: type === 'stellar' ? WalletType.STELLAR : WalletType.EVM,
-          tokenAddress: asset.address,
-          decimals: asset.decimals || (type === 'stellar' ? 7 : 18),
-          isNative: asset.isNative || false,
-          type,
-          networkKey: chainId,
-          baseFee: type === 'stellar' ? 0.00001 : 0.001,
-          balance: asset.balance || 0,
-          blockExplorerUrl: asset.blockExplorerUrl,
-        };
+    const registryAssets: EnhancedSendAsset[] = [];
+    const networkChains = CHAIN_REGISTRY.filter(
+      c => c.networkType === currentNetwork && c.available
+    );
+
+    // Map store assets by chainId & address/native for fast balance lookup
+    const storeMap = new Map<string, any>();
+    storeAssets.forEach(a => {
+      const cId = String(
+        a.chainId ||
+          (a.chainType === 'stellar' ? (currentNetwork === 'testnet' ? 'testnet' : 'pubnet') : '')
+      );
+      const isNative =
+        !!a.isNative ||
+        !a.address ||
+        a.address.toLowerCase() === 'native' ||
+        a.address.toLowerCase() === '0x0000000000000000000000000000000000000000';
+      const addr = isNative ? 'native' : (a.address || '').toLowerCase();
+      storeMap.set(`${cId}:${addr}:${a.symbol.toUpperCase()}`, a);
+      if (!isNative) {
+        storeMap.set(`${cId}:${addr}`, a);
+      }
+    });
+
+    for (const config of networkChains) {
+      if (!config.sendEnable) continue;
+      const isStellar = config.chainId === 'pubnet' || config.chainId === 'testnet';
+      const type: 'evm' | 'stellar' = isStellar ? 'stellar' : 'evm';
+      const walletType = isStellar ? WalletType.STELLAR : WalletType.EVM;
+
+      // 1. Native currency
+      const nativeStoreKey = `${config.chainId}:native:${config.nativeCurrency.symbol.toUpperCase()}`;
+      const nativeStoreItem = storeMap.get(nativeStoreKey);
+      const nativeBalance = nativeStoreItem?.balance || 0;
+
+      registryAssets.push({
+        value: `send-${config.chainId}-native`,
+        symbol: config.nativeCurrency.symbol,
+        label: `${config.nativeCurrency.symbol} (${config.name})`,
+        logo: config.nativeCurrency.logoURI || config.logoURI,
+        network: config.name,
+        chainId: config.chainId,
+        addressType: type,
+        walletType,
+        tokenAddress: undefined,
+        decimals: config.nativeCurrency.decimals || (isStellar ? 7 : 18),
+        isNative: true,
+        type,
+        networkKey: config.chainId,
+        baseFee: isStellar ? 0.00001 : 0.001,
+        balance: nativeBalance,
+        blockExplorerUrl: config.blockExplorerUrl,
       });
 
-    if (activeFromStore.length > 0) {
-      return activeFromStore;
-    }
+      // 2. Chain tokens from tokenListService
+      const chainTokens = getTokensForChain(config.chainId);
+      for (const t of chainTokens) {
+        if (t.isNative || t.symbol.toUpperCase() === config.nativeCurrency.symbol.toUpperCase()) {
+          continue;
+        }
+        const tokenAddr = t.address || '';
+        const tokenStoreKey = `${config.chainId}:${tokenAddr.toLowerCase()}`;
+        const storeItem =
+          storeMap.get(tokenStoreKey) ||
+          storeMap.get(`${config.chainId}:${tokenAddr.toLowerCase()}:${t.symbol.toUpperCase()}`);
+        const tokenBalance = storeItem?.balance || 0;
 
-    const registryAssets: EnhancedSendAsset[] = [];
-    for (const config of CHAIN_REGISTRY) {
-      if (config.sendEnable) {
-        const type: 'evm' | 'stellar' =
-          config.chainId === 'pubnet' || config.chainId === 'testnet' ? 'stellar' : 'evm';
         registryAssets.push({
-          value: `send-${config.chainId}-native`,
-          symbol: config.nativeCurrency.symbol,
-          label: `${config.nativeCurrency.symbol} (${config.name})`,
-          logo: config.nativeCurrency.logoURI,
+          value: `send-${config.chainId}-${t.symbol}`,
+          symbol: t.symbol,
+          label: `${t.symbol} (${config.name})`,
+          logo: t.logoURI || '',
           network: config.name,
           chainId: config.chainId,
           addressType: type,
-          walletType: type === 'stellar' ? WalletType.STELLAR : WalletType.EVM,
-          tokenAddress: undefined,
-          decimals: config.nativeCurrency.decimals || (type === 'stellar' ? 7 : 18),
-          isNative: true,
+          walletType,
+          tokenAddress: tokenAddr,
+          decimals: t.decimals || (isStellar ? 7 : 18),
+          isNative: false,
           type,
           networkKey: config.chainId,
-          baseFee: type === 'stellar' ? 0.00001 : 0.001,
-          balance: 0,
-        });
-
-        config.assets?.forEach((asset: any) => {
-          if (asset.symbol === config.nativeCurrency.symbol) return;
-          registryAssets.push({
-            value: `send-${config.chainId}-${asset.symbol}`,
-            symbol: asset.symbol,
-            label: `${asset.symbol} (${config.name})`,
-            logo: asset.logoURI,
-            network: config.name,
-            chainId: config.chainId,
-            addressType: type,
-            walletType: type === 'stellar' ? WalletType.STELLAR : WalletType.EVM,
-            tokenAddress: asset.address,
-            decimals: asset.decimals || (type === 'stellar' ? 7 : 18),
-            isNative: false,
-            type,
-            networkKey: config.chainId,
-            baseFee: type === 'stellar' ? 0.00001 : 0.001,
-            balance: 0,
-          });
+          baseFee: isStellar ? 0.00001 : 0.001,
+          balance: tokenBalance,
+          blockExplorerUrl: config.blockExplorerUrl,
         });
       }
     }
-    return registryAssets;
-  }, [storeAssets]);
+
+    // 3. Append custom imported user tokens from storeAssets that aren't in registry
+    const existingKeys = new Set(
+      registryAssets.map(
+        a => `${a.chainId}:${(a.isNative ? 'native' : a.tokenAddress || '').toLowerCase()}`
+      )
+    );
+
+    for (const a of storeAssets) {
+      if ((a.balance || 0) <= 0) continue;
+      const type: 'evm' | 'stellar' = a.chainType === 'stellar' ? 'stellar' : 'evm';
+      const defaultStellarId = currentNetwork === 'testnet' ? 'testnet' : 'pubnet';
+      const chainId = a.chainId || (type === 'stellar' ? defaultStellarId : 0);
+      const isNative =
+        !!a.isNative ||
+        !a.address ||
+        a.address.toLowerCase() === 'native' ||
+        a.address.toLowerCase() === '0x0000000000000000000000000000000000000000';
+      const key = `${chainId}:${(isNative ? 'native' : a.address || '').toLowerCase()}`;
+
+      if (!existingKeys.has(key)) {
+        registryAssets.push({
+          value: a.id || `send-${chainId}-${a.symbol}`,
+          symbol: a.symbol,
+          label: `${a.symbol} (${a.chainName || ''})`,
+          logo: a.image,
+          network: a.chainName || '',
+          chainId,
+          addressType: type,
+          walletType: type === 'stellar' ? WalletType.STELLAR : WalletType.EVM,
+          tokenAddress: isNative ? undefined : a.address,
+          decimals: a.decimals || (type === 'stellar' ? 7 : 18),
+          isNative,
+          type,
+          networkKey: chainId,
+          baseFee: type === 'stellar' ? 0.00001 : 0.001,
+          balance: a.balance || 0,
+          blockExplorerUrl: a.blockExplorerUrl,
+        });
+        existingKeys.add(key);
+      }
+    }
+
+    // 4. Sort: funded tokens first, then native assets, then alphabetically
+    return registryAssets.sort((a, b) => {
+      if (a.balance > 0 && b.balance <= 0) return -1;
+      if (b.balance > 0 && a.balance <= 0) return 1;
+      if (a.balance > 0 && b.balance > 0 && a.balance !== b.balance) {
+        return b.balance - a.balance;
+      }
+      if (a.isNative && !b.isNative) return -1;
+      if (!a.isNative && b.isNative) return 1;
+      return a.symbol.localeCompare(b.symbol);
+    });
+  }, [storeAssets, currentNetwork]);
 
   const assetParam = searchParams.get('asset');
   const chainIdParam = searchParams.get('chainId');
@@ -172,10 +238,15 @@ export const useSendAsset = (onBack?: () => void) => {
 
   const currentAsset = useMemo(() => {
     if (assetParam && chainIdParam) {
-      return allAssets.find(a => {
+      const stellarChainId = currentNetwork === 'testnet' ? 'testnet' : 'pubnet';
+      const paramIdStr = chainIdParam === 'stellar' ? stellarChainId : String(chainIdParam);
+
+      // 1. Search in allAssets
+      const found = allAssets.find(a => {
         const aChainIdStr = String(a.chainId);
-        const paramIdStr = chainIdParam === 'stellar' ? 'pubnet' : chainIdParam;
-        if (a.symbol !== assetParam || aChainIdStr !== paramIdStr) return false;
+        if (a.symbol.toUpperCase() !== assetParam.toUpperCase() || aChainIdStr !== paramIdStr) {
+          return false;
+        }
 
         if (addressParam) {
           const aIsNative =
@@ -193,19 +264,91 @@ export const useSendAsset = (onBack?: () => void) => {
         }
         return true;
       });
+
+      if (found) return found;
+
+      // 2. Direct fallback resolution if asset not yet loaded in allAssets
+      const config = getChainById(paramIdStr);
+      if (config) {
+        const isStellar = config.chainId === 'pubnet' || config.chainId === 'testnet';
+        const type: 'evm' | 'stellar' = isStellar ? 'stellar' : 'evm';
+        const walletType = isStellar ? WalletType.STELLAR : WalletType.EVM;
+        const isNativeParam =
+          !addressParam ||
+          addressParam.toLowerCase() === 'native' ||
+          addressParam.toLowerCase() === '0x0000000000000000000000000000000000000000';
+
+        if (
+          isNativeParam ||
+          assetParam.toUpperCase() === config.nativeCurrency.symbol.toUpperCase()
+        ) {
+          return {
+            value: `send-${config.chainId}-native`,
+            symbol: config.nativeCurrency.symbol,
+            label: `${config.nativeCurrency.symbol} (${config.name})`,
+            logo: config.nativeCurrency.logoURI || config.logoURI,
+            network: config.name,
+            chainId: config.chainId,
+            addressType: type,
+            walletType,
+            tokenAddress: undefined,
+            decimals: config.nativeCurrency.decimals || (isStellar ? 7 : 18),
+            isNative: true,
+            type,
+            networkKey: config.chainId,
+            baseFee: isStellar ? 0.00001 : 0.001,
+            balance: 0,
+            blockExplorerUrl: config.blockExplorerUrl,
+          };
+        }
+
+        const chainTokens = getTokensForChain(config.chainId);
+        const matched = chainTokens.find(
+          t =>
+            (addressParam &&
+              addressParam.toLowerCase() !== 'native' &&
+              t.address.toLowerCase() === addressParam.toLowerCase()) ||
+            t.symbol.toUpperCase() === assetParam.toUpperCase()
+        );
+
+        if (matched) {
+          return {
+            value: `send-${config.chainId}-${matched.symbol}`,
+            symbol: matched.symbol,
+            label: `${matched.symbol} (${config.name})`,
+            logo: matched.logoURI || '',
+            network: config.name,
+            chainId: config.chainId,
+            addressType: type,
+            walletType,
+            tokenAddress: matched.address,
+            decimals: matched.decimals || (isStellar ? 7 : 18),
+            isNative: !!matched.isNative,
+            type,
+            networkKey: config.chainId,
+            baseFee: isStellar ? 0.00001 : 0.001,
+            balance: 0,
+            blockExplorerUrl: config.blockExplorerUrl,
+          };
+        }
+      }
     }
     return undefined;
-  }, [allAssets, assetParam, chainIdParam, addressParam]);
+  }, [allAssets, assetParam, chainIdParam, addressParam, currentNetwork]);
 
   useEffect(() => {
-    if (!currentAsset && allAssets.length > 0) {
-      const first = allAssets[0];
-      const tarChain = first.chainId === 'pubnet' ? 'stellar' : String(first.chainId);
-      if (assetParam !== first.symbol || chainIdParam !== tarChain) {
+    // Only default to first asset if URL has NO asset or chainId params at all
+    if (!assetParam || !chainIdParam) {
+      if (allAssets.length > 0) {
+        const first = allAssets[0];
+        const tarChain =
+          first.chainId === 'pubnet' || first.chainId === 'testnet'
+            ? 'stellar'
+            : String(first.chainId);
         setSearchParams({ asset: first.symbol, chainId: tarChain }, { replace: true });
       }
     }
-  }, [currentAsset, allAssets, assetParam, chainIdParam, setSearchParams]);
+  }, [allAssets, assetParam, chainIdParam, setSearchParams]);
 
   const senderAddress = useMemo(() => {
     if (!currentAsset) return null;
@@ -406,21 +549,25 @@ export const useSendAsset = (onBack?: () => void) => {
 
         let unsignedTx: string | undefined;
 
-        console.log('[useSendAsset] Preparing EVM transaction via backend API...');
-        try {
-          const prepRes = await sendCryptoEVMPrepare(
-            Number(currentAsset.networkKey),
-            senderAddress,
-            to,
-            sendAmt,
-            { data }
-          );
-          unsignedTx = prepRes.unsignedTx;
-        } catch (apiError) {
-          console.warn(
-            '[useSendAsset] Backend transaction preparation failed. Falling back to client-side simulation:',
-            apiError
-          );
+        // Backend API proxy prepare requires mainnet device authentication.
+        // On testnet, skip backend prepare and use direct client-side simulation + wallet signing.
+        if (currentNetwork !== 'testnet') {
+          console.log('[useSendAsset] Preparing EVM transaction via backend API...');
+          try {
+            const prepRes = await sendCryptoEVMPrepare(
+              Number(currentAsset.networkKey),
+              senderAddress,
+              to,
+              sendAmt,
+              { data }
+            );
+            unsignedTx = prepRes.unsignedTx;
+          } catch (apiError) {
+            console.warn(
+              '[useSendAsset] Backend transaction preparation failed. Falling back to client-side simulation:',
+              apiError
+            );
+          }
         }
 
         req = {
@@ -451,7 +598,7 @@ export const useSendAsset = (onBack?: () => void) => {
           amountIn: amount,
           amountOut: amount,
           txType: currentAsset.isNative ? 'Native Transfer' : 'Token Transfer',
-        }).catch(err => console.error('Failed to store transfer to backend:', err));
+        }).catch((err: any) => console.error('Failed to store transfer to backend:', err));
 
         setRecipientAddress('');
         setAmount('');
@@ -473,6 +620,7 @@ export const useSendAsset = (onBack?: () => void) => {
 
         const executeStellarWithRetry = async (retryCount = 0): Promise<any> => {
           try {
+            const isTestnet = currentNetwork === 'testnet' || currentAsset.chainId === 'testnet';
             const tx = await sendCryptoStellarBuild(
               senderAddress,
               recipientAddress,
@@ -482,17 +630,24 @@ export const useSendAsset = (onBack?: () => void) => {
                 code: currentAsset.symbol,
                 issuer: currentAsset.tokenAddress,
                 isNative: currentAsset.isNative,
+                chainId: isTestnet ? 'testnet' : 'pubnet',
               }
             );
 
             req = {
               type: 'stellar',
               network: currentAsset.network,
-              networkKey: currentNetwork === 'testnet' ? 'testnet' : 'pubnet',
+              networkKey: isTestnet ? 'testnet' : 'pubnet',
               from: senderAddress,
               to: recipientAddress,
               amount,
-              data: { xdr: tx.xdr, network: currentNetwork === 'testnet' ? 'TESTNET' : 'PUBNET' },
+              data: {
+                xdr: tx.xdr,
+                network: isTestnet ? 'TESTNET' : 'PUBNET',
+                networkPassphrase: isTestnet
+                  ? 'Test SDF Network ; September 2015'
+                  : 'Public Global Stellar Network ; September 2015',
+              },
             };
 
             console.log(

@@ -1,15 +1,15 @@
+import { PerpEvent, perpEventBus } from '../../core/events';
+import { orderBookStore } from '../../core/stores/orderbookStore';
+import { type AssetCtx, useTickerStore } from '../../core/stores/tickerStore';
+import { tradeStore } from '../../core/stores/tradeStore';
 import { WebSocketManager } from '../../core/websocket/manager';
 import { HyperliquidMapper } from './mapper';
-import { orderBookStore } from '../../core/stores/orderbookStore';
-import { tradeStore } from '../../core/stores/tradeStore';
-import { useTickerStore } from '../../core/stores/tickerStore';
-import { perpEventBus, PerpEvent } from '../../core/events';
 
 export class HyperliquidWebSocket extends WebSocketManager {
-  constructor() {
+  constructor(url: string = 'wss://api.hyperliquid.xyz/ws') {
     super({
-      url: 'wss://api.hyperliquid.xyz/ws',
-      pingIntervalMs: 50000, // HL recommends ~50s ping
+      url,
+      pingIntervalMs: 50000,
       reconnectBaseDelayMs: 1000,
     });
   }
@@ -19,10 +19,8 @@ export class HyperliquidWebSocket extends WebSocketManager {
   }
 
   protected onReconnect(): void {
-    // Subscribe to global webData2 to receive periodic assetCtx updates for all coins
-    this.send({ method: 'subscribe', subscription: { type: 'webData2' } });
+    this.send({ method: 'subscribe', subscription: { type: 'allMids' } });
 
-    // Re-subscribe to all active topics based on the ref-counted map
     for (const [topicId] of this.subscriptions.entries()) {
       if (topicId.startsWith('l2Book:')) {
         const coin = topicId.split(':')[1];
@@ -30,6 +28,9 @@ export class HyperliquidWebSocket extends WebSocketManager {
       } else if (topicId.startsWith('trades:')) {
         const coin = topicId.split(':')[1];
         this.send({ method: 'subscribe', subscription: { type: 'trades', coin } });
+      } else if (topicId.startsWith('activeAssetCtx:')) {
+        const coin = topicId.split(':')[1];
+        this.send({ method: 'subscribe', subscription: { type: 'activeAssetCtx', coin } });
       } else if (topicId.startsWith('candle:')) {
         const [, coin, interval] = topicId.split(':');
         this.send({ method: 'subscribe', subscription: { type: 'candle', coin, interval } });
@@ -57,14 +58,36 @@ export class HyperliquidWebSocket extends WebSocketManager {
     this.unsubscribe(topicId, { method: 'unsubscribe', subscription: { type: 'trades', coin } });
   }
 
+  public subscribeActiveAssetCtx(coin: string): void {
+    const topicId = `activeAssetCtx:${coin}`;
+    this.subscribe(topicId, {
+      method: 'subscribe',
+      subscription: { type: 'activeAssetCtx', coin },
+    });
+  }
+
+  public unsubscribeActiveAssetCtx(coin: string): void {
+    const topicId = `activeAssetCtx:${coin}`;
+    this.unsubscribe(topicId, {
+      method: 'unsubscribe',
+      subscription: { type: 'activeAssetCtx', coin },
+    });
+  }
+
   public subscribeCandles(coin: string, interval: string): void {
     const topicId = `candle:${coin}:${interval}`;
-    this.subscribe(topicId, { method: 'subscribe', subscription: { type: 'candle', coin, interval } });
+    this.subscribe(topicId, {
+      method: 'subscribe',
+      subscription: { type: 'candle', coin, interval },
+    });
   }
 
   public unsubscribeCandles(coin: string, interval: string): void {
     const topicId = `candle:${coin}:${interval}`;
-    this.unsubscribe(topicId, { method: 'unsubscribe', subscription: { type: 'candle', coin, interval } });
+    this.unsubscribe(topicId, {
+      method: 'unsubscribe',
+      subscription: { type: 'candle', coin, interval },
+    });
   }
 
   protected handleMessage(event: MessageEvent): void {
@@ -74,8 +97,15 @@ export class HyperliquidWebSocket extends WebSocketManager {
       if (data.channel === 'pong') return;
 
       if (data.channel === 'l2Book' && data.data) {
-        const mappedBook = HyperliquidMapper.mapOrderBook(data.data);
-        orderBookStore.applySnapshot(mappedBook.symbol, mappedBook.bids, mappedBook.asks, mappedBook.updateId ?? data.data.time ?? 0);
+        const raw = data.data;
+        const symbol = `${raw.coin}-USDC`;
+        const rawBids = raw.levels[0] || [];
+        const rawAsks = raw.levels[1] || [];
+
+        const bids = rawBids.map((lvl: any) => ({ price: lvl.px, size: lvl.sz }));
+        const asks = rawAsks.map((lvl: any) => ({ price: lvl.px, size: lvl.sz }));
+
+        orderBookStore.applySnapshot(symbol, bids, asks, raw.time || Date.now());
       }
 
       if (data.channel === 'trades' && data.data) {
@@ -83,9 +113,17 @@ export class HyperliquidWebSocket extends WebSocketManager {
         if (trades && trades.length > 0) {
           const mappedTrades = HyperliquidMapper.mapTrade(trades);
           if (mappedTrades.length > 0) {
-            // Write directly to Zustand — components subscribe via useTradeStore selectors
             tradeStore.addTrades(mappedTrades[0].symbol, mappedTrades);
           }
+        }
+      }
+
+      if (data.channel === 'activeAssetCtx' && data.data) {
+        const { coin, ctx } = data.data;
+        if (coin && ctx) {
+          const uiSymbol = `${coin}-USDC`;
+          ctx.nextFundingTime = HyperliquidMapper.getNextFundingTime();
+          useTickerStore.getState().setAssetCtx(uiSymbol, ctx);
         }
       }
 
@@ -96,11 +134,27 @@ export class HyperliquidWebSocket extends WebSocketManager {
         }
       }
 
+      if (data.channel === 'allMids' && data.data?.mids) {
+        const mids = data.data.mids;
+        const currentMap = useTickerStore.getState().assetCtxByMarket;
+        const updates: Record<string, AssetCtx> = {};
+        for (const [coin, midPx] of Object.entries(mids)) {
+          const uiSymbol = `${coin}-USDC`;
+          const existing = currentMap[uiSymbol];
+          if (existing) {
+            updates[uiSymbol] = { ...existing, markPx: midPx as string, midPx: midPx as string };
+          }
+        }
+        if (Object.keys(updates).length > 0) {
+          useTickerStore.getState().setMultipleAssetCtxs(updates);
+        }
+      }
+
       if (data.channel === 'webData2' && data.data) {
         const assetCtxs = data.data.assetCtxs;
         const meta = data.data.meta;
         if (Array.isArray(assetCtxs) && meta?.universe) {
-          const contexts: Record<string, import('../../core/stores/tickerStore').AssetCtx> = {};
+          const contexts: Record<string, AssetCtx> = {};
           assetCtxs.forEach((ctx: any, index: number) => {
             const coin = meta.universe[index]?.name;
             if (coin) {

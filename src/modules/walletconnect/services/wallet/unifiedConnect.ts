@@ -60,23 +60,43 @@ export async function connectUnified(
 
     const session = await new Promise<any>((resolve, reject) => {
       const timeout = setTimeout(() => {
+        console.warn(
+          `[WalletConnect:${networkTag}] Connection timed out after ${CONNECTION_TIMEOUT_MS / 1000}s`
+        );
         modal!.closeModal();
         reject(new Error('Connection timeout'));
       }, CONNECTION_TIMEOUT_MS);
 
+      // Guard flag: once provider.connect() resolves, modal-close must NOT reject
+      let sessionResolved = false;
       let modalOpened = false;
+
       const unsubscribe = modal!.subscribeModal(state => {
         if (state.open) {
           modalOpened = true;
+          console.info(
+            `[WalletConnect:${networkTag}] QR modal opened — waiting for wallet approval...`
+          );
         } else if (modalOpened && !state.open) {
-          clearTimeout(timeout);
-          unsubscribe();
-          provider.abortPairing?.();
-          reject(new Error('User closed the modal'));
+          // Modal closed — only treat as cancel if session hasn't resolved yet
+          if (!sessionResolved) {
+            console.info(
+              `[WalletConnect:${networkTag}] Modal closed before session resolved — treating as user cancel`
+            );
+            clearTimeout(timeout);
+            unsubscribe();
+            provider.abortPairing?.();
+            reject(new Error('User closed the modal'));
+          } else {
+            console.debug(
+              `[WalletConnect:${networkTag}] Modal closed after session resolved — ignoring`
+            );
+          }
         }
       });
 
       provider.on('display_uri', (uri: string) => {
+        console.info(`[WalletConnect:${networkTag}] WC URI generated — opening modal/deeplink`);
         ctx.openMobileDeepLink(walletId, uri);
         if (!isMobileDevice() || walletId === 'walletconnect') {
           modal!.openModal({ uri });
@@ -95,12 +115,21 @@ export async function connectUnified(
       provider
         .connect({ ...namespaces })
         .then((s: any) => {
+          // Mark resolved FIRST — before closing modal — to prevent false rejection
+          sessionResolved = true;
+          console.info(
+            `[WalletConnect:${networkTag}] ✓ provider.connect() resolved — session established`
+          );
           clearTimeout(timeout);
           unsubscribe();
           modal!.closeModal();
           resolve(s);
         })
         .catch((err: any) => {
+          console.error(
+            `[WalletConnect:${networkTag}] ✕ provider.connect() failed:`,
+            err?.message ?? err
+          );
           clearTimeout(timeout);
           unsubscribe();
           modal!.closeModal();

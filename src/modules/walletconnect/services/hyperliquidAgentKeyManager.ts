@@ -2,11 +2,20 @@ import { HttpTransport } from '@nktkas/hyperliquid';
 import { approveAgent } from '@nktkas/hyperliquid/api/exchange';
 import { BrowserProvider, Wallet } from 'ethers';
 
+import { useWalletStore } from '../store/walletConnectStore';
 import { destroyAESKey, generateAndStoreAESKey, retrieveAESKey } from './keyVaultIndexedDB';
 
-const BLOB_KEY = '_sx_hl_agentkey';
-const ADDR_KEY = '_sx_hl_agentaddr';
+const BLOB_KEY_PREFIX = '_sx_hl_agentkey';
+const ADDR_KEY_PREFIX = '_sx_hl_agentaddr';
 const AGENT_NAME = 'SwiftExDesktop';
+
+function getBlobKey(isTestnet: boolean = false) {
+  return `${BLOB_KEY_PREFIX}_${isTestnet ? 'testnet' : 'mainnet'}`;
+}
+
+function getAddrKey(isTestnet: boolean = false) {
+  return `${ADDR_KEY_PREFIX}_${isTestnet ? 'testnet' : 'mainnet'}`;
+}
 
 function toBase64(buf: Uint8Array): string {
   let b = '';
@@ -60,8 +69,10 @@ export interface HyperliquidAgentKey {
 export async function deriveHyperliquidAgentKey(
   evmAddress: string,
   provider: any,
-  isTestnet: boolean = false
+  isTestnet?: boolean
 ): Promise<HyperliquidAgentKey> {
+  const activeTestnet =
+    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
   const browserProvider = new BrowserProvider(provider);
   const signer = await browserProvider.getSigner(evmAddress);
 
@@ -70,8 +81,9 @@ export async function deriveHyperliquidAgentKey(
   console.groupCollapsed('[hyperliquid] deriveHyperliquidAgentKey');
   console.log('evmAddress (signer):', evmAddress);
   console.log('agentWallet.address:', agentWallet.address);
+  console.log('isTestnet:', activeTestnet);
 
-  const transport = new HttpTransport({ isTestnet });
+  const transport = new HttpTransport({ isTestnet: activeTestnet });
 
   try {
     await approveAgent(
@@ -98,7 +110,12 @@ export async function deriveHyperliquidAgentKey(
   };
 }
 
-export async function encryptAndStoreAgentKey(privKeyHex: string): Promise<string> {
+export async function encryptAndStoreAgentKey(
+  privKeyHex: string,
+  isTestnet?: boolean
+): Promise<string> {
+  const activeTestnet =
+    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
   let aesKey = await retrieveAESKey();
   if (!aesKey) aesKey = await generateAndStoreAESKey();
 
@@ -109,19 +126,23 @@ export async function encryptAndStoreAgentKey(privKeyHex: string): Promise<strin
   const blob = await encryptBytes(keyBytes, aesKey);
   keyBytes.fill(0);
 
-  localStorage.setItem(BLOB_KEY, JSON.stringify(blob));
-  localStorage.setItem(ADDR_KEY, agentWallet.address);
+  localStorage.setItem(getBlobKey(activeTestnet), JSON.stringify(blob));
+  localStorage.setItem(getAddrKey(activeTestnet), agentWallet.address);
 
   return agentWallet.address;
 }
 
-export async function restoreAgentWallet(): Promise<Wallet | null> {
-  const raw = localStorage.getItem(BLOB_KEY);
+export async function restoreAgentWallet(isTestnet?: boolean): Promise<Wallet | null> {
+  const activeTestnet =
+    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
+  const raw =
+    localStorage.getItem(getBlobKey(activeTestnet)) ||
+    (!activeTestnet ? localStorage.getItem(BLOB_KEY_PREFIX) : null);
   if (!raw) return null;
 
   const aesKey = await retrieveAESKey();
   if (!aesKey) {
-    purgeAgentKey();
+    purgeAgentKey(activeTestnet);
     return null;
   }
 
@@ -129,7 +150,7 @@ export async function restoreAgentWallet(): Promise<Wallet | null> {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    purgeAgentKey();
+    purgeAgentKey(activeTestnet);
     return null;
   }
 
@@ -141,25 +162,44 @@ export async function restoreAgentWallet(): Promise<Wallet | null> {
     return new Wallet(privKeyHex);
   } catch {
     if (keyBytes) keyBytes.fill(0);
-    purgeAgentKey();
+    purgeAgentKey(activeTestnet);
     return null;
   }
 }
 
-export function getStoredAgentAddress(): string | null {
-  return localStorage.getItem(ADDR_KEY);
+export function getStoredAgentAddress(isTestnet?: boolean): string | null {
+  const activeTestnet =
+    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
+  return (
+    localStorage.getItem(getAddrKey(activeTestnet)) ||
+    (!activeTestnet ? localStorage.getItem(ADDR_KEY_PREFIX) : null)
+  );
 }
 
-export function hasStoredAgentKey(): boolean {
-  return !!localStorage.getItem(BLOB_KEY);
+export function hasStoredAgentKey(isTestnet?: boolean): boolean {
+  const activeTestnet =
+    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
+  return !!(
+    localStorage.getItem(getBlobKey(activeTestnet)) ||
+    (!activeTestnet && localStorage.getItem(BLOB_KEY_PREFIX))
+  );
 }
 
-export function purgeAgentKey(): void {
-  localStorage.removeItem(BLOB_KEY);
-  localStorage.removeItem(ADDR_KEY);
+export function purgeAgentKey(isTestnet?: boolean): void {
+  if (isTestnet !== undefined) {
+    localStorage.removeItem(getBlobKey(isTestnet));
+    localStorage.removeItem(getAddrKey(isTestnet));
+  } else {
+    localStorage.removeItem(getBlobKey(false));
+    localStorage.removeItem(getAddrKey(false));
+    localStorage.removeItem(getBlobKey(true));
+    localStorage.removeItem(getAddrKey(true));
+    localStorage.removeItem(BLOB_KEY_PREFIX);
+    localStorage.removeItem(ADDR_KEY_PREFIX);
+  }
 }
 
-export async function purgeAgentKeyAndAes(): Promise<void> {
-  purgeAgentKey();
+export async function purgeAgentKeyAndAes(isTestnet?: boolean): Promise<void> {
+  purgeAgentKey(isTestnet);
   await destroyAESKey();
 }

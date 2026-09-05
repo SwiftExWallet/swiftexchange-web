@@ -1,4 +1,4 @@
-import { ASTER_ENDPOINTS, ASTER_REST_URL } from '../constants';
+import { ASTER_ENDPOINTS, getAsterRestUrl } from '../constants';
 
 export interface AggTradeData {
   a: number; // Aggregate tradeId
@@ -11,7 +11,7 @@ export interface AggTradeData {
 }
 
 export async function getAggTrades(symbol: string, limit: number = 80): Promise<AggTradeData[]> {
-  const url = `${ASTER_REST_URL}${ASTER_ENDPOINTS.AGG_TRADES}?symbol=${symbol}&limit=${limit}`;
+  const url = `${getAsterRestUrl()}${ASTER_ENDPOINTS.AGG_TRADES}?symbol=${symbol}&limit=${limit}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch agg trades: ${response.statusText}`);

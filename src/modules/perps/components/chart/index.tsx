@@ -16,11 +16,7 @@ import { ChartHeader } from './components/ChartHeader';
 import { DrawingStyleBar, DrawingToolbar, ScaleModeToggle } from './components/DrawingToolbar';
 import { IndicatorSettingsModal } from './components/IndicatorSettingsModal';
 import { Legend } from './components/Legend';
-import {
-  HistoryLoadingOverlay,
-  MarketTransitionOverlay,
-  Watermark,
-} from './components/LoadingOverlay';
+import { HistoryLoadingOverlay, MarketTransitionOverlay } from './components/LoadingOverlay';
 import { hydrateDrawing } from './constants/drawingClassMap';
 import { useChartData } from './hooks/useChartData';
 import { useChartDrawings } from './hooks/useChartDrawings';
@@ -713,7 +709,6 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
         className="flex-1 bg-secondary relative overflow-hidden min-h-[200px]"
         style={{ touchAction: 'none' }}
       >
-        <Watermark market={selectedMarket} isMobile={isMobile} isDark={isDark} />
         <HistoryLoadingOverlay isFetchingMore={isFetchingMore} />
         <DrawingToolbar
           show={showDrawingToolbar}

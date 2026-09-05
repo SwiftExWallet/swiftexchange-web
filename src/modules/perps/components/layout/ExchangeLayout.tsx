@@ -8,6 +8,7 @@ import {
   ExchangeOrderFormPanel,
   ExchangeRightPanel,
 } from './ExchangeRightPanel';
+import { ExchangeSwitchingOverlay } from './ExchangeSwitchingOverlay';
 import { ExchangeTopBar } from './ExchangeTopBar';
 import { MobileOrderSheet } from './MobileOrderSheet';
 import { OrderbookPanel } from './OrderbookPanel';
@@ -84,12 +85,14 @@ export const ExchangeLayout: React.FC<ExchangeLayoutProps> = ({ sidebar }) => {
         <MobileOrderSheet isOpen={isOrderSheetOpen} onClose={() => setIsOrderSheetOpen(false)}>
           <ExchangeRightPanel />
         </MobileOrderSheet>
+
+        <ExchangeSwitchingOverlay />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-60px)] w-full bg-primary font-body text-primary overflow-x-hidden overflow-y-auto">
+    <div className="flex flex-col h-[calc(100vh-60px)] w-full bg-primary font-body text-primary overflow-x-hidden overflow-y-auto relative">
       {sidebar}
 
       <div className="flex flex-col flex-1 p-1 gap-1 min-w-0 max-w-full h-full min-h-0">
@@ -115,6 +118,8 @@ export const ExchangeLayout: React.FC<ExchangeLayoutProps> = ({ sidebar }) => {
           </div>
         </div>
       </div>
+
+      <ExchangeSwitchingOverlay />
     </div>
   );
 };

@@ -18,21 +18,25 @@ interface TickerStoreState {
   setAssetCtx: (market: string, ctx: AssetCtx) => void;
   setMultipleAssetCtxs: (contexts: Record<string, AssetCtx>) => void;
   getAssetCtx: (market: string) => AssetCtx | undefined;
+  clear: () => void;
 }
 
 export const useTickerStore = create<TickerStoreState>((set, get) => ({
   assetCtxByMarket: {},
-  setAssetCtx: (market, ctx) => set((state) => ({
-    assetCtxByMarket: {
-      ...state.assetCtxByMarket,
-      [market]: ctx,
-    }
-  })),
-  setMultipleAssetCtxs: (contexts) => set((state) => ({
-    assetCtxByMarket: {
-      ...state.assetCtxByMarket,
-      ...contexts
-    }
-  })),
-  getAssetCtx: (market) => get().assetCtxByMarket[market],
+  setAssetCtx: (market, ctx) =>
+    set(state => ({
+      assetCtxByMarket: {
+        ...state.assetCtxByMarket,
+        [market]: ctx,
+      },
+    })),
+  setMultipleAssetCtxs: contexts =>
+    set(state => ({
+      assetCtxByMarket: {
+        ...state.assetCtxByMarket,
+        ...contexts,
+      },
+    })),
+  getAssetCtx: market => get().assetCtxByMarket[market],
+  clear: () => set({ assetCtxByMarket: {} }),
 }));

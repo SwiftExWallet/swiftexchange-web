@@ -16,13 +16,14 @@ import {
   isEvmChain,
   normalizeTokenForDisplay,
 } from '../../Chainregistry';
-import { ARB, AVAX, BASE, BSC, CHAINS, ETH, OPT, POL, STR } from '../chains';
+import { ARB, AVAX, BASE, BSC, CHAINS, ETH, OPT, POL, STR, STR_TESTNET } from '../chains';
 import {
   AGGREGATOR_NATIVE_ADDRESS,
   ASSET_CDN_BASE,
   EXPLORER_URLS,
   GET_LOGO_URL,
   GET_RESOURCES_LIST_URL,
+  GET_STELLAR_TOKEN_LIST_URL,
   GET_TOKEN_LOGO_URL,
   NATIVE_ADDRESS,
   RESOURCE_BASE_URL,
@@ -50,6 +51,7 @@ describe('EVM Asset Management - Constants', () => {
     expect(RPC_URLS.BSC_TESTNET.length).toBeGreaterThan(0);
     expect(RPC_URLS.AMOY.length).toBeGreaterThan(0);
     expect(RPC_URLS.STR.length).toBeGreaterThan(0);
+    expect(RPC_URLS.STR_TESTNET.length).toBeGreaterThan(0);
   });
 
   it('maps primary RPC URLs matching RPC_URLS first entries', () => {
@@ -61,6 +63,7 @@ describe('EVM Asset Management - Constants', () => {
     expect(RPC.BASERPC).toBe(RPC_URLS.BASE[0]);
     expect(RPC.BSCRPC).toBe(RPC_URLS.BNB[0]);
     expect(RPC.STRRPC).toBe(RPC_URLS.STR[0]);
+    expect(RPC.STRRPC_TESTNET).toBe(RPC_URLS.STR_TESTNET[0]);
   });
 
   it('provides block explorer base URLs for all chains', () => {
@@ -133,13 +136,18 @@ describe('EVM Asset Management - Chains Registry Configuration', () => {
     expect(BSC.symbol).toBe('BNB');
   });
 
-  it('contains Stellar non-EVM chain configuration', () => {
+  it('contains Stellar non-EVM chain configuration for Mainnet and Testnet', () => {
     expect(STR.chainId).toBe('pubnet');
     expect(STR.nativeChainKey).toBe('stellar');
+    expect(STR.bridgeSupportTokens.length).toBeGreaterThan(0);
+
+    expect(STR_TESTNET.chainId).toBe('testnet');
+    expect(STR_TESTNET.nativeChainKey).toBe('stellar');
+    expect(STR_TESTNET.bridgeSupportTokens.length).toBeGreaterThan(0);
   });
 
   it('verifies all CHAINS entries conform to IChain interface', () => {
-    const chainKeys = ['ETH', 'ARB', 'POL', 'OPT', 'AVAX', 'BASE', 'BNB', 'STR'];
+    const chainKeys = ['ETH', 'ARB', 'POL', 'OPT', 'AVAX', 'BASE', 'BNB', 'STR', 'STR_TESTNET'];
     for (const key of chainKeys) {
       const chain = CHAINS[key];
       expect(chain).toBeDefined();
@@ -319,5 +327,32 @@ describe('EVM Chainregistry Integration with Asset Management', () => {
 
     const ethTokenAddresses = getTokenAddressesForChain(1);
     expect(ethTokenAddresses.USDT).toBeDefined();
+  });
+
+  it('correctly resolves and isolates Stellar Mainnet (pubnet) and Stellar Testnet (testnet)', () => {
+    const pubnetChain = getChainById('pubnet');
+    const testnetChain = getChainById('testnet');
+
+    expect(pubnetChain).toBeDefined();
+    expect(testnetChain).toBeDefined();
+
+    expect(pubnetChain?.chainId).toBe('pubnet');
+    expect(pubnetChain?.networkType).toBe('mainnet');
+    expect(testnetChain?.chainId).toBe('testnet');
+    expect(testnetChain?.networkType).toBe('testnet');
+
+    // Mainnet USDC uses Circle Mainnet Issuer
+    const pubnetUsdc = pubnetChain?.assets.find(a => a.symbol === 'USDC');
+    expect(pubnetUsdc).toBeDefined();
+    expect(pubnetUsdc?.address).toBe('GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN');
+
+    // Testnet USDC uses Circle Testnet Issuer
+    const testnetUsdc = testnetChain?.assets.find(a => a.symbol === 'USDC');
+    expect(testnetUsdc).toBeDefined();
+    expect(testnetUsdc?.address).toBe('GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5');
+
+    // Token list resolution per network
+    expect(GET_STELLAR_TOKEN_LIST_URL('mainnet')).toContain('stellar_tokens.json');
+    expect(GET_STELLAR_TOKEN_LIST_URL('testnet')).toContain('stellar_testnet_tokens.json');
   });
 });

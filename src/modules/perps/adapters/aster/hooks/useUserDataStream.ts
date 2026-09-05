@@ -9,7 +9,7 @@ import { useAccountStore } from '../../../core/stores/accountStore';
 import { useHistoryStore } from '../../../core/stores/historyStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
-import { ASTER_WS_URL } from '../constants';
+import { getAsterWsUrl } from '../constants';
 import { useListenKey } from './useListenKey';
 
 export interface MarginCallPosition {
@@ -215,7 +215,7 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
   useEffect(() => {
     if (!listenKey) return;
 
-    const ws = new WebSocket(`${ASTER_WS_URL}/${listenKey}`);
+    const ws = new WebSocket(`${getAsterWsUrl()}/${listenKey}`);
     wsRef.current = ws;
 
     ws.onopen = () => {

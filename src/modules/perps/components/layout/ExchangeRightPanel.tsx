@@ -1,14 +1,11 @@
-import { AlertCircle, HelpCircle, KeyRound, Loader2 } from 'lucide-react';
+import { HelpCircle, Sparkles } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { useNotificationStore } from '../../../../store/notificationStore';
-import { useAsterAgent, useAsterAgentStore } from '../../adapters/aster/hooks/useAsterAgent';
+import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
 import { useAsterDataSync } from '../../adapters/aster/hooks/useAsterDataSync';
 import { useOrders } from '../../adapters/aster/hooks/useOrders';
-import {
-  useHyperliquidAgent,
-  useHyperliquidAgentStore,
-} from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
+import { useHyperliquidAgent } from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
 import { useHyperliquidDataStream } from '../../adapters/hyperliquid/hooks/useHyperliquidDataStream';
 import { useExchangeManager } from '../../core/ExchangeManager';
 import { useAccountStore } from '../../core/stores/accountStore';
@@ -60,38 +57,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
   const hyperliquidAgent = useHyperliquidAgent();
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const activeAgent = currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
-  const { userAddr, isReady, deriveState, error: deriveError, deriveAgentKey } = activeAgent;
-
-  const isDepositError = deriveState === 'error' && deriveError?.message?.includes('Must deposit');
-
-  const handleActionClick = async () => {
-    if (isDepositError) {
-      setAccountModalTab('deposit');
-      setActiveModal('account');
-      return;
-    }
-
-    let timeoutId: any;
-    try {
-      timeoutId = setTimeout(() => {
-        const state =
-          currentExchange === 'hyperliquid'
-            ? useHyperliquidAgentStore.getState()
-            : useAsterAgentStore.getState();
-        if (state.deriveState === 'signing') {
-          state.setDeriveState('error');
-          state.setError(
-            new Error('Signature request timed out after 1 minute. Please try again.')
-          );
-        }
-      }, 60000);
-      await deriveAgentKey();
-    } catch (e) {
-      console.error('Failed to derive agent key:', e);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  };
+  const { userAddr } = activeAgent;
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
 
   useAsterDataSync(asterAgent.asterSigner, userAddr);
@@ -289,69 +255,6 @@ export const ExchangeOrderFormPanel: React.FC = () => {
 
   return (
     <div className="bg-secondary border border-color rounded-lg h-full min-h-0 flex flex-col overflow-hidden relative">
-      {userAddr && !isReady && (
-        <div className="absolute inset-0 z-50 backdrop-blur-xl bg-black/60 flex flex-col items-center justify-center p-6 text-center transition-all duration-300">
-          <div className="relative overflow-hidden bg-tertiary/80 border border-white/10 rounded-2xl p-6 sm:p-8 max-w-[320px] w-full shadow-2xl flex flex-col items-center">
-            {/* Background effects */}
-            <div className="absolute -top-20 -right-20 w-40 h-40 bg-brand/20 blur-[50px] rounded-full pointer-events-none" />
-            <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-brand/10 blur-[50px] rounded-full pointer-events-none" />
-
-            <div className="relative z-10 flex flex-col items-center w-full">
-              <div className="relative mb-5">
-                <div
-                  className={`absolute inset-0 bg-brand/20 blur-xl rounded-full ${deriveState === 'signing' ? 'animate-pulse' : ''}`}
-                />
-                <div className="w-14 h-14 bg-secondary/80 border border-white/10 rounded-full flex items-center justify-center relative shadow-inner">
-                  {deriveState === 'signing' ? (
-                    <Loader2 className="w-6 h-6 text-brand animate-spin" />
-                  ) : deriveState === 'error' ? (
-                    <AlertCircle className="w-6 h-6 text-red-500" />
-                  ) : (
-                    <KeyRound className="w-6 h-6 text-brand" />
-                  )}
-                </div>
-              </div>
-
-              <h3 className="text-base font-black text-white mb-2 tracking-tight">
-                {deriveState === 'signing'
-                  ? 'Approve in Wallet'
-                  : deriveState === 'error'
-                    ? 'Authorization Failed'
-                    : 'Trading Authorization'}
-              </h3>
-
-              <p className="text-xs text-muted mb-6 max-w-[240px] leading-relaxed">
-                {deriveState === 'signing'
-                  ? 'Please check your connected wallet and approve the signature request to enable trading.'
-                  : deriveState === 'error'
-                    ? deriveError?.message ||
-                      'The request was rejected or timed out. Please try again.'
-                    : 'Sign a one-time request to verify your wallet and enable gas-free trading.'}
-              </p>
-
-              <button
-                type="button"
-                onClick={handleActionClick}
-                disabled={deriveState === 'signing'}
-                className="w-full relative overflow-hidden group bg-brand hover:bg-brand-hover text-white rounded-xl py-3 font-bold text-xs transition-all duration-300 shadow-[0_0_20px_rgba(var(--color-brand-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--color-brand-rgb),0.5)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
-              >
-                <span className="relative z-10">
-                  {isDepositError
-                    ? 'Deposit Funds'
-                    : deriveState === 'signing'
-                      ? 'Waiting for Approval...'
-                      : deriveState === 'error'
-                        ? 'Try Again'
-                        : 'Prepare Wallet'}
-                </span>
-                {!deriveState || deriveState !== 'signing' ? (
-                  <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
-                ) : null}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       <OrderForm
         onSubmitOrder={handlePlaceOrder}
         isLoading={isSubmitting}
@@ -379,6 +282,7 @@ export const ExchangeAccountPanel: React.FC = () => {
   const asterAgent = useAsterAgent();
   const hyperliquidAgent = useHyperliquidAgent();
   const currentExchange = useExchangeManager(s => s.currentExchange);
+  const currentNetwork = useExchangeManager(s => s.currentNetwork);
   const { isReady: isAsterReady } =
     currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
@@ -387,10 +291,10 @@ export const ExchangeAccountPanel: React.FC = () => {
     'margin' | 'leverage' | 'account' | 'assetMode' | null
   >(null);
   const [accountModalTab, setAccountModalTab] = useState<
-    'deposit' | 'withdraw' | 'transfer' | 'history'
+    'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet'
   >('deposit');
 
-  const handleOpenAccount = (tab: 'deposit' | 'withdraw' | 'transfer' | 'history') => {
+  const handleOpenAccount = (tab: 'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet') => {
     setAccountModalTab(tab);
     setActiveModal('account');
   };
@@ -413,30 +317,48 @@ export const ExchangeAccountPanel: React.FC = () => {
   return (
     <div className="bg-secondary border border-color rounded-lg p-3 space-y-2.5 h-full min-h-0 overflow-y-auto scrollbar-thin flex flex-col justify-between">
       <div className="space-y-2.5">
-        {/* 3 Action Buttons */}
-        <div className="flex gap-1.5">
+        {/* Action Buttons */}
+        {currentNetwork === 'testnet' ? (
           <button
             type="button"
-            onClick={() => handleOpenAccount('deposit')}
-            className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+            onClick={() => handleOpenAccount('faucet')}
+            className="w-full bg-gradient-to-r from-amber-500/20 to-brand/20 hover:from-amber-500/30 hover:to-brand/30 text-amber-300 border border-amber-500/40 py-2 rounded-md text-[12px] font-semibold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm"
           >
-            Deposit
+            <Sparkles size={14} className="text-amber-400" />
+            Claim Testnet Faucet
           </button>
-          <button
-            type="button"
-            onClick={() => handleOpenAccount('withdraw')}
-            className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
-          >
-            Withdraw
-          </button>
-          <button
-            type="button"
-            onClick={() => handleOpenAccount('transfer')}
-            className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
-          >
-            Transfer
-          </button>
-        </div>
+        ) : (
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => handleOpenAccount('deposit')}
+              className="flex-1 bg-brand hover:bg-brand-hover text-white py-1.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer text-center"
+            >
+              Deposit
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenAccount('withdraw')}
+              className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+            >
+              Withdraw
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenAccount('transfer')}
+              className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+            >
+              Transfer
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenAccount('history')}
+              className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+            >
+              History
+            </button>
+          </div>
+        )}
 
         {/* Account Equity Section */}
         <div className="space-y-1">

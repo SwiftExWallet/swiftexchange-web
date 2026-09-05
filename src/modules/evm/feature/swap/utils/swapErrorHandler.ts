@@ -275,13 +275,6 @@ export function translateErrorMessage(message: string): string {
     return 'Wallet provider error. Please reconnect your wallet and try again.';
   }
 
-  if (processedMessage.length > 150) {
-    if (lower.includes('balance') || lower.includes('underfunded')) {
-      return 'Transaction failed due to insufficient balance or reserve requirements.';
-    }
-    return 'The transaction failed. Please ensure your wallet is funded and try again.';
-  }
-
   return processedMessage;
 }
 

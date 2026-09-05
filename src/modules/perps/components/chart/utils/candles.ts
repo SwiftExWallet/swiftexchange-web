@@ -19,18 +19,54 @@ export function isValidCandle(c: {
 }
 
 export function normalizeCandles(raw: any[]): CandleBar[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+
   const mapped = raw
-    .map(c => ({
-      time: c.startedAtTime
-        ? Math.floor(c.startedAtTime / 1000)
-        : Math.floor(new Date(c.startedAt).getTime() / 1000),
-      open: parseFloat(c.open),
-      high: parseFloat(c.high),
-      low: parseFloat(c.low),
-      close: parseFloat(c.close),
-      volume: parseFloat(c.usdVolume),
-    }))
-    .filter(isValidCandle)
+    .map(c => {
+      if (!c) return null;
+      const rawTime = c.startedAtTime
+        ? c.startedAtTime > 1e11
+          ? Math.floor(c.startedAtTime / 1000)
+          : c.startedAtTime
+        : Math.floor(new Date(c.startedAt || 0).getTime() / 1000);
+
+      const open = parseFloat(c.open);
+      const high = parseFloat(c.high);
+      const low = parseFloat(c.low);
+      const close = parseFloat(c.close);
+      const rawVol = c.usdVolume !== undefined ? c.usdVolume : c.baseTokenVolume || c.volume || 0;
+      const volume = parseFloat(rawVol) || 0;
+
+      if (
+        !rawTime ||
+        isNaN(rawTime) ||
+        !isFinite(rawTime) ||
+        isNaN(open) ||
+        isNaN(high) ||
+        isNaN(low) ||
+        isNaN(close) ||
+        !isFinite(open) ||
+        !isFinite(high) ||
+        !isFinite(low) ||
+        !isFinite(close) ||
+        open <= 0 ||
+        high <= 0 ||
+        low <= 0 ||
+        close <= 0
+      ) {
+        return null;
+      }
+
+      return {
+        time: rawTime,
+        open,
+        high: Math.max(high, open, close),
+        low: Math.min(low, open, close),
+        close,
+        volume: isFinite(volume) && volume >= 0 ? volume : 0,
+      };
+    })
+    .filter((c): c is CandleBar => c !== null)
     .sort((a, b) => a.time - b.time);
 
   if (mapped.length === 0) return [];

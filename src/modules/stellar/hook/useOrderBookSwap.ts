@@ -35,6 +35,7 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
   const [service, setService] = useState<OrderBookSwapService | null>(null);
   const [isBuy, setIsBuyState] = useState(true);
   const hasSetDefaultPairRef = useRef(false);
+  const lastPairRef = useRef<string>('');
   const [fromToken, setFromToken] = useState<TokenInfo | null>(null);
   const [toToken, setToToken] = useState<TokenInfo | null>(null);
   const [amount, setAmount] = useState<string>('');
@@ -270,7 +271,13 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
           setOrderBook(book);
           if (key) globalOrderBookCache.set(key, book);
 
-          if (!price) {
+          const currentPairKey = `${base}-${counter}`;
+          const isNewPair = lastPairRef.current !== currentPairKey;
+          if (isNewPair) {
+            lastPairRef.current = currentPairKey;
+          }
+
+          if (isNewPair || !price) {
             const bestPrice = isBuy
               ? book.asks.length > 0
                 ? book.asks[0].price
@@ -387,13 +394,21 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
 
   // Calculate quote
   useEffect(() => {
-    if (!service || !amount || !price || !fromToken?.asset || !toToken?.asset) {
+    if (!service || !fromToken?.asset || !toToken?.asset) {
       setTotal('0');
       setQuote(null);
       return;
     }
 
-    setIsLoading(true);
+    const numAmount = parseFloat(amount || '0');
+    const numPrice = parseFloat(price || '0');
+
+    if (isNaN(numAmount) || isNaN(numPrice) || numAmount <= 0 || numPrice <= 0) {
+      setTotal('0');
+      setQuote(null);
+      return;
+    }
+
     try {
       const newTotal = service.calculateTotal(amount, price);
       setTotal(newTotal);
@@ -410,51 +425,52 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
       setError(null);
     } catch (err) {
       console.error('Failed to calculate quote:', err);
-      setError('Failed to calculate order quote');
-    } finally {
-      setIsLoading(false);
     }
   }, [amount, price, fromToken, toToken, slippageTolerance, service]);
 
   const setAmountPercentage = useCallback(
     (percentage: number) => {
-      if (!fromToken?.balance) {
-        setError('No balance available for selected token');
+      const activePayingToken = isBuy ? toToken : fromToken;
+      if (!activePayingToken?.balance) {
+        setError(`No ${activePayingToken?.code || ''} balance available`);
         return;
       }
 
-      const balance = parseFloat(fromToken.balance);
-      const reserve = fromToken.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
+      const balance = parseFloat(activePayingToken.balance);
+      const reserve = activePayingToken.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
       const availableBalance = Math.max(0, balance - reserve);
-      const newAmount = ((availableBalance * percentage) / 100).toFixed(7);
-      setAmount(newAmount);
+      const allocatedPayingAmount = (availableBalance * percentage) / 100;
+
+      if (isBuy) {
+        const numPrice = parseFloat(price);
+        if (!numPrice || numPrice <= 0) {
+          setError('Please enter a valid price first');
+          return;
+        }
+        const baseAmount = allocatedPayingAmount / numPrice;
+        setAmount(baseAmount.toFixed(7));
+      } else {
+        setAmount(allocatedPayingAmount.toFixed(7));
+      }
+      setError(null);
     },
-    [fromToken]
+    [isBuy, fromToken, toToken, subentryCount, price]
   );
 
   const setMaxAmount = useCallback(() => {
-    if (!fromToken?.balance) {
-      setError('No balance available for selected token');
-      return;
-    }
+    setAmountPercentage(100);
+  }, [setAmountPercentage]);
 
-    const balance = parseFloat(fromToken.balance);
-    const reserve = fromToken.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
-    const maxAmount = Math.max(0, balance - reserve);
-    setAmount(maxAmount.toFixed(7));
-  }, [fromToken, subentryCount]);
-
-  const toggleOrderType = useCallback(() => {
-    setIsBuyState(prev => !prev);
-    const temp = fromToken;
-    setFromToken(toToken);
-    setToToken(temp);
+  const setIsBuy = useCallback((val?: boolean | ((prev: boolean) => boolean)) => {
+    setIsBuyState(prev => {
+      const next = typeof val === 'function' ? val(prev) : typeof val === 'boolean' ? val : !prev;
+      return next;
+    });
     setAmount('');
-    setPrice('');
     setTotal('');
     setQuote(null);
     setError(null);
-  }, [fromToken, toToken]);
+  }, []);
 
   const buildTransaction = useCallback(
     async (options: LargeOrderOptions = {}): Promise<LargeOrderTransaction> => {
@@ -463,12 +479,13 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
       if (!quote) throw new Error('No quote available');
       if (!fromToken || !toToken) throw new Error('Please select both tokens');
 
+      const payingToken = isBuy ? toToken : fromToken;
       const requiredAmount = isBuy ? parseFloat(quote.total) : parseFloat(quote.amount);
-      const availableBalance = parseFloat(fromToken.balance || '0');
+      const availableBalance = parseFloat(payingToken.balance || '0');
 
       if (requiredAmount > availableBalance) {
         throw new Error(
-          `Insufficient ${fromToken.code} balance. Required: ${requiredAmount.toFixed(
+          `Insufficient ${payingToken.code} balance. Required: ${requiredAmount.toFixed(
             7
           )}, Available: ${availableBalance.toFixed(7)}`
         );
@@ -599,11 +616,12 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
     availableTokens,
     subentryCount,
     orderBook,
-    setIsBuy: toggleOrderType,
+    setIsBuy,
     setFromToken,
     setToToken,
     setAmount,
     setPrice,
+    setTotal,
     setSlippageTolerance,
     setAmountPercentage,
     setMaxAmount,

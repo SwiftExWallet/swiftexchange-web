@@ -48,11 +48,34 @@ async function parseError(res: Response): Promise<string> {
   return res.statusText;
 }
 
+function getConnectedWalletAddress(): string {
+  try {
+    const state = useWalletStore.getState();
+    const evmAddr = state.connectedWallets.evm?.address;
+    if (evmAddr) return evmAddr;
+    const stellarAddr = state.connectedWallets.stellar?.address;
+    if (stellarAddr) return stellarAddr;
+
+    // Fallback to session storage if store hasn't populated yet
+    const stored = localStorage.getItem('wallet_sessions');
+    if (stored) {
+      const data = JSON.parse(stored);
+      if (data.evm?.evmAddress) return data.evm.evmAddress;
+      if (data.stellar?.stellarAddress) return data.stellar.stellarAddress;
+    }
+  } catch {
+    /* ignore */
+  }
+  return '';
+}
+
 function makeHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = API_CONFIG.deviceAuth;
+  const walletAddress = getConnectedWalletAddress();
   return {
     'Content-Type': 'application/json',
     'x-auth-device-token': token,
+    ...(walletAddress ? { 'x-wallet-address': walletAddress } : {}),
     Authorization: token ? `Bearer ${token}` : '',
     ...extra,
   };
@@ -78,7 +101,7 @@ export async function fetchApiResponseFromProxy<T>(
   signal?: AbortSignal
 ): Promise<ApiResponse<T>> {
   const res = await fetchWithRetry(
-    `${API_CONFIG.proxyUrl}${endpoint}`,
+    `${API_CONFIG.serverUrl}${endpoint}`,
     {
       method,
       headers: makeHeaders(),

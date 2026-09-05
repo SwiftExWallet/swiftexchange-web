@@ -263,19 +263,34 @@ export const useWalletStore = create<WalletState & WalletActions>()(
 
     authenticateEvm: async () => {
       const evm = get().connectedWallets.evm;
+      const network = get().network;
+
       if (!evm) {
+        console.warn('[Auth:EVM] authenticateEvm called but no EVM wallet connected');
         return;
       }
       if (get().isAuthenticating) {
+        console.warn('[Auth:EVM] Already authenticating — skipping duplicate call');
         return;
       }
+
+      console.group(
+        `%c[Auth:EVM] Starting EVM authentication`,
+        'color: #6366f1; font-weight: bold;'
+      );
+      console.log('  Address  :', evm.address);
+      console.log('  Chain ID :', evm.chainId, `(network: ${network})`);
+      console.log('  Wallet   :', evm.walletId);
+      console.groupEnd();
 
       set({ isAuthenticating: true, authError: null });
 
       try {
         // 1. Check if we already have a valid session in DB/storage for this address
+        console.info('[Auth:EVM] Checking for existing auth session...');
         const existingSession = await restoreAuthSession(evm.address);
         if (existingSession) {
+          console.info('[Auth:EVM] ✓ Existing valid session found — skipping sign request');
           const hasStellar = Boolean(get().connectedWallets.stellar);
           const linked: ('evm' | 'stellar')[] = hasStellar ? ['evm', 'stellar'] : ['evm'];
 
@@ -289,22 +304,41 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           return;
         }
 
+        console.info('[Auth:EVM] No existing session — requesting wallet signature...');
+
         // 2. Otherwise request signature from wallet
         const provider = walletService.getProvider('evm');
         if (!provider) {
           throw new Error('EVM provider not found');
         }
 
-        const chainId =
+        // Always use chainId 1 (Ethereum mainnet) for SIWE signing.
+        // Testnet mode affects the Stellar chain only — EVM auth always
+        // goes through the mainnet signing flow regardless of network UI mode.
+        const rawChainId =
           typeof evm.chainId === 'number' ? evm.chainId : parseInt(String(evm.chainId), 10);
+        const signingChainId = rawChainId || 1;
 
-        const message = await buildSiweMessage(evm.address, chainId);
-        const signature = await walletService.signSiweMessage(evm.address, provider, message);
+        console.info(
+          `[Auth:EVM] Building SIWE message for address=${evm.address} chainId=${signingChainId}`
+        );
+        const message = await buildSiweMessage(evm.address, signingChainId);
 
+        console.info('[Auth:EVM] ➔ Sending personal_sign request to wallet...');
+        const signature = await walletService.signSiweMessage(
+          evm.address,
+          provider,
+          message,
+          signingChainId
+        );
+        console.info('[Auth:EVM] ✓ Signature received from wallet');
+
+        console.info('[Auth:EVM] Verifying signature on backend...');
         const { accessToken, expiresIn, refreshToken } = await verifySiwe(message, signature, {
           address: evm.address,
-          chainId,
+          chainId: signingChainId,
         });
+        console.info('[Auth:EVM] ✓ Backend verification successful');
 
         await setAccessToken(
           {
@@ -312,7 +346,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
             expiresAt: Date.now() + expiresIn * 1000,
             refreshToken,
             address: evm.address,
-            chainId,
+            chainId: signingChainId,
           },
           evm.address
         );
@@ -320,6 +354,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         const hasStellar = Boolean(get().connectedWallets.stellar);
         const linked: ('evm' | 'stellar')[] = hasStellar ? ['evm', 'stellar'] : ['evm'];
 
+        console.info('[Auth:EVM] ✓ Authentication complete');
         set({
           isAuthenticated: true,
           isAuthenticating: false,
@@ -328,11 +363,13 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           linkedChains: linked,
         });
       } catch (error: any) {
+        const msg =
+          error?.message === 'USER_REJECTED' ? 'Signature rejected' : extractErrorMessage(error);
+        console.error('[Auth:EVM] ✕ Authentication failed:', error?.message ?? error);
         set(state => ({
           isAuthenticating: false,
           isAuthenticated: state.isAuthenticated,
-          authError:
-            error?.message === 'USER_REJECTED' ? 'Signature rejected' : extractErrorMessage(error),
+          authError: msg,
         }));
       }
     },

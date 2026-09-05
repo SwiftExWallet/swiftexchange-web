@@ -39,7 +39,6 @@ import {
   normalizeTokenForDisplay,
 } from '../../../utils/Chainregistry';
 import { switchOrAddChain } from '../../../utils/evmChainUtils';
-import { STELLAR_CHAIN_ID } from '../constants/swap.constants';
 import { useEvmSwap } from '../hooks/useEvmSwap';
 import { useNearIntentCrossChain } from '../hooks/useNearIntentCrossChain';
 import { useSwapAssetDefaults } from '../hooks/useSwapAssetDefaults';
@@ -113,7 +112,10 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   const [isFetchingStellarAssets, setIsFetchingStellarAssets] = useState(false);
 
   const actionType = useMemo(
-    () => (fromChainId === toChainId ? 'SWAP' : 'BRIDGE'),
+    () =>
+      fromChainId === toChainId || (isStellar(fromChainId) && isStellar(toChainId))
+        ? 'SWAP'
+        : 'BRIDGE',
     [fromChainId, toChainId]
   );
 
@@ -169,11 +171,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   const { isActive: isStellarAccountActive } = useStellarAccountStatus(stellarAddress);
 
   useEffect(() => {
-    if (
-      toChainId === STELLAR_CHAIN_ID &&
-      isStellarAccountActive === false &&
-      buyAssetSymbol !== 'XLM'
-    ) {
+    if (isStellar(toChainId) && isStellarAccountActive === false && buyAssetSymbol !== 'XLM') {
       setBuyAssetSymbol('XLM');
       setBuyAssetAddress('native');
     }
@@ -229,7 +227,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           balance: '0',
           decimals: chainAsset.decimals || 7,
           isNative: chainAsset.isNative,
-          chainId: STELLAR_CHAIN_ID,
+          chainId: fromChainId,
           address: chainAsset.address,
         };
       }
@@ -242,7 +240,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           balance: '0',
           decimals: 7,
           isNative: sellAssetSymbol === 'XLM',
-          chainId: STELLAR_CHAIN_ID,
+          chainId: fromChainId,
           address: sellAssetAddress || 'native',
         };
       }
@@ -310,7 +308,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           balance: '0',
           decimals: chainAsset.decimals || 7,
           isNative: chainAsset.isNative,
-          chainId: STELLAR_CHAIN_ID,
+          chainId: toChainId,
           address: chainAsset.address,
         };
       }
@@ -323,7 +321,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           balance: '0',
           decimals: 7,
           isNative: buyAssetSymbol === 'XLM',
-          chainId: STELLAR_CHAIN_ID,
+          chainId: toChainId,
           address: buyAssetAddress || 'native',
         };
       }
@@ -591,7 +589,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
               decimals: b.decimals || 7,
               isNative: b.asset.isNative(),
               asset: b.asset,
-              chainId: STELLAR_CHAIN_ID,
+              chainId: fromChainId,
               address: b.asset.isNative() ? 'native' : b.asset.getIssuer(),
               hasTrustline: b.hasTrustline,
             };
@@ -944,7 +942,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
               decimals: 7,
               isNative: b.asset.isNative(),
               asset: b.asset,
-              chainId: STELLAR_CHAIN_ID,
+              chainId: fromChainId,
               address: b.asset.isNative() ? 'native' : b.asset.getIssuer(),
             };
           });
@@ -1156,8 +1154,9 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                     defaultNetwork: fromChainId,
                     pairedChainId: toChainId,
                     onSelect: (a: any) => {
+                      const stellarTargetId = getStellarConfig(currentNetwork).chainId;
                       handleChainSelectInModal(
-                        isStellar(a.chainId) ? STELLAR_CHAIN_ID : Number(a.chainId),
+                        isStellar(a.chainId) ? stellarTargetId : Number(a.chainId),
                         true
                       );
                       setSellAssetSymbol(a.symbol);
@@ -1323,8 +1322,9 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                     defaultNetwork: fromChainId,
                     pairedChainId: fromChainId,
                     onSelect: (a: any) => {
+                      const stellarTargetId = getStellarConfig(currentNetwork).chainId;
                       handleChainSelectInModal(
-                        isStellar(a.chainId) ? STELLAR_CHAIN_ID : Number(a.chainId),
+                        isStellar(a.chainId) ? stellarTargetId : Number(a.chainId),
                         false
                       );
                       setBuyAssetSymbol(a.symbol);

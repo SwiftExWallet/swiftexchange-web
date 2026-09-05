@@ -1,19 +1,26 @@
+import type { PerpNetwork } from '../../core/config/networks';
 import type { PerpExchange } from '../../core/interfaces/exchange';
-import type { Market, OrderBook, Ticker, Candle } from '../../core/models';
-import { AsterWebSocket } from './websocket';
+import type { Candle, Market, OrderBook, Ticker } from '../../core/models';
+import { type AssetCtx, useTickerStore } from '../../core/stores/tickerStore';
+import { ASTER_ENDPOINTS, getAsterRestUrl } from './constants';
 import { AsterMapper } from './mapper';
-import { ASTER_REST_URL, ASTER_ENDPOINTS } from './constants';
-import { useTickerStore, type AssetCtx } from '../../core/stores/tickerStore';
+import { AsterWebSocket } from './websocket';
 
 export class AsterClient implements PerpExchange {
   private wsClient: AsterWebSocket;
+  public readonly network: PerpNetwork;
 
-  constructor() {
-    this.wsClient = AsterWebSocket.getInstance();
+  constructor(network: PerpNetwork = 'mainnet') {
+    this.network = network;
+    this.wsClient = AsterWebSocket.getInstance(network);
+  }
+
+  private get restUrl(): string {
+    return getAsterRestUrl(this.network);
   }
 
   public async connect(): Promise<void> {
-    await this.wsClient.connect();
+    await this.wsClient.connect(this.network);
   }
 
   public async disconnect(): Promise<void> {
@@ -22,14 +29,11 @@ export class AsterClient implements PerpExchange {
 
   public async getMarkets(): Promise<Market[]> {
     const [infoResponse, tickerResponse] = await Promise.all([
-      fetch(`${ASTER_REST_URL}${ASTER_ENDPOINTS.EXCHANGE_INFO}`),
-      fetch(`${ASTER_REST_URL}${ASTER_ENDPOINTS.TICKER_24HR}`),
+      fetch(`${this.restUrl}${ASTER_ENDPOINTS.EXCHANGE_INFO}`),
+      fetch(`${this.restUrl}${ASTER_ENDPOINTS.TICKER_24HR}`),
     ]);
 
-    const [infoData, tickerData] = await Promise.all([
-      infoResponse.json(),
-      tickerResponse.json(),
-    ]);
+    const [infoData, tickerData] = await Promise.all([infoResponse.json(), tickerResponse.json()]);
 
     if (!infoData || !infoData.symbols) return [];
 
@@ -51,7 +55,9 @@ export class AsterClient implements PerpExchange {
   public async getOrderBook(symbol: string): Promise<OrderBook> {
     const coin = this.extractCoinFromSymbol(symbol);
     const asterSymbol = `${coin}USDT`;
-    const response = await fetch(`${ASTER_REST_URL}${ASTER_ENDPOINTS.DEPTH}?symbol=${asterSymbol}&limit=100`);
+    const response = await fetch(
+      `${this.restUrl}${ASTER_ENDPOINTS.DEPTH}?symbol=${asterSymbol}&limit=100`
+    );
     const data = await response.json();
 
     return AsterMapper.mapOrderBook(symbol, data);
@@ -90,7 +96,7 @@ export class AsterClient implements PerpExchange {
     endTime: number
   ): Promise<Candle[]> {
     const asterSymbol = `${coin}USDT`;
-    const url = `${ASTER_REST_URL}${ASTER_ENDPOINTS.KLINES}?symbol=${asterSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=500`;
+    const url = `${this.restUrl}${ASTER_ENDPOINTS.KLINES}?symbol=${asterSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=500`;
     const response = await fetch(url);
     const data = await response.json();
 
@@ -102,13 +108,16 @@ export class AsterClient implements PerpExchange {
     return data.map((k: any) => AsterMapper.mapCandle(uiSymbol, interval, k));
   }
 
-
-  private async signedFetch(endpoint: string, params: Record<string, string> = {}, method = 'GET'): Promise<any> {
+  private async signedFetch(
+    endpoint: string,
+    params: Record<string, string> = {},
+    method = 'GET'
+  ): Promise<any> {
     const query = new URLSearchParams(params);
     query.append('timestamp', Date.now().toString());
     query.append('signature', 'DUMMY_SIGNATURE');
 
-    const url = `${ASTER_REST_URL}${endpoint}?${query.toString()}`;
+    const url = `${this.restUrl}${endpoint}?${query.toString()}`;
     const response = await fetch(url, {
       method,
       headers: {

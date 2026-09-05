@@ -16,7 +16,6 @@ export interface OrderBookState {
 
 interface OrderbookStoreState {
   books: Record<string, OrderBookState>;
-  // Raw Maps kept separately for O(1) upsert/delete — only converted on RAF
   _bidMaps: Record<string, Map<string, string>>;
   _askMaps: Record<string, Map<string, string>>;
 
@@ -48,7 +47,7 @@ function applyLevelsToMap(map: Map<string, string>, levels: OrderBookLevel[]): v
   }
 }
 
-function sortedBids(map: Map<string, string>, limit = 60): { price: string; size: string }[] {
+function sortedBids(map: Map<string, string>, limit = 50): { price: string; size: string }[] {
   const entries: [string, number][] = [];
   for (const price of map.keys()) {
     entries.push([price, Number(price)]);
@@ -63,7 +62,7 @@ function sortedBids(map: Map<string, string>, limit = 60): { price: string; size
   return result;
 }
 
-function sortedAsks(map: Map<string, string>, limit = 60): { price: string; size: string }[] {
+function sortedAsks(map: Map<string, string>, limit = 50): { price: string; size: string }[] {
   const entries: [string, number][] = [];
   for (const price of map.keys()) {
     entries.push([price, Number(price)]);
@@ -78,27 +77,42 @@ function sortedAsks(map: Map<string, string>, limit = 60): { price: string; size
   return result;
 }
 
+// Global RAF batch scheduler for smooth 60fps renders without React thrashing
+let rafPending = false;
+const pendingFlushes = new Set<string>();
+
 export const useOrderbookStore = create<OrderbookStoreState>((set, get) => ({
   books: {},
   _bidMaps: {},
   _askMaps: {},
 
   applySnapshot: (symbol, bids, asks, lastUpdateId) => {
-    const bidMap = new Map<string, string>();
-    const askMap = new Map<string, string>();
+    const state = get();
+    let bidMap = state._bidMaps[symbol];
+    let askMap = state._askMaps[symbol];
+
+    if (!bidMap) bidMap = new Map<string, string>();
+    else bidMap.clear();
+
+    if (!askMap) askMap = new Map<string, string>();
+    else askMap.clear();
 
     for (const { price, size } of bids) bidMap.set(price, size);
     for (const { price, size } of asks) askMap.set(price, size);
 
-    set(state => ({
-      _bidMaps: { ...state._bidMaps, [symbol]: bidMap },
-      _askMaps: { ...state._askMaps, [symbol]: askMap },
+    // Fast-path: Hyperliquid and REST snapshots already return sorted arrays
+    const formattedBids = bids.slice(0, 50).map(b => ({ price: b.price, size: b.size }));
+    const formattedAsks = asks.slice(0, 50).map(a => ({ price: a.price, size: a.size }));
+
+    set(s => ({
+      _bidMaps: { ...s._bidMaps, [symbol]: bidMap },
+      _askMaps: { ...s._askMaps, [symbol]: askMap },
       books: {
-        ...state.books,
+        ...s.books,
         [symbol]: {
           symbol,
-          bids: sortedBids(bidMap),
-          asks: sortedAsks(askMap),
+          bids: formattedBids,
+          asks: formattedAsks,
           lastUpdateId,
           isReady: true,
         },
@@ -114,6 +128,18 @@ export const useOrderbookStore = create<OrderbookStoreState>((set, get) => ({
 
     applyLevelsToMap(bidMap, bids);
     applyLevelsToMap(askMap, asks);
+
+    pendingFlushes.add(symbol);
+    if (!rafPending) {
+      rafPending = true;
+      requestAnimationFrame(() => {
+        rafPending = false;
+        pendingFlushes.forEach(sym => {
+          get().flushToState(sym);
+        });
+        pendingFlushes.clear();
+      });
+    }
   },
 
   flushToState: symbol => {

@@ -13,7 +13,7 @@ import {
   useLocalTransactions,
 } from '../hook/useLocalTransactions';
 import { type TransactionItem, getEvmTransactionHistory } from '../service/EvmTransactionService';
-import { type SwapOrder, updateSwapOrderStatus } from '../service/evmTransactionStatusService';
+import { type SwapOrder } from '../service/evmTransactionStatusService';
 import {
   findChain,
   getAssetByAddress,
@@ -24,11 +24,11 @@ import {
   getGlobalAssetMetadata,
 } from '../utils/Chainregistry';
 import { formatBlockNumber } from '../utils/blockNumber';
+import { checkTxStatus } from '../utils/checkTxStatus';
 import { formatAssetName, formatTxAmount, getDisplayAmountWithSign } from '../utils/formatAmount';
 import { rpcManager } from '../utils/rpcProvider';
 import TransactionDetailsSheet from './TransactionDetailsSheet';
 import TransactionDetailsView from './TransactionDetailsView';
-import { checkTxStatus } from './TransactionMonitor';
 
 type ViewType = 'recent' | 'stellar' | number;
 
@@ -157,13 +157,15 @@ const EvmTransactionHistory: React.FC = () => {
   const hasStellar = Boolean(stellarWallet);
   const availableChains = getEvmChainsForNetwork(currentNetwork);
 
-  const defaultView: ViewType = 'recent';
+  const defaultView: ViewType = !hasEvm && hasStellar ? 'stellar' : 'recent';
   const tabParam = searchParams.get('tab');
   const initialView: ViewType =
     tabParam === 'stellar'
       ? 'stellar'
       : tabParam === 'recent'
-        ? 'recent'
+        ? !hasEvm && hasStellar
+          ? 'stellar'
+          : 'recent'
         : tabParam && !isNaN(Number(tabParam))
           ? Number(tabParam)
           : defaultView;
@@ -185,6 +187,12 @@ const EvmTransactionHistory: React.FC = () => {
     Record<string, 'success' | 'failed'>
   >({});
   const [showPendingOnly, setShowPendingOnly] = useState(false);
+
+  useEffect(() => {
+    if (!hasEvm && hasStellar && selectedView !== 'stellar') {
+      setSelectedView('stellar');
+    }
+  }, [hasEvm, hasStellar, selectedView]);
 
   const {
     ordersData: backendOrders,
@@ -280,10 +288,6 @@ const EvmTransactionHistory: React.FC = () => {
                 ...prev,
                 [order.txHash.toLowerCase()]: newStatus,
               }));
-              await updateSwapOrderStatus({
-                txHash: order.txHash,
-                orderStatus: isSuccess ? 'completed' : 'failed',
-              }).catch(err => console.error('Failed to update status in DB:', err));
             }
           } catch (err) {
             console.error('Failed to verify pending backend order on-chain:', err);
@@ -579,10 +583,6 @@ const EvmTransactionHistory: React.FC = () => {
                 ...prev,
                 [tx.hash.toLowerCase()]: newStatus,
               }));
-              await updateSwapOrderStatus({
-                txHash: tx.hash,
-                orderStatus: isSuccess ? 'completed' : 'failed',
-              }).catch(err => console.error('Failed to update status in DB:', err));
             }
           } catch (err) {
             console.error('Failed to verify order on-chain:', err);
@@ -1530,12 +1530,6 @@ const EvmTransactionHistory: React.FC = () => {
                                   ...prev,
                                   [selectedLocalTx.hash.toLowerCase()]: newStatus,
                                 }));
-                                updateSwapOrderStatus({
-                                  txHash: selectedLocalTx.hash,
-                                  orderStatus: receipt.status === 1 ? 'completed' : 'failed',
-                                }).catch(err =>
-                                  console.error('Failed to update Uniswap status in DB:', err)
-                                );
                               }
                             })
                             .catch(err =>
@@ -1621,12 +1615,6 @@ const EvmTransactionHistory: React.FC = () => {
                                 ...prev,
                                 [selectedLocalTx.hash.toLowerCase()]: newStatus,
                               }));
-                              updateSwapOrderStatus({
-                                txHash: selectedLocalTx.hash,
-                                orderStatus: receipt.status === 1 ? 'completed' : 'failed',
-                              }).catch(err =>
-                                console.error('Failed to update Uniswap status in DB:', err)
-                              );
                             }
                           })
                           .catch(err =>

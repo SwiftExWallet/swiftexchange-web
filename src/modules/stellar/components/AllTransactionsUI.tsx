@@ -11,9 +11,8 @@ import {
   Search,
   Shield,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
-import { getExplorerUrl as getRegistryExplorerUrl } from '../../evm/utils/Chainregistry';
 import { WalletType } from '../../walletconnect/constants/Wallet';
 import { useWalletConnect } from '../../walletconnect/hooks/useWalletConnect';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
@@ -30,11 +29,10 @@ const AllTransactionsUI = ({ embedded = false }: AllTransactionsUIProps) => {
   const stellarWallet = connectedWallets[WalletType.STELLAR];
   const stellarAddress = stellarWallet?.address || '';
 
-  const { transactions, isLoading, error, hasMore, loadMore } = useAllTransactions({
+  const { transactions, isLoading, isLoadingMore, error, hasMore, loadMore } = useAllTransactions({
     userAddress: stellarAddress,
   });
 
-  console.log(isLoading, '=====================');
   const [filterType, setFilterType] = useState<TransactionType | 'ALL'>('ALL');
   const [dateFilter, setDateFilter] = useState<'ALL' | '7D' | '30D' | 'CUSTOM'>('ALL');
   const [customDate, setCustomDate] = useState<{ start: string; end: string }>({
@@ -68,36 +66,6 @@ const AllTransactionsUI = ({ embedded = false }: AllTransactionsUIProps) => {
 
     return matchesType && matchesDate;
   });
-
-  const [autoFetchCount, setAutoFetchCount] = useState(0);
-
-  useEffect(() => {
-    setAutoFetchCount(0);
-  }, [filterType, dateFilter, customDate.start, customDate.end]);
-
-  useEffect(() => {
-    if (
-      (filterType !== 'ALL' || dateFilter !== 'ALL') &&
-      filteredTransactions.length === 0 &&
-      hasMore &&
-      !isLoading &&
-      autoFetchCount < 10
-    ) {
-      if (dateFilter === 'CUSTOM' && (!customDate.start || !customDate.end)) return;
-      setAutoFetchCount(prev => prev + 1);
-      loadMore();
-    }
-  }, [
-    filterType,
-    dateFilter,
-    customDate.start,
-    customDate.end,
-    filteredTransactions.length,
-    hasMore,
-    isLoading,
-    autoFetchCount,
-    loadMore,
-  ]);
 
   if (!stellarWallet) {
     if (embedded) {
@@ -241,8 +209,10 @@ const AllTransactionsUI = ({ embedded = false }: AllTransactionsUIProps) => {
     }
   };
 
-  const chainId = network === 'mainnet' ? 'pubnet' : 'testnet';
-  const getExplorerUrl = (hash: string) => getRegistryExplorerUrl(chainId, 'tx', hash);
+  const getExplorerUrl = (hash: string) => {
+    const explorerNetwork = network === 'mainnet' ? 'public' : 'testnet';
+    return `https://stellar.expert/explorer/${explorerNetwork}/tx/${hash}`;
+  };
 
   const filterOptions: { label: string; value: TransactionType | 'ALL' }[] = [
     { label: 'All', value: 'ALL' },
@@ -363,7 +333,7 @@ const AllTransactionsUI = ({ embedded = false }: AllTransactionsUIProps) => {
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-muted">
                     <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin text-brand-primary" />
-                    <p className="animate-pulse">Scanning history for matching transactions...</p>
+                    <p className="animate-pulse">Loading transaction history...</p>
                   </td>
                 </tr>
               ) : (
@@ -425,11 +395,12 @@ const AllTransactionsUI = ({ embedded = false }: AllTransactionsUIProps) => {
                 <tr>
                   <td colSpan={5} className="p-0">
                     <div
-                      className="p-4 text-center bg-white/5 hover:bg-white/10 transition-colors cursor-pointer border-t border-white/5"
-                      onClick={!isLoading ? loadMore : undefined}
+                      className="p-4 text-center bg-white/5 hover:bg-white/10 transition-colors cursor-pointer border-t border-white/5 flex items-center justify-center gap-2"
+                      onClick={!isLoadingMore ? loadMore : undefined}
                     >
-                      <button disabled={isLoading} className="text-primary text-sm font-medium">
-                        {isLoading ? 'Loading...' : 'Load More History'}
+                      {isLoadingMore && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+                      <button disabled={isLoadingMore} className="text-primary text-sm font-medium">
+                        {isLoadingMore ? 'Loading More History...' : 'Load More History'}
                       </button>
                     </div>
                   </td>
@@ -447,7 +418,7 @@ const AllTransactionsUI = ({ embedded = false }: AllTransactionsUIProps) => {
           ) : filteredTransactions.length === 0 && isLoading ? (
             <div className="text-center py-12 text-muted">
               <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin text-brand-primary" />
-              <p className="animate-pulse">Scanning history...</p>
+              <p className="animate-pulse">Loading transaction history...</p>
             </div>
           ) : (
             filteredTransactions.map(tx => (
@@ -503,11 +474,12 @@ const AllTransactionsUI = ({ embedded = false }: AllTransactionsUIProps) => {
           )}
           {hasMore && (
             <div
-              className="p-4 rounded-xl border border-white/5 text-center bg-primary hover:bg-white/10 transition-colors cursor-pointer"
-              onClick={!isLoading ? loadMore : undefined}
+              className="p-4 rounded-xl border border-white/5 text-center bg-primary hover:bg-white/10 transition-colors cursor-pointer flex items-center justify-center gap-2"
+              onClick={!isLoadingMore ? loadMore : undefined}
             >
-              <button disabled={isLoading} className="text-primary text-sm font-medium">
-                {isLoading ? 'Loading...' : 'Load More History'}
+              {isLoadingMore && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+              <button disabled={isLoadingMore} className="text-primary text-sm font-medium">
+                {isLoadingMore ? 'Loading More History...' : 'Load More History'}
               </button>
             </div>
           )}

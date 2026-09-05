@@ -1,13 +1,13 @@
-import { HttpTransport } from '../../core/transport/http';
 import type { OrderBook } from '../../core/models';
 import { orderBookStore } from '../../core/stores/orderbookStore';
+import { HttpTransport } from '../../core/transport/http';
 import { HyperliquidMapper } from './mapper';
 import type { HlL2BookResponse } from './mapper';
 
 export class HyperliquidOrderBook extends HttpTransport {
-  constructor() {
+  constructor(baseUrl: string = 'https://api.hyperliquid.xyz') {
     super({
-      baseUrl: 'https://api.hyperliquid.xyz',
+      baseUrl,
       timeoutMs: 15000,
       maxRetries: 3,
     });
@@ -20,7 +20,7 @@ export class HyperliquidOrderBook extends HttpTransport {
     });
 
     const mapped = HyperliquidMapper.mapOrderBook(response);
-    
+
     // Seed our local store snapshot
     orderBookStore.applySnapshot(mapped.symbol, mapped.bids, mapped.asks, mapped.updateId ?? 0);
 

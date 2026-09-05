@@ -14,20 +14,27 @@ import { useSearchParams } from 'react-router-dom';
 import { useTransactionModalStore } from '../../../../store/transactionModalStore';
 import { getTokenIcon } from '../../../evm/utils/ChainUrlHelpers';
 import { getChainById } from '../../../evm/utils/Chainregistry';
+import { useIsMobile } from '../../../perps/components/chart/hooks/useIsMobile';
 import { WalletType } from '../../../walletconnect/constants/Wallet';
 import { useWalletConnect } from '../../../walletconnect/hooks/useWalletConnect';
 import { useWalletStore } from '../../../walletconnect/store/walletConnectStore';
 import { portfolioUtils } from '../../../walletconnect/utils/portfolioUtils';
 import { SUCCESS_MESSAGES, UI_STRINGS } from '../../constants/ammSwapConstants';
 import { useAmmSwap } from '../../hook/useAmmSwap';
+import { useStickySidebar } from '../../hook/useStickySidebar';
 import { useAmmSwapStore } from '../../store/ammSwapStore';
+import { StellarAccountPanel } from '../account/StellarAccountPanel';
 import StellarAssetSelectorModal from '../modals/StellarAssetSelectorModal';
 import { SettingsPanel, SwapDetails } from './AmmSwapSubComponents';
 import { XlmReserveButton } from './XlmReserveInfo';
 
 const StellarTradingChart = lazy(() => import('../chart/StellarTradingChart'));
+const TradeTransactionUI = lazy(() => import('../TradeTransactionUI'));
 
 const AmmSwapUI = () => {
+  const isMobile = useIsMobile();
+  const { sidebarRef, stickyStyle } = useStickySidebar();
+  const [mobileTab, setMobileTab] = useState<'swap' | 'chart'>('swap');
   const [showSettings, setShowSettings] = useState(false);
   const [swapStatus, setSwapStatus] = useState<'pending' | 'success' | null>(null);
   const [selectingAssetFor, setSelectingAssetFor] = useState<'from' | 'to' | null>(null);
@@ -495,29 +502,134 @@ const AmmSwapUI = () => {
   );
 
   return (
-    <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 h-full overflow-y-auto lg:overflow-visible">
-      <div className="w-full h-[300px] bg-[var(--color-bg-secondary)] lg:h-auto lg:flex-1 rounded-2xl overflow-hidden shrink-0 border border-[var(--color-border)]/60 shadow-sm">
-        <Suspense
-          fallback={
-            <div className="w-full h-full flex items-center justify-center bg-secondary">
-              <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
+    <>
+      {isMobile ? (
+        /* ============ MOBILE-OPTIMIZED 2-TAB AMM SWAP LAYOUT ============ */
+        <div className="flex flex-col gap-2 w-full">
+          {/* Segmented Switcher: Swap vs Chart */}
+          <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/60 rounded-xl p-1 mb-1">
+            <button
+              onClick={() => setMobileTab('swap')}
+              className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                mobileTab === 'swap'
+                  ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              Swap
+            </button>
+            <button
+              onClick={() => setMobileTab('chart')}
+              className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                mobileTab === 'chart'
+                  ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              Chart
+            </button>
+          </div>
+
+          {mobileTab === 'swap' ? (
+            <>
+              {/* Swap Form on Mobile - Top Priority */}
+              <div className="w-full bg-[var(--color-bg-secondary)] p-4 sm:p-5 rounded-2xl border border-[var(--color-border)]/60 shadow-sm">
+                {renderSwapForm()}
+              </div>
+
+              {/* Stellar Account Summary on Mobile */}
+              <StellarAccountPanel
+                xlmBalance={xlmBalance}
+                spendableXlm={portfolioUtils.formatBalance(
+                  Math.max(
+                    0,
+                    parseFloat(xlmBalance || '0') - (1 + subentryCount * 0.5 + 0.05)
+                  ).toString()
+                )}
+                subentryCount={subentryCount}
+              />
+
+              {/* Trade History directly underneath on Mobile */}
+              <div className="w-full bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 overflow-hidden shadow-sm min-h-[300px]">
+                <Suspense
+                  fallback={
+                    <div className="w-full h-32 flex items-center justify-center bg-secondary">
+                      <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  }
+                >
+                  <TradeTransactionUI />
+                </Suspense>
+              </div>
+            </>
+          ) : (
+            /* Chart View on Mobile */
+            <div className="w-full h-[400px] sm:h-[460px] bg-[var(--color-bg-secondary)] rounded-2xl overflow-hidden shrink-0 border border-[var(--color-border)]/60 shadow-sm">
+              <Suspense
+                fallback={
+                  <div className="w-full h-full flex items-center justify-center bg-secondary">
+                    <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                }
+              >
+                <StellarTradingChart />
+              </Suspense>
             </div>
-          }
-        >
-          <StellarTradingChart />
-        </Suspense>
-      </div>
+          )}
+        </div>
+      ) : (
+        /* ============ DESKTOP PRO 2-COLUMN LAYOUT ============ */
+        <div className="flex flex-col lg:flex-row gap-2 lg:gap-3 items-start w-full">
+          {/* Left Column: Chart (Top) + Trade Transactions (Bottom) */}
+          <div className="flex-1 min-w-0 flex flex-col gap-2 w-full">
+            <div className="w-full h-[400px] sm:h-[460px] lg:h-[520px] bg-[var(--color-bg-secondary)] rounded-2xl overflow-hidden shrink-0 border border-[var(--color-border)]/60 shadow-sm">
+              <Suspense
+                fallback={
+                  <div className="w-full h-full flex items-center justify-center bg-secondary">
+                    <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                }
+              >
+                <StellarTradingChart />
+              </Suspense>
+            </div>
 
-      <div className="w-full lg:w-[450px] bg-[var(--color-bg-secondary)] p-4 sm:p-5 lg:p-6 rounded-2xl shrink-0 border border-[var(--color-border)]/60 shadow-sm">
-        {/* <InfoBanner
-          variant="warning"
-          label="Beta:"
-          message={"This feature is currently in Beta. We're actively testing and improving it."}
-          margin="mx-0 mt-0 mb-2"
-        /> */}
+            <div className="w-full bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 overflow-hidden shadow-sm min-h-[300px]">
+              <Suspense
+                fallback={
+                  <div className="w-full h-32 flex items-center justify-center bg-secondary">
+                    <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                  </div>
+                }
+              >
+                <TradeTransactionUI />
+              </Suspense>
+            </div>
+          </div>
 
-        {renderSwapForm()}
-      </div>
+          {/* Right Column: AMM Swap Form + Stellar Account Panel (Ecommerce-style sticky natural height) */}
+          <div
+            ref={sidebarRef}
+            style={stickyStyle}
+            className="w-full lg:w-[400px] xl:w-[440px] shrink-0 flex flex-col gap-2 h-fit"
+          >
+            <div className="w-full bg-[var(--color-bg-secondary)] p-4 sm:p-5 rounded-2xl border border-[var(--color-border)]/60 shadow-sm">
+              {renderSwapForm()}
+            </div>
+
+            <StellarAccountPanel
+              xlmBalance={xlmBalance}
+              spendableXlm={portfolioUtils.formatBalance(
+                Math.max(
+                  0,
+                  parseFloat(xlmBalance || '0') - (1 + subentryCount * 0.5 + 0.05)
+                ).toString()
+              )}
+              subentryCount={subentryCount}
+            />
+          </div>
+        </div>
+      )}
 
       <StellarAssetSelectorModal
         isOpen={selectingAssetFor !== null}
@@ -533,7 +645,7 @@ const AmmSwapUI = () => {
         }}
         title={`Select ${selectingAssetFor === 'from' ? 'Pay' : 'Receive'} Asset`}
       />
-    </div>
+    </>
   );
 };
 

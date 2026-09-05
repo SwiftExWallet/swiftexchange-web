@@ -1,6 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 
 import { useTransactionHistory } from '../../../adapters/aster/hooks/useTransactionHistory';
+import { useExchangeManager } from '../../../core/ExchangeManager';
 
 interface Props {
   signer: any;
@@ -43,10 +44,13 @@ function formatIncomeType(type: string): string {
 }
 
 export const TransactionHistoryTab: React.FC<Props> = ({ signer, userAddr }) => {
-  const { income, isLoading, isLoadingMore, hasMore, loadMore } = useTransactionHistory(
-    signer,
-    userAddr
-  );
+  const currentExchange = useExchangeManager(state => state.currentExchange);
+  const isAster = currentExchange === 'aster';
+
+  const asterHook = useTransactionHistory(isAster ? signer : null, isAster ? userAddr : '');
+  const { income, isLoading, isLoadingMore, hasMore, loadMore } = isAster
+    ? asterHook
+    : { income: [], isLoading: false, isLoadingMore: false, hasMore: false, loadMore: () => {} };
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const handleScroll = useCallback(() => {

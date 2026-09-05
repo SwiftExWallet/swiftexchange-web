@@ -42,6 +42,7 @@ export interface SwapQuote {
   pricePerToken: string;
   fee: number;
   networkFee?: number;
+  poolAddress?: string;
   priceImpact: string;
   rawQuote: Record<string, unknown>;
   provider: string;

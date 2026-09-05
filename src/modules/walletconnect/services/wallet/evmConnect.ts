@@ -170,23 +170,36 @@ export async function connectWalletConnectSingle(
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
+      console.warn('[WalletConnect:EVM] Connection timed out');
       modal.closeModal();
       reject(new Error('Connection timeout'));
     }, CONNECTION_TIMEOUT_MS);
 
+    // Guard flag: once connect() resolves, modal-close must NOT reject
+    let sessionResolved = false;
     let modalOpened = false;
+
     const unsubscribe = modal.subscribeModal(state => {
       if (state.open) {
         modalOpened = true;
+        console.info('[WalletConnect:EVM] QR modal opened — waiting for wallet approval...');
       } else if (modalOpened && !state.open) {
-        clearTimeout(timeout);
-        unsubscribe();
-        provider.abortPairing?.();
-        reject(new Error('User closed the modal'));
+        if (!sessionResolved) {
+          console.info(
+            '[WalletConnect:EVM] Modal closed before session resolved — treating as user cancel'
+          );
+          clearTimeout(timeout);
+          unsubscribe();
+          provider.abortPairing?.();
+          reject(new Error('User closed the modal'));
+        } else {
+          console.debug('[WalletConnect:EVM] Modal closed after session resolved — ignoring');
+        }
       }
     });
 
     provider.on('display_uri', (uri: string) => {
+      console.info('[WalletConnect:EVM] WC URI generated — opening modal/deeplink');
       ctx.openMobileDeepLink(walletId, uri);
       if (!isMobileDevice() || walletId === 'walletconnect') {
         modal.openModal({ uri });
@@ -205,6 +218,9 @@ export async function connectWalletConnectSingle(
     provider
       .connect({ namespaces: namespaces as any })
       .then((session: any) => {
+        // Mark resolved FIRST — before closing modal — to prevent false rejection
+        sessionResolved = true;
+        console.info('[WalletConnect:EVM] ✓ provider.connect() resolved — session established');
         clearTimeout(timeout);
         unsubscribe();
         modal.closeModal();
@@ -237,6 +253,7 @@ export async function connectWalletConnectSingle(
         });
       })
       .catch((error: any) => {
+        console.error('[WalletConnect:EVM] ✕ provider.connect() failed:', error?.message ?? error);
         clearTimeout(timeout);
         unsubscribe();
         modal.closeModal();

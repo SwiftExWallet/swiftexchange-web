@@ -142,8 +142,9 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     setBridgeErrorMsg(null);
     resetSwap();
 
-    if (actionType === 'SWAP') {
-      if (isStellar(fromChainId) && ammService) {
+    const isBothStellar = isStellar(fromChainId) && isStellar(toChainId);
+    if (actionType === 'SWAP' || isBothStellar) {
+      if ((isStellar(fromChainId) || isStellar(toChainId)) && ammService) {
         if (!selectedSellAsset || !selectedBuyAsset) return;
         try {
           const fromAsset = selectedSellAsset.asset;

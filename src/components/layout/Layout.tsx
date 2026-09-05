@@ -10,11 +10,11 @@ interface LayoutProps {
 
 const Layout: FC<LayoutProps> = ({ children, withSidebar = true }) => {
   return (
-    <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-primary">
+    <div className="flex min-h-screen max-w-[100vw] overflow-x-clip bg-primary">
       {withSidebar && <Sidebar />}
-      <div className="flex-1 min-w-0 max-w-full flex flex-col transition-all duration-300 overflow-x-hidden">
+      <div className="flex-1 min-w-0 max-w-full flex flex-col transition-all duration-300 overflow-x-clip">
         <Topbar />
-        <main className="flex-1 min-w-0 max-w-full overflow-x-hidden pb-7">{children}</main>
+        <main className="flex-1 min-w-0 max-w-full overflow-x-clip pb-7">{children}</main>
       </div>
     </div>
   );

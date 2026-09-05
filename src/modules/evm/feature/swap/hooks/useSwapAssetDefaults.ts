@@ -2,10 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 
 import { useSwapStore } from '../../../../../store/swapStore';
+import { getStellarConfig } from '../../../../walletconnect/config/chains';
 import { WalletType } from '../../../../walletconnect/constants/Wallet';
-import { getEvmSwapEnabledChains, isEvmChain } from '../../../utils/Chainregistry';
+import {
+  getEvmChainsForNetwork,
+  getEvmSwapEnabledChains,
+  isEvmChain,
+} from '../../../utils/Chainregistry';
 import { switchOrAddChain } from '../../../utils/evmChainUtils';
-import { STELLAR_CHAIN_ID } from '../constants/swap.constants';
 import { isStellar } from '../utils/swapAssetUtils';
 
 export function useSwapAssetDefaults(params: {
@@ -42,15 +46,30 @@ export function useSwapAssetDefaults(params: {
   const urlParamsApplied = useRef(false);
 
   const parseChainId = (param: string): number | string => {
-    if (param === 'stellar' || param === 'pubnet') return STELLAR_CHAIN_ID;
+    if (param === 'stellar' || param === 'pubnet' || param === 'testnet') {
+      return getStellarConfig(currentNetwork).chainId;
+    }
     const n = Number(param);
     return isNaN(n) ? param : n;
   };
 
   useEffect(() => {
+    const stellarId = getStellarConfig(currentNetwork).chainId;
+    if (isStellar(fromChainId) && fromChainId !== stellarId) {
+      setFromChainId(stellarId);
+    }
+    if (isStellar(toChainId) && toChainId !== stellarId) {
+      setToChainId(stellarId);
+    }
+  }, [currentNetwork, fromChainId, toChainId, setFromChainId, setToChainId]);
+
+  useEffect(() => {
     if (locationState?.selectedAsset) {
       const asset = locationState.selectedAsset;
-      const targetChainId = asset.chainType === 'stellar' ? STELLAR_CHAIN_ID : asset.chainId || 1;
+      const targetChainId =
+        asset.chainType === 'stellar'
+          ? getStellarConfig(currentNetwork).chainId
+          : asset.chainId || 1;
       setFromChainId(targetChainId);
       setSellAssetSymbol(asset.symbol);
       setSellAssetAddress(asset.address || '');
@@ -80,7 +99,7 @@ export function useSwapAssetDefaults(params: {
     }
 
     urlParamsApplied.current = true;
-  }, [locationState, searchParams]);
+  }, [locationState, searchParams, currentNetwork]);
 
   useEffect(() => {
     if (hasInitializedDefaults.current) return;
@@ -89,25 +108,44 @@ export function useSwapAssetDefaults(params: {
     const hasStoredSelection =
       stored.sellAssetSymbol !== '' ||
       isStellar(stored.fromChainId) ||
-      (stored.fromChainId !== 'pubnet' && stored.fromChainId !== 1);
+      (stored.fromChainId !== 'pubnet' &&
+        stored.fromChainId !== 'testnet' &&
+        stored.fromChainId !== 1);
 
     if (hasStoredSelection) {
       hasInitializedDefaults.current = true;
       return;
     }
 
+    const stellarId = getStellarConfig(currentNetwork).chainId;
+
     if (connectedWallets[WalletType.STELLAR]) {
-      setFromChainId(STELLAR_CHAIN_ID);
-      setToChainId(STELLAR_CHAIN_ID);
+      setFromChainId(stellarId);
+      setToChainId(stellarId);
     } else if (connectedWallets[WalletType.EVM] && currentChainId) {
       const swapEnabledChains = getEvmSwapEnabledChains(currentNetwork);
       if (swapEnabledChains.some(c => c.chainId === currentChainId)) {
         setFromChainId(currentChainId);
         setToChainId(currentChainId);
+      } else {
+        // Testnet EVM chains have swapEnable: false — still use connected chain as default
+        // so swap screen shows EVM chains instead of defaulting to Stellar
+        const evmTestnetChains = getEvmChainsForNetwork(currentNetwork);
+        const matchedChain = evmTestnetChains.find(c => c.chainId === currentChainId);
+        if (matchedChain) {
+          setFromChainId(currentChainId);
+          setToChainId(currentChainId);
+        } else if (evmTestnetChains.length > 0) {
+          setFromChainId(evmTestnetChains[0].chainId);
+          setToChainId(evmTestnetChains[0].chainId);
+        } else {
+          setFromChainId(stellarId);
+          setToChainId(stellarId);
+        }
       }
     } else {
-      setFromChainId(STELLAR_CHAIN_ID);
-      setToChainId(STELLAR_CHAIN_ID);
+      setFromChainId(stellarId);
+      setToChainId(stellarId);
     }
 
     hasInitializedDefaults.current = true;
@@ -150,7 +188,10 @@ export function useSwapAssetDefaults(params: {
   useEffect(() => {
     if (locationState?.selectedAsset) {
       const asset = locationState.selectedAsset;
-      const targetChainId = asset.chainType === 'stellar' ? STELLAR_CHAIN_ID : asset.chainId || 1;
+      const targetChainId =
+        asset.chainType === 'stellar'
+          ? getStellarConfig(currentNetwork).chainId
+          : asset.chainId || 1;
       setFromChainId(targetChainId);
       setSellAssetSymbol(asset.symbol);
       setSellAssetAddress(asset.address || '');
@@ -158,7 +199,14 @@ export function useSwapAssetDefaults(params: {
         setToChainId(targetChainId);
       }
     }
-  }, [locationState]);
+  }, [
+    locationState,
+    currentNetwork,
+    setFromChainId,
+    setSellAssetSymbol,
+    setSellAssetAddress,
+    setToChainId,
+  ]);
 
   useEffect(() => {
     if (

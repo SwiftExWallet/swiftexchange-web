@@ -20,9 +20,32 @@ export interface StoredAuthSession {
 const STORAGE_KEY_PREFIX = '_sx_auth_';
 const ACTIVE_ADDRESS_KEY = '_sx_active_auth_addr';
 
-export const AUTH_API_BASE_URL =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BASE_SERVER_URL) ||
-  'https://dev.swiftexchange.io/api/v1';
+export function getAuthApiBaseUrl(): string {
+  try {
+    const isTestnet = localStorage.getItem('network') === 'testnet';
+    if (isTestnet) {
+      return (
+        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BASE_SERVER_URL_TEST) ||
+        'https://dev.swiftexchange.io/api/v1'
+      );
+    }
+    return (
+      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BASE_SERVER_URL_PROD) ||
+      'https://beta-v2.swiftexchange.io/api/v1'
+    );
+  } catch {
+    return 'https://beta-v2.swiftexchange.io/api/v1';
+  }
+}
+
+export const AUTH_API_BASE_URL = {
+  toString() {
+    return getAuthApiBaseUrl();
+  },
+  valueOf() {
+    return getAuthApiBaseUrl();
+  },
+};
 
 let currentToken: AuthTokens | null = null;
 
@@ -150,7 +173,7 @@ export function clearAccessToken(address?: string): void {
 }
 
 export async function buildSiweMessage(_address: string, _chainId: number): Promise<string> {
-  const API_URL = AUTH_API_BASE_URL;
+  const API_URL = getAuthApiBaseUrl();
   console.log(_address, _chainId, API_URL, 'API_URL');
   try {
     console.log('[auth] Requesting signing payload from:', `${API_URL}/signing/request`);
@@ -188,7 +211,7 @@ export async function verifySiwe(
   signature: string,
   options?: SiweVerifyOptions
 ): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> {
-  const API_URL = AUTH_API_BASE_URL;
+  const API_URL = getAuthApiBaseUrl();
 
   if (API_URL) {
     try {
@@ -305,7 +328,7 @@ export async function verifySiwe(
 export async function buildStellarChallenge(
   publicKey: string
 ): Promise<{ xdr: string; networkPassphrase: string }> {
-  const API_URL = AUTH_API_BASE_URL;
+  const API_URL = getAuthApiBaseUrl();
   console.log(
     '[auth] Requesting Stellar signing payload from:',
     `${API_URL}/signing/stellar/request?account=${publicKey}`
@@ -371,7 +394,7 @@ export async function verifyStellarChallenge(
   networkPassphrase: string,
   options?: SiweVerifyOptions
 ): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> {
-  const API_URL = AUTH_API_BASE_URL;
+  const API_URL = getAuthApiBaseUrl();
 
   if (API_URL) {
     try {
@@ -509,7 +532,7 @@ export async function restoreAuthSession(address?: string): Promise<StoredAuthSe
 }
 
 export async function logoutServer(address?: string): Promise<void> {
-  const API_URL = AUTH_API_BASE_URL;
+  const API_URL = getAuthApiBaseUrl();
   if (API_URL && currentToken) {
     try {
       await fetch(`${API_URL}/auth/logout`, {

@@ -215,36 +215,49 @@ export function useChartData(): UseChartDataResult {
       const low = parseFloat(latestCandle.low);
       const close = parseFloat(latestCandle.close);
       if (
-        !open ||
-        !high ||
-        !low ||
-        !close ||
+        isNaN(open) ||
+        isNaN(high) ||
+        isNaN(low) ||
+        isNaN(close) ||
         !isFinite(open) ||
         !isFinite(high) ||
         !isFinite(low) ||
-        !isFinite(close)
+        !isFinite(close) ||
+        open <= 0 ||
+        high <= 0 ||
+        low <= 0 ||
+        close <= 0
       ) {
         return null;
       }
 
-      const candleTime = latestCandle.startedAtTime
-        ? Math.floor(latestCandle.startedAtTime / 1000)
-        : Math.floor(new Date(latestCandle.startedAt).getTime() / 1000);
-      if (candleTime < lastBarTimeRef.current) return null;
+      const safeHigh = Math.max(high, open, close);
+      const safeLow = Math.min(low, open, close);
 
-      const candlePoint = { time: candleTime as any, open, high, low, close };
+      const candleTime = latestCandle.startedAtTime
+        ? latestCandle.startedAtTime > 1e11
+          ? Math.floor(latestCandle.startedAtTime / 1000)
+          : latestCandle.startedAtTime
+        : Math.floor(new Date(latestCandle.startedAt || 0).getTime() / 1000);
+      if (!candleTime || isNaN(candleTime) || candleTime < lastBarTimeRef.current) return null;
+
+      const candlePoint = { time: candleTime as any, open, high: safeHigh, low: safeLow, close };
 
       try {
         if (chartType === 'candlestick') series.update(candlePoint);
         else series.update({ time: candlePoint.time, value: close });
 
         lastBarTimeRef.current = candleTime;
-        const volume = parseFloat(latestCandle.usdVolume);
+        const rawVol =
+          latestCandle.usdVolume !== undefined
+            ? latestCandle.usdVolume
+            : latestCandle.baseTokenVolume || latestCandle.volume || 0;
+        const volume = parseFloat(rawVol) || 0;
 
         if (showVolume && volumeSeries) {
           volumeSeries.update({
             time: candlePoint.time,
-            value: volume,
+            value: isFinite(volume) && volume >= 0 ? volume : 0,
             color: close >= open ? colors.upColor + '40' : colors.downColor + '40',
           });
         }
@@ -253,7 +266,14 @@ export function useChartData(): UseChartDataResult {
         const priceColor = close >= open ? colors.upColor : colors.downColor;
         priceLineRef.current = upsertPriceLine(series, priceLineRef.current, close, priceColor);
 
-        const updatedBar: CandleBar = { time: candleTime, open, high, low, close, volume };
+        const updatedBar: CandleBar = {
+          time: candleTime,
+          open,
+          high: safeHigh,
+          low: safeLow,
+          close,
+          volume: isFinite(volume) && volume >= 0 ? volume : 0,
+        };
         const candleData = lastCandleDataRef.current;
         if (candleData.length > 0 && candleData[candleData.length - 1].time === candleTime) {
           candleData[candleData.length - 1] = updatedBar;

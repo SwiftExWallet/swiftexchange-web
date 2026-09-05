@@ -91,12 +91,12 @@
 
 ## 🌐 Supported Networks
 
-| Network      | Features                                  | Status    |
-| ------------ | ------------------------------------------ | --------- |
-| **Ethereum** | Swaps, Transfers, Bridging, Aster Perps    | ✅ Active |
-| **BNB Chain**| Swaps, Transfers, Bridging, Aster Perps    | ✅ Active |
-| **Arbitrum** | Aster Perps                                | ✅ Active |
-| **Stellar**  | AMM Swaps, Order Book Trading, Trustlines  | ✅ Active |
+| Network       | Features                                  | Status    |
+| ------------- | ----------------------------------------- | --------- |
+| **Ethereum**  | Swaps, Transfers, Bridging, Aster Perps   | ✅ Active |
+| **BNB Chain** | Swaps, Transfers, Bridging, Aster Perps   | ✅ Active |
+| **Arbitrum**  | Aster Perps                               | ✅ Active |
+| **Stellar**   | AMM Swaps, Order Book Trading, Trustlines | ✅ Active |
 
 ---
 
@@ -189,14 +189,12 @@ Create a `.env` file in the root directory:
 VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
 VITE_WALLETCONNECT_RELAY_URL=wss://relay.walletconnect.com
 
-# Development Environment
-VITE_BASE_SERVER_URL_DEV=https://dev-api.swiftex.exchange
-VITE_BASE_PROXY_URL_DEV=https://dev-proxy.swiftex.exchange
+# Development / Testnet Environment
+VITE_BASE_SERVER_URL_TEST=https://dev.swiftexchange.io/api/v1
 VITE_API_DEVICE_AUTH_DEV=your_dev_auth_token
 
 # Production Environment
-VITE_BASE_SERVER_URL_PROD=https://api.swiftex.exchange
-VITE_BASE_PROXY_URL_PROD=https://proxy.swiftex.exchange
+VITE_BASE_SERVER_URL_PROD=https://beta-v2.swiftexchange.io/api/v1
 VITE_API_DEVICE_AUTH_PROD=your_prod_auth_token
 ```
 
@@ -266,37 +264,37 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 ### Frontend
 
 | Technology            | Purpose                                  |
-| ---------------------- | ----------------------------------------- |
-| **React 18**           | UI framework with concurrent features     |
-| **Vite 5**              | Lightning-fast build tool and dev server  |
-| **TypeScript**          | Type-safe development                     |
-| **Tailwind CSS**        | Utility-first styling                     |
-| **@tailwindcss/vite**   | Native Tailwind integration for Vite      |
+| --------------------- | ---------------------------------------- |
+| **React 18**          | UI framework with concurrent features    |
+| **Vite 5**            | Lightning-fast build tool and dev server |
+| **TypeScript**        | Type-safe development                    |
+| **Tailwind CSS**      | Utility-first styling                    |
+| **@tailwindcss/vite** | Native Tailwind integration for Vite     |
 
 ### Blockchain Integration
 
-| Library                  | Purpose                          |
-| -------------------------- | --------------------------------- |
-| **WalletConnect v2**       | Multi-wallet connection protocol  |
-| **Ethers.js**               | EVM blockchain interaction        |
-| **@stellar/stellar-sdk**   | Stellar network operations        |
+| Library                        | Purpose                                          |
+| ------------------------------ | ------------------------------------------------ |
+| **WalletConnect v2**           | Multi-wallet connection protocol                 |
+| **Ethers.js**                  | EVM blockchain interaction                       |
+| **@stellar/stellar-sdk**       | Stellar network operations                       |
 | **Aster REST / WebSocket API** | Perpetual trading, order books, and account data |
 
 ### State & Real-Time Data
 
 | Tool          | Purpose                                   |
-| ------------- | ------------------------------------------ |
-| **Zustand**   | Lightweight state management               |
-| **WebSocket** | Real-time market data and account updates  |
+| ------------- | ----------------------------------------- |
+| **Zustand**   | Lightweight state management              |
+| **WebSocket** | Real-time market data and account updates |
 
 ### Development Tools
 
 | Tool                           | Purpose                                     |
-| -------------------------------- | ---------------------------------------------- |
-| **vite-plugin-node-polyfills**   | Node.js polyfills for browser compatibility    |
-| **vite-plugin-remove-console**   | Remove console logs in production builds       |
-| **ESLint**                       | Code linting                                    |
-| **Prettier**                     | Code formatting                                 |
+| ------------------------------ | ------------------------------------------- |
+| **vite-plugin-node-polyfills** | Node.js polyfills for browser compatibility |
+| **vite-plugin-remove-console** | Remove console logs in production builds    |
+| **ESLint**                     | Code linting                                |
+| **Prettier**                   | Code formatting                             |
 
 ### Backend Services
 
@@ -529,7 +527,6 @@ Set all required environment variables in your hosting platform:
 - `VITE_WALLETCONNECT_PROJECT_ID`
 - `VITE_WALLETCONNECT_RELAY_URL`
 - `VITE_BASE_SERVER_URL_PROD`
-- `VITE_BASE_PROXY_URL_PROD`
 - `VITE_API_DEVICE_AUTH_PROD`
 
 **Important:** Never commit `.env` file to git.

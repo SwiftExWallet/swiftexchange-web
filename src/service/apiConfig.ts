@@ -17,9 +17,34 @@ function getValidDeviceToken(): string | null {
   return localStorage.getItem('device_token');
 }
 
+export function getCurrentNetwork(): 'mainnet' | 'testnet' {
+  if (typeof window === 'undefined') return 'mainnet';
+  try {
+    const isTestnetEnabled = import.meta.env.VITE_ENABLE_TESTNET === 'true';
+    if (!isTestnetEnabled) return 'mainnet';
+    const stored = localStorage.getItem('network');
+    return stored === 'testnet' ? 'testnet' : 'mainnet';
+  } catch {
+    return 'mainnet';
+  }
+}
+
+export function getServerUrl(): string {
+  const network = getCurrentNetwork();
+  if (network === 'testnet') {
+    return import.meta.env.VITE_BASE_SERVER_URL_TEST || 'https://dev.swiftexchange.io/api/v1';
+  }
+  return import.meta.env.VITE_BASE_SERVER_URL_PROD || 'https://beta-v2.swiftexchange.io/api/v1';
+}
+
 export const API_CONFIG = {
-  serverUrl: import.meta.env.VITE_BASE_SERVER_URL,
-  proxyUrl: import.meta.env.VITE_BASE_PROXY_URL,
+  get serverUrl(): string {
+    return getServerUrl();
+  },
+  // Backward compatibility alias for serverUrl (VITE_BASE_PROXY_URL removed, unified with serverUrl)
+  get proxyUrl(): string {
+    return getServerUrl();
+  },
   get deviceAuth(): string {
     return getValidDeviceToken() || getAccessToken() || import.meta.env.VITE_API_DEVICE_AUTH || '';
   },

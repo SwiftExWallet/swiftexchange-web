@@ -1,7 +1,12 @@
 import type { Signer } from 'ethers';
 import { getAddress, isAddress } from 'ethers';
 
-import { ASTER_BAPI_URL, ASTER_ENDPOINTS, ASTER_REST_URL, ASTER_SPOT_REST_URL } from '../constants';
+import {
+  ASTER_ENDPOINTS,
+  getAsterBapiUrl,
+  getAsterRestUrl,
+  getAsterSpotRestUrl,
+} from '../constants';
 import type {
   AsterAccountInfo,
   AsterBalance,
@@ -214,18 +219,58 @@ export async function getDepositAssets(
     return cached.data;
   }
 
-  const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
-  const res = await fetch(`${ASTER_BAPI_URL}/aster/deposit/assets?${qs}`);
-  const data = await res.json();
+  try {
+    const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
+    const res = await fetch(`${getAsterBapiUrl()}/aster/deposit/assets?${qs}`);
+    const data = await res.json();
 
-  const isSuccess = data.success === true || data.code === '000000';
-  if (!isSuccess || !Array.isArray(data.data)) {
-    throw new Error(data.message || data.messageDetail || 'Failed to fetch deposit assets');
+    const isSuccess = data.success === true || data.code === '000000';
+    if (isSuccess && Array.isArray(data.data) && data.data.length > 0) {
+      const result: DepositAsset[] = data.data;
+      depositAssetsCache[cacheKey] = { timestamp: Date.now(), data: result };
+      return result;
+    }
+  } catch (err) {
+    console.warn('[Deposit] Failed to fetch deposit assets from Aster bapi, using fallback:', err);
   }
 
-  const result: DepositAsset[] = data.data;
-  depositAssetsCache[cacheKey] = { timestamp: Date.now(), data: result };
-  return result;
+  // Fallback default assets for BSC Testnet (97) and BSC Mainnet (56)
+  const isTestnet = chainIds === '97' || chainIds === '421614' || chainIds === '11155111';
+  const fallback: DepositAsset[] = [
+    {
+      name: 'USDT',
+      displayName: 'USDT',
+      contractAddress:
+        chainIds === '97'
+          ? '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd'
+          : chainIds === '42161'
+            ? '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
+            : '0x55d398326f99059fF775485246999027B3197955',
+      decimals: 18,
+      network: isTestnet ? 'BSC Testnet' : 'BSC',
+      chainId: Number(chainIds) || 56,
+      isNative: false,
+      isProfit: true,
+      rank: 1,
+    },
+    {
+      name: 'USDC',
+      displayName: 'USDC',
+      contractAddress:
+        chainIds === '97'
+          ? '0x64544969ed7EBf5f083679233325356EbE738930'
+          : chainIds === '42161'
+            ? '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+            : '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+      decimals: 18,
+      network: isTestnet ? 'BSC Testnet' : 'BSC',
+      chainId: Number(chainIds) || 56,
+      isNative: false,
+      isProfit: false,
+      rank: 2,
+    },
+  ];
+  return fallback;
 }
 
 export async function getWithdrawAssets(
@@ -240,7 +285,7 @@ export async function getWithdrawAssets(
   }
 
   const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
-  const res = await fetch(`${ASTER_BAPI_URL}/aster/withdraw/assets?${qs}`);
+  const res = await fetch(`${getAsterBapiUrl()}/aster/withdraw/assets?${qs}`);
   const data = await res.json();
 
   const isSuccess = data.success === true || data.code === '000000';
@@ -258,7 +303,7 @@ export async function getUserWithdrawInfo(
   userAddr: string,
   accountType: 'spot' | 'perp' = 'perp'
 ): Promise<UserWithdrawInfo> {
-  const baseUrl = accountType === 'spot' ? ASTER_SPOT_REST_URL : ASTER_REST_URL;
+  const baseUrl = accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
   const res = await signedRequest(
     signer,
     userAddr,
@@ -288,7 +333,7 @@ export async function getDepositWithdrawHistory(
   if (opts.endTime) params.endTime = String(opts.endTime);
   if (opts.limit) params.limit = String(opts.limit);
 
-  const baseUrl = opts.accountType === 'spot' ? ASTER_SPOT_REST_URL : ASTER_REST_URL;
+  const baseUrl = opts.accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
   const res = await signedRequest(
     signer,
     userAddr,
@@ -320,7 +365,7 @@ export async function submitWithdraw(
   }
 
   const checksummedReceiver = getAddress(params.receiver);
-  const baseUrl = params.accountType === 'spot' ? ASTER_SPOT_REST_URL : ASTER_REST_URL;
+  const baseUrl = params.accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
 
   return signedRequest(
     signer,

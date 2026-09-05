@@ -3,6 +3,10 @@ import { ethers } from 'ethers';
 import { ERC20_ABI } from '../../../abi/Erc20AbI';
 import PancakeTokens from '../../../data/swap/PancakeList.json';
 import UniswapTokens from '../../../data/swap/UniswapList.json';
+import {
+  TESTNET_CHAIN_IDS,
+  getTestnetTokensForChain,
+} from '../../../data/testnet/evm-testnet-tokens';
 import { CHAIN_REGISTRY, getChainById, normalizeTokenForDisplay } from '../utils/Chainregistry';
 import { NATIVE_ADDRESS } from '../utils/assetmanagement/constants';
 
@@ -40,7 +44,46 @@ export function getTokensForChain(chainId: number | string): TokenInfo[] {
   const chainConfig = getChainById(chainId);
   if (!chainConfig) return [];
 
+  if (chainId === 'pubnet' || chainId === 'testnet' || chainId === 'stellar') {
+    const stellarAssets = chainConfig.assets || [];
+    return stellarAssets.map(t => {
+      const isNative = isNativeAddress(t.address) || t.type === 'NATIVE' || t.symbol === 'XLM';
+      return {
+        chainId: (t as any).chainId || chainId,
+        address: t.address,
+        name: t.name || t.symbol,
+        symbol: t.symbol,
+        decimals: t.decimals || 7,
+        logoURI: t.logoURI,
+        balance: undefined,
+        isNative,
+        type: t.type || (isNative ? 'NATIVE' : 'STELLAR'),
+      };
+    });
+  }
+
   let rawTokens: any[] = [];
+
+  // ── Testnet EVM chains ──────────────────────────────────────────────────
+  // Use the centralized testnet registry (src/data/testnet/evm-testnet-tokens.ts)
+  // instead of Uniswap/Pancake mainnet lists which have no testnet entries.
+  const testnetChainIds = Object.values(TESTNET_CHAIN_IDS) as number[];
+  if (testnetChainIds.includes(Number(chainId))) {
+    const testnetTokens = getTestnetTokensForChain(Number(chainId));
+    return testnetTokens.map(t => ({
+      chainId: t.chainId,
+      address: t.address,
+      name: t.name,
+      symbol: t.symbol,
+      decimals: t.decimals,
+      logoURI: t.logoURI,
+      balance: undefined,
+      isNative: t.isNative ?? false,
+      type: t.isNative ? 'NATIVE' : 'ERC20',
+    }));
+  }
+  // ── Mainnet EVM chains ──────────────────────────────────────────────────
+
   const platform = chainConfig.coingeckoPlatform.toLowerCase();
   const slug = chainConfig.slug.toLowerCase();
 

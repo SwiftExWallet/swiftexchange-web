@@ -10,6 +10,7 @@ interface HistoryStoreState {
   addOrder: (order: AsterOrderResponse) => void;
   addTrade: (trade: AsterUserTrade) => void;
   addIncome: (income: IncomeRecord) => void;
+  clear: () => void;
 }
 
 export const useHistoryStore = create<HistoryStoreState>(set => ({
@@ -49,4 +50,5 @@ export const useHistoryStore = create<HistoryStoreState>(set => ({
       }
       return { recentIncome: [income, ...state.recentIncome].slice(0, 100) };
     }),
+  clear: () => set({ recentOrders: [], recentTrades: [], recentIncome: [] }),
 }));

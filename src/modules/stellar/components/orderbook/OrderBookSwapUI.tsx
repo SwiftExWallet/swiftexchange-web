@@ -1,40 +1,43 @@
 import {
   AlertCircle,
-  ArrowUpDown,
+  ArrowRightLeft,
   Check,
   CheckCircle,
   ChevronDown,
   Copy,
-  ExternalLink,
   RefreshCw,
 } from 'lucide-react';
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { useTransactionModalStore } from '../../../../store/transactionModalStore';
 import { getTokenIcon } from '../../../evm/utils/ChainUrlHelpers';
 import { getChainById } from '../../../evm/utils/Chainregistry';
-import { getStellarConfig } from '../../../walletconnect/config/chains';
+import { useIsMobile } from '../../../perps/components/chart/hooks/useIsMobile';
 import { WalletType } from '../../../walletconnect/constants/Wallet';
 import { useWalletConnect } from '../../../walletconnect/hooks/useWalletConnect';
 import { useWalletStore } from '../../../walletconnect/store/walletConnectStore';
 import { portfolioUtils } from '../../../walletconnect/utils/portfolioUtils';
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../../constants/orderBookSwapConstants';
 import { useLargeOrder } from '../../hook/useOrderBookSwap';
-import { getBinanceSymbol, isFlippedPair } from '../../service/binanceBridgeService';
-import { StellarChartService } from '../../service/stellarChartService';
+import { useStickySidebar } from '../../hook/useStickySidebar';
 import { useAmmSwapStore } from '../../store/ammSwapStore';
 import { useLargeOrderStore } from '../../store/orderBookSwapStore';
+import { StellarAccountPanel } from '../account/StellarAccountPanel';
 import StellarAssetSelectorModal from '../modals/StellarAssetSelectorModal';
 import OrderBook from './OrderBook';
 
 const StellarTradingChart = lazy(() => import('../chart/StellarTradingChart'));
 const LastTrades = lazy(() => import('../tradescreen/LastTrades'));
+const TradeTransactionUI = lazy(() => import('../TradeTransactionUI'));
 
 const OrderBookSwapUI = () => {
+  const isMobile = useIsMobile();
+  const { sidebarRef, stickyStyle } = useStickySidebar();
   const [orderStatus, setOrderStatus] = useState<'pending' | 'success' | 'error' | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'orderBook' | 'trades'>('overview');
+  const [mobileTab, setMobileTab] = useState<'trade' | 'chart'>('trade');
+  const [middleColumnTab, setMiddleColumnTab] = useState<'book' | 'trades'>('book');
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectingAssetFor, setSelectingAssetFor] = useState<'from' | 'to' | null>(null);
   const [orderRateType, setOrderRateType] = useState<'limit' | 'market'>('limit');
@@ -62,6 +65,8 @@ const OrderBookSwapUI = () => {
     setToToken,
     setAmount,
     setPrice,
+    setTotal,
+    setAmountPercentage,
     setMaxAmount,
     buildTransaction,
     executeOrderWithWalletConnect,
@@ -71,235 +76,6 @@ const OrderBookSwapUI = () => {
     fetchBalances,
     isRefreshingBalances,
   } = useLargeOrder({ userAddress: stellarAddress });
-
-  const [marketStats, setMarketStats] = useState<{
-    lastPrice: string;
-    lastPriceUsd: string;
-    priceChangePercent: string;
-    priceChangePercentRaw: number;
-    volume: string;
-    volumeUsd: string;
-  } | null>(null);
-
-  const binanceActive = useMemo(() => {
-    if (!fromToken || !toToken) return false;
-    return getBinanceSymbol(fromToken.code, toToken.code) !== null;
-  }, [fromToken?.code, toToken?.code]);
-
-  const spreadStats = useMemo(() => {
-    const bids = orderBook?.bids || [];
-    const asks = orderBook?.asks || [];
-    if (bids.length === 0 || asks.length === 0) {
-      return { raw: '—', percent: '—' };
-    }
-    const bestBid = parseFloat(bids[0].price);
-    const bestAsk = parseFloat(asks[0].price);
-    if (isNaN(bestBid) || isNaN(bestAsk) || bestBid <= 0 || bestAsk <= 0) {
-      return { raw: '—', percent: '—' };
-    }
-    const raw = Math.abs(bestAsk - bestBid);
-    const percent = (raw / bestAsk) * 100;
-    return {
-      raw: raw.toFixed(7),
-      percent: percent.toFixed(4) + '%',
-    };
-  }, [orderBook]);
-
-  const isLowLiquidity = useMemo(() => {
-    const bids = orderBook?.bids || [];
-    const asks = orderBook?.asks || [];
-    const bidsCount = bids.length;
-    const asksCount = asks.length;
-    const totalBidsVol = bids.reduce((sum: number, b: any) => sum + (parseFloat(b.amount) || 0), 0);
-    const totalAsksVol = asks.reduce((sum: number, a: any) => sum + (parseFloat(a.amount) || 0), 0);
-
-    if (isLoading || !orderBook) return false;
-    return bidsCount < 5 || asksCount < 5 || (totalBidsVol < 200 && totalAsksVol < 200);
-  }, [orderBook, isLoading]);
-
-  useEffect(() => {
-    if (!fromToken || !toToken) return;
-
-    let isMounted = true;
-
-    const fetchStats = async () => {
-      try {
-        const isToNative = toToken.asset.isNative();
-        const target = !isToNative ? toToken : fromToken;
-        const quote = !isToNative ? fromToken : toToken;
-
-        let xlmPriceInUsd = 0.18;
-        try {
-          const xlmRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=XLMUSDT');
-          if (xlmRes.ok) {
-            const xlmData = await xlmRes.json();
-            xlmPriceInUsd = parseFloat(xlmData.price) || 0.18;
-          }
-        } catch (err) {
-          console.warn('Failed to fetch XLM price from Binance', err);
-        }
-
-        const symbol = getBinanceSymbol(target.code, quote.code);
-
-        let lastPrice = 0;
-        let lastPriceUsd = 0;
-        let priceChangePercentRaw = 0;
-        let volumeInTarget = 0;
-
-        if (binanceActive && symbol) {
-          const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
-          if (!res.ok) throw new Error('Binance ticker request failed');
-          const ticker = await res.json();
-
-          const binancePrice = parseFloat(ticker.lastPrice);
-          const binanceOpen = parseFloat(ticker.openPrice);
-          const binanceVol = parseFloat(ticker.volume);
-          const binanceQuoteVol = parseFloat(ticker.quoteVolume);
-
-          const isFlipped = isFlippedPair(target.code, quote.code);
-
-          if (!isFlipped) {
-            lastPrice = binancePrice;
-            const openPrice = binanceOpen;
-            priceChangePercentRaw =
-              openPrice > 0
-                ? ((lastPrice - openPrice) / openPrice) * 100
-                : parseFloat(ticker.priceChangePercent);
-            volumeInTarget = binanceVol;
-          } else {
-            lastPrice = binancePrice > 0 ? 1 / binancePrice : 0;
-            const openPrice = binanceOpen > 0 ? 1 / binanceOpen : 0;
-            priceChangePercentRaw =
-              openPrice > 0
-                ? ((lastPrice - openPrice) / openPrice) * 100
-                : -parseFloat(ticker.priceChangePercent);
-            volumeInTarget = binanceQuoteVol;
-          }
-        } else {
-          const config = getStellarConfig(currentNetwork);
-          const chartService = new StellarChartService(
-            config.horizonUrl,
-            config.networkPassphrase,
-            config.chainId
-          );
-
-          const endTime = Date.now();
-          const startTime = endTime - 24 * 60 * 60 * 1000;
-
-          const pair = {
-            base: fromToken.code,
-            counter: toToken.code,
-            baseIssuer: fromToken.issuer,
-            counterIssuer: toToken.issuer,
-          };
-
-          const records = await chartService.fetchTradeAggregations(
-            pair,
-            { startTime, endTime },
-            { resolution: 900000, limit: 100 }
-          );
-
-          if (records.length > 0) {
-            const firstRecord = records[0];
-            const lastRecord = records[records.length - 1];
-
-            const firstOpen = parseFloat(firstRecord.open);
-            const lastClose = parseFloat(lastRecord.close);
-
-            let totalBaseVol = 0;
-            let totalCounterVol = 0;
-            for (const r of records) {
-              totalBaseVol += parseFloat(r.baseVolume) || 0;
-              totalCounterVol += parseFloat(r.counterVolume) || 0;
-            }
-
-            const isTargetFrom =
-              target.code === fromToken.code && target.issuer === fromToken.issuer;
-
-            if (isTargetFrom) {
-              lastPrice = lastClose;
-              priceChangePercentRaw =
-                firstOpen > 0 ? ((lastClose - firstOpen) / firstOpen) * 100 : 0;
-              volumeInTarget = totalBaseVol;
-            } else {
-              lastPrice = lastClose > 0 ? 1 / lastClose : 0;
-              const initialPrice = firstOpen > 0 ? 1 / firstOpen : 0;
-              priceChangePercentRaw =
-                initialPrice > 0 ? ((lastPrice - initialPrice) / initialPrice) * 100 : 0;
-              volumeInTarget = totalCounterVol;
-            }
-          } else {
-            const bids = orderBook?.bids || [];
-            const asks = orderBook?.asks || [];
-            if (bids.length > 0 && asks.length > 0) {
-              lastPrice = (parseFloat(bids[0].price) + parseFloat(asks[0].price)) / 2;
-            } else if (bids.length > 0) {
-              lastPrice = parseFloat(bids[0].price);
-            } else if (asks.length > 0) {
-              lastPrice = parseFloat(asks[0].price);
-            }
-            priceChangePercentRaw = 0;
-            volumeInTarget = 0;
-          }
-        }
-
-        if (target.code === 'USDC' || target.code === 'USDT') {
-          lastPriceUsd = 1.0;
-        } else if (target.code === 'XLM') {
-          lastPriceUsd = xlmPriceInUsd;
-        } else if (quote.code === 'XLM') {
-          lastPriceUsd = lastPrice * xlmPriceInUsd;
-        } else if (quote.code === 'USDC' || quote.code === 'USDT') {
-          lastPriceUsd = lastPrice * 1.0;
-        } else {
-          lastPriceUsd = lastPrice * xlmPriceInUsd;
-        }
-
-        const volumeInQuote = volumeInTarget * lastPrice;
-        let volumeUsdVal = 0;
-        if (quote.code === 'USDC' || quote.code === 'USDT') {
-          volumeUsdVal = volumeInQuote;
-        } else if (quote.code === 'XLM') {
-          volumeUsdVal = volumeInQuote * xlmPriceInUsd;
-        } else {
-          volumeUsdVal = volumeInTarget * lastPriceUsd;
-        }
-
-        if (isMounted) {
-          setMarketStats({
-            lastPrice: lastPrice.toFixed(7),
-            lastPriceUsd: lastPriceUsd.toFixed(4),
-            priceChangePercent:
-              (priceChangePercentRaw >= 0 ? '+' : '') + priceChangePercentRaw.toFixed(2) + '%',
-            priceChangePercentRaw,
-            volume: volumeInQuote.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-            volumeUsd: volumeUsdVal.toLocaleString(undefined, {
-              style: 'currency',
-              currency: 'USD',
-            }),
-          });
-        }
-      } catch (err) {
-        console.error('Error fetching market stats:', err);
-      }
-    };
-
-    fetchStats();
-    const interval = setInterval(fetchStats, 30000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [
-    fromToken?.code,
-    fromToken?.issuer,
-    toToken?.code,
-    toToken?.issuer,
-    binanceActive,
-    currentNetwork,
-    orderBook,
-  ]);
 
   useEffect(() => {
     if (orderRateType === 'market' && orderBook) {
@@ -437,7 +213,6 @@ const OrderBookSwapUI = () => {
     !isLoading &&
     quote &&
     stellarWallet;
-  const fromBalance = fromToken?.balance ? parseFloat(fromToken.balance).toFixed(4) : '0.00';
   const toBalance = toToken?.balance ? parseFloat(toToken.balance).toFixed(4) : '0.00';
 
   const spendableAmount = fromToken?.balance
@@ -448,555 +223,640 @@ const OrderBookSwapUI = () => {
       )
     : '0.00';
 
-  return (
-    <>
-      <div className="flex sm:hidden bg-secondary border border-color lg:rounded-xl overflow-hidden mb-1 lg:mb-4">
-        {(['overview', 'orderBook', 'trades'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${activeTab === tab ? 'text-primary bg-primary/5' : 'text-muted'}`}
-          >
-            {tab === 'orderBook' ? 'Book' : tab === 'trades' ? 'Trades' : 'Chart'}
-          </button>
-        ))}
-      </div>
+  const renderOrderForm = () => {
+    const baseCode = fromToken?.code || 'XLM';
+    const quoteCode = toToken?.code || 'USDC';
+    const activeBalance = isBuy ? toBalance : spendableAmount;
+    const activeUnit = isBuy ? quoteCode : baseCode;
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-1 lg:gap-4 items-stretch">
-        <div
-          className={`bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 overflow-hidden shadow-sm h-[320px] max-h-[380px] lg:h-auto lg:min-h-0 ${
-            activeTab === 'overview' ? 'block' : 'hidden lg:block'
-          }`}
-        >
-          <Suspense
-            fallback={
-              <div className="w-full h-full flex items-center justify-center bg-secondary">
-                <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
-              </div>
-            }
-          >
-            <StellarTradingChart />
-          </Suspense>
-        </div>
-        <div
-          className={`bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 shadow-sm overflow-hidden h-[440px] max-h-[500px] lg:h-auto lg:min-h-0 ${
-            activeTab === 'trades' ? 'block' : 'hidden lg:block'
-          }`}
-        >
-          <Suspense
-            fallback={
-              <div className="w-full h-full flex items-center justify-center bg-secondary">
-                <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
-              </div>
-            }
-          >
-            <LastTrades baseAsset={fromToken || undefined} counterAsset={toToken || undefined} />
-          </Suspense>
-        </div>
+    const targetToken = !fromToken?.asset.isNative() ? fromToken : toToken;
+    const hasIssuer = targetToken && !targetToken.asset.isNative() && targetToken.issuer;
+    const domain =
+      targetToken?.homeDomain ||
+      targetToken?.domain ||
+      (targetToken?.asset.isNative() ? 'stellar.org' : 'custom');
+    const issuerShort = targetToken?.issuer
+      ? `${targetToken.issuer.slice(0, 4)}...${targetToken.issuer.slice(-4)}`
+      : null;
 
-        {/* ============ ORDER TRADE FORM ============ */}
-        <div
-          className={`bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 shadow-sm p-4 lg:p-6 ${
-            activeTab === 'overview' ? 'block' : 'hidden lg:block'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-5 lg:mb-6">
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-base lg:text-lg font-bold text-primary tracking-tight">
-                Order Trade
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex gap-0.5 bg-white/5 p-1 rounded-lg border border-white/5">
-                {(['limit', 'market'] as const).map(type => (
-                  <button
-                    key={type}
-                    onClick={() => handleRateTypeChange(type)}
-                    disabled={isLoading}
-                    className={`px-2.5 lg:px-3 py-1.5 rounded-md text-[10px] lg:text-[11px] font-bold uppercase tracking-wider transition-all min-h-[28px] ${
-                      orderRateType === type
-                        ? 'bg-brand text-white'
-                        : 'text-muted hover:text-primary'
-                    }`}
-                  >
-                    {type}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={refreshOrderBook}
-                className="p-2 rounded-lg hover:bg-hover transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center"
-                disabled={isLoading}
-                aria-label="Refresh order book"
-              >
-                <RefreshCw className={`w-4 h-4 text-muted ${isLoading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-          </div>
+    const bestAsk = orderBook?.asks?.[0]?.price ? parseFloat(orderBook.asks[0].price) : 0;
+    const bestBid = orderBook?.bids?.[0]?.price ? parseFloat(orderBook.bids[0].price) : 0;
+    const spreadRaw = bestAsk && bestBid ? Math.max(0, bestAsk - bestBid) : 0;
+    const spreadPercent =
+      bestAsk > 0 && bestBid > 0 ? ((spreadRaw / bestAsk) * 100).toFixed(2) + '%' : '—';
+    const isLowLiq =
+      !isLoading &&
+      orderBook &&
+      ((orderBook.bids?.length || 0) < 3 || (orderBook.asks?.length || 0) < 3);
 
-          {(() => {
-            const isToNative = toToken?.asset.isNative();
-            const targetToken = !isToNative ? toToken : fromToken;
-            const quoteToken = !isToNative ? fromToken : toToken;
-            const homeDomain =
-              targetToken?.homeDomain ||
-              targetToken?.domain ||
-              (targetToken?.asset.isNative() ? 'stellar.org' : '—');
-            const hasIssuer = !!(
-              targetToken &&
-              !targetToken.asset.isNative() &&
-              targetToken.issuer
-            );
-            const issuerShort =
-              targetToken && targetToken.issuer
-                ? `${targetToken.issuer.slice(0, 4)}...${targetToken.issuer.slice(-4)}`
-                : 'Native';
-
-            const handleCopyIssuer = () => {
-              if (hasIssuer && targetToken.issuer) {
-                navigator.clipboard.writeText(targetToken.issuer);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }
-            };
-
-            const isPricePositive = marketStats ? marketStats.priceChangePercentRaw >= 0 : true;
-
-            return (
-              <>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 p-3.5 mb-5 lg:mb-6 bg-white/[0.02] border border-white/5 rounded-2xl text-[11px] select-none">
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <span className="text-[10px] font-bold text-muted uppercase tracking-wider">
-                      Asset Info
-                    </span>
-                    <div className="flex flex-col gap-0.5 truncate">
-                      <span className="text-primary font-medium truncate">{homeDomain}</span>
-                      <div className="flex items-center gap-1 text-muted">
-                        <span className="truncate">{issuerShort}</span>
-                        {hasIssuer && (
-                          <>
-                            <button
-                              onClick={handleCopyIssuer}
-                              className={`transition-colors focus:outline-none ${copied ? 'text-green-400' : 'hover:text-primary'}`}
-                              title={copied ? 'Copied!' : 'Copy Issuer Address'}
-                            >
-                              {copied ? <Check size={11} /> : <Copy size={11} />}
-                            </button>
-                            <a
-                              href={`https://stellar.expert/explorer/${isMainnet ? 'public' : 'testnet'}/account/${targetToken?.issuer || ''}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="hover:text-primary transition-colors focus:outline-none"
-                              title="View on Stellar.expert"
-                            >
-                              <ExternalLink size={11} />
-                            </a>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <span className="text-[10px] font-bold text-muted uppercase tracking-wider">
-                      Last Price
-                    </span>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-primary font-semibold truncate tabular-nums">
-                        {marketStats ? `${marketStats.lastPrice} ${quoteToken?.code}` : '—'}
-                      </span>
-                      <span className="text-muted tabular-nums">
-                        {marketStats ? `($${marketStats.lastPriceUsd})` : '—'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <span className="text-[10px] font-bold text-muted uppercase tracking-wider">
-                      24H Change
-                    </span>
-                    <span
-                      className={`font-semibold tabular-nums mt-1 ${
-                        isPricePositive ? 'text-green-500' : 'text-red-500'
-                      }`}
-                    >
-                      {marketStats ? marketStats.priceChangePercent : '—'}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <span className="text-[10px] font-bold text-muted uppercase tracking-wider">
-                      24H Volume
-                    </span>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-primary font-semibold truncate tabular-nums">
-                        {marketStats ? `${marketStats.volume} ${quoteToken?.code}` : '—'}
-                      </span>
-                      <span className="text-muted tabular-nums">
-                        {marketStats ? marketStats.volumeUsd : '—'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1 min-w-0 col-span-2 sm:col-span-1">
-                    <span className="text-[10px] font-bold text-muted uppercase tracking-wider">
-                      Spread
-                    </span>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-primary font-semibold tabular-nums">
-                        {spreadStats.percent}
-                      </span>
-                      <span className="text-muted truncate tabular-nums">
-                        {spreadStats.raw !== '—' ? `${spreadStats.raw} ${quoteToken?.code}` : '—'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                {isLowLiquidity && (
-                  <div className="mt-[-12px] mb-5 lg:mb-6 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl flex items-center gap-2 text-yellow-500 text-[10px] font-bold uppercase tracking-wider select-none">
-                    <AlertCircle size={12} className="shrink-0" />
-                    <span>
-                      Warning: This asset pair has low liquidity. Orders may experience high price
-                      slippage.
-                    </span>
-                  </div>
-                )}
-              </>
-            );
-          })()}
-
-          <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/5 mb-5 lg:mb-6">
+    return (
+      <div className="bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 shadow-sm p-4 lg:p-4.5 flex flex-col justify-between">
+        {/* Top Bar: Base Asset, Flip Button, Quote Asset & LMT/MKT Switcher */}
+        <div className="flex items-center justify-between gap-1.5 mb-3 select-none">
+          <div className="flex items-center gap-1 min-w-0">
+            {/* Base Asset Pill */}
             <button
-              onClick={() => !isBuy && setIsBuy()}
-              disabled={isLoading}
-              className={`flex-1 py-3 lg:py-3.5 rounded-lg text-sm font-bold uppercase tracking-wider transition-all min-h-[44px] ${
-                isBuy ? 'bg-green-500 text-white shadow-sm' : 'text-muted hover:text-primary'
-              }`}
+              onClick={() => setSelectingAssetFor('from')}
+              className="flex items-center gap-1.5 px-2 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] active:scale-[0.98] border border-white/5 transition-all cursor-pointer min-w-0"
+              title="Select Base Asset"
             >
-              Buy
-            </button>
-            <button
-              onClick={() => isBuy && setIsBuy()}
-              disabled={isLoading}
-              className={`flex-1 py-3 lg:py-3.5 rounded-lg text-sm font-bold uppercase tracking-wider transition-all min-h-[44px] ${
-                !isBuy ? 'bg-red-500 text-white shadow-sm' : 'text-muted hover:text-primary'
-              }`}
-            >
-              Sell
-            </button>
-          </div>
-
-          <div className="flex flex-col md:flex-row items-stretch  md:gap-16 relative mb-5 lg:mb-6">
-            {/* Pay Card */}
-            <div className="flex-1 bg-tertiary rounded-2xl p-4 border border-color">
-              <div className="flex justify-between items-center mb-3">
-                <label className="text-[10px] lg:text-[11px] font-bold uppercase tracking-wider text-muted">
-                  From
-                </label>
-                <span className="text-[10px] lg:text-[11px] font-bold uppercase tracking-wider text-muted">
-                  Balance
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between gap-3">
-                <button
-                  onClick={() => setSelectingAssetFor('from')}
-                  className="flex items-center gap-2 bg-secondary rounded-lg px-2 py-2 hover:bg-hover active:scale-[0.98] transition-all relative group min-w-0"
-                  style={{ width: 'clamp(120px, 38vw, 160px)' }}
-                >
-                  <div className="relative min-w-[32px] shrink-0">
-                    <img
-                      key={
-                        fromToken?.code
-                          ? `${fromToken.code}-${fromToken.issuer || 'native'}`
-                          : 'placeholder'
-                      }
-                      src={
-                        fromToken?.icon ||
-                        getTokenIcon(fromToken?.code || '', chainConfig, fromToken?.issuer) ||
-                        `https://ui-avatars.com/api/?name=${fromToken?.code || 'S'}&background=random`
-                      }
-                      className="w-8 h-8 rounded-full bg-tertiary object-cover"
-                      alt=""
-                      onError={e => {
-                        (e.target as HTMLImageElement).src =
-                          `https://ui-avatars.com/api/?name=${fromToken?.code || 'S'}&background=random`;
-                      }}
-                    />
-                    <img
-                      src={chainConfig?.nativeCurrency.logoURI}
-                      className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-secondary bg-secondary"
-                      alt=""
-                    />
-                  </div>
-                  <div className="flex flex-col items-start pr-1 min-w-0 overflow-hidden text-left">
-                    <span className="font-bold text-[13px] leading-tight truncate w-full">
-                      {fromToken ? fromToken.name || fromToken.code : 'Select'}
-                    </span>
-                    <span className="text-[9px] text-muted font-medium tracking-tight truncate w-full">
-                      {fromToken
-                        ? fromToken.homeDomain ||
-                          (fromToken.asset.isNative() ? 'stellar.org' : 'Stellar')
-                        : 'stellar'}
-                    </span>
-                  </div>
-                  <ChevronDown
-                    size={14}
-                    className="text-muted group-hover:text-primary transition-all ml-auto flex-shrink-0"
-                  />
-                </button>
-
-                <div className="text-right flex flex-col items-end">
-                  <p className="text-base lg:text-lg text-primary font-bold tabular-nums leading-tight">
-                    {fromBalance}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
-                <span className="text-[9px] lg:text-[10px] text-muted uppercase font-bold tracking-wider">
-                  Spendable
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] lg:text-[11px] text-brand font-bold tabular-nums">
-                    {spendableAmount}
-                  </span>
-                  <button
-                    onClick={() => fetchBalances(true)}
-                    className="p-1 hover:bg-white/5 rounded transition-colors text-muted hover:text-primary"
-                  >
-                    <RefreshCw size={10} className={isRefreshingBalances ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-center md:absolute md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:z-10 -mt-4 md:mt-0">
-              <button
-                onClick={() => {
-                  const t = fromToken;
-                  setFromToken(toToken as any);
-                  setToToken(t as any);
-                }}
-                className="w-11 h-11 lg:w-12 lg:h-12 rounded-full bg-secondary flex items-center justify-center hover:scale-110 active:scale-90 transition-all duration-300 text-brand group backdrop-blur-md border border-color min-w-[44px] min-h-[44px]"
-                disabled={isLoading || !fromToken || !toToken}
-                aria-label="Swap tokens"
-              >
-                <ArrowUpDown
-                  size={18}
-                  className="group-hover:rotate-180 transition-transform duration-500 md:rotate-90"
-                />
-              </button>
-            </div>
-
-            {/* Receive Card */}
-            <div className="flex-1 bg-tertiary rounded-2xl p-4 border border-color -mt-4 md:mt-0">
-              <div className="flex justify-between items-center mb-3">
-                <label className="text-[10px] lg:text-[11px] font-bold uppercase tracking-wider text-muted">
-                  To
-                </label>
-                <span className="text-[10px] lg:text-[11px] font-bold uppercase tracking-wider text-muted">
-                  Balance
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between gap-3">
-                <button
-                  onClick={() => setSelectingAssetFor('to')}
-                  className="flex items-center gap-2 bg-secondary rounded-lg px-2 py-2 hover:bg-hover active:scale-[0.98] transition-all relative group min-w-0"
-                  style={{ width: 'clamp(120px, 38vw, 160px)' }}
-                >
-                  <div className="relative min-w-[32px] shrink-0">
-                    <img
-                      key={
-                        toToken?.code
-                          ? `${toToken.code}-${toToken.issuer || 'native'}`
-                          : 'placeholder'
-                      }
-                      src={
-                        toToken?.icon ||
-                        getTokenIcon(toToken?.code || '', chainConfig, toToken?.issuer) ||
-                        `https://ui-avatars.com/api/?name=${toToken?.code || 'S'}&background=random`
-                      }
-                      className="w-8 h-8 rounded-full bg-tertiary object-cover"
-                      alt=""
-                      onError={e => {
-                        (e.target as HTMLImageElement).src =
-                          `https://ui-avatars.com/api/?name=${toToken?.code || 'S'}&background=random`;
-                      }}
-                    />
-                    <img
-                      src={chainConfig?.nativeCurrency.logoURI}
-                      className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-secondary bg-secondary"
-                      alt=""
-                    />
-                  </div>
-                  <div className="flex flex-col items-start pr-1 min-w-0 overflow-hidden text-left">
-                    <span className="font-bold text-[13px] leading-tight truncate w-full">
-                      {toToken ? toToken.name || toToken.code : 'Select'}
-                    </span>
-                    <span className="text-[9px] text-muted font-medium tracking-tight truncate w-full">
-                      {toToken
-                        ? toToken.homeDomain ||
-                          (toToken.asset.isNative() ? 'stellar.org' : 'Stellar')
-                        : 'stellar'}
-                    </span>
-                  </div>
-                  <ChevronDown
-                    size={14}
-                    className="text-muted group-hover:text-primary transition-all ml-auto flex-shrink-0"
-                  />
-                </button>
-
-                <div className="text-right flex flex-col items-end">
-                  <p className="text-base lg:text-lg text-primary font-bold tabular-nums leading-tight">
-                    {toBalance}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
-                <span className="text-[9px] lg:text-[10px] text-muted uppercase font-bold tracking-wider">
-                  Spendable
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] lg:text-[11px] text-brand font-bold tabular-nums">
-                    {toToken?.balance
-                      ? portfolioUtils.formatBalance(
-                          toToken.code === 'XLM'
-                            ? Math.max(
-                                0,
-                                parseFloat(toToken.balance) - (1 + subentryCount * 0.5 + 0.05)
-                              ).toString()
-                            : toToken.balance
-                        )
-                      : '0.00'}
-                  </span>
-                  <button
-                    onClick={() => fetchBalances(true)}
-                    className="p-1 hover:bg-white/5 rounded transition-colors text-muted hover:text-primary"
-                  >
-                    <RefreshCw size={10} className={isRefreshingBalances ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ===== Inputs: Amount / Price ===== */}
-          <div className="grid grid-cols-2 gap-2 md:gap-16 mb-4 lg:mb-5">
-            <div className="bg-tertiary rounded-2xl p-4 border border-color">
-              <div className="flex justify-between items-center mb-2">
-                <label className="text-[10px] lg:text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
-                  Amount
-                </label>
-                {fromToken && (
-                  <button
-                    onClick={setMaxAmount}
-                    className="text-[9px] lg:text-[10px] font-bold text-brand hover:underline uppercase tracking-widest"
-                  >
-                    Max
-                  </button>
-                )}
-              </div>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={amount}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (v === '' || /^\d*\.?\d*$/.test(v)) setAmount(v);
-                }}
-                placeholder="0.00"
-                className="w-full bg-transparent border-none p-0 text-right text-lg lg:text-xl font-bold tabular-nums focus:ring-0 focus:outline-none placeholder:text-muted/30"
-                disabled={isLoading}
+              <img
+                src={
+                  fromToken?.icon ||
+                  getTokenIcon(fromToken?.code || '', chainConfig, fromToken?.issuer) ||
+                  `https://ui-avatars.com/api/?name=${baseCode}&background=random`
+                }
+                className="w-4 h-4 rounded-full bg-tertiary object-cover shrink-0"
+                alt=""
               />
-            </div>
-
-            <div className="bg-tertiary rounded-2xl p-4 border border-color">
-              <div className="flex justify-between items-center mb-2">
-                <label className="text-[10px] lg:text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
-                  Price
-                </label>
-                {orderRateType === 'market' && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand/10 text-brand font-bold uppercase tracking-wider">
-                    MKT
-                  </span>
-                )}
-              </div>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={orderRateType === 'market' && !price ? 'Market' : price}
-                onChange={e => {
-                  if (orderRateType === 'market') return;
-                  const v = e.target.value;
-                  if (v === '' || /^\d*\.?\d*$/.test(v)) setPrice(v);
-                }}
-                placeholder="0.00"
-                className="w-full bg-transparent border-none p-0 text-right text-lg lg:text-xl font-bold tabular-nums focus:ring-0 focus:outline-none placeholder:text-muted/30 disabled:opacity-60 disabled:text-muted"
-                disabled={isLoading || orderRateType === 'market'}
-              />
-            </div>
-          </div>
-
-          <div className="bg-tertiary rounded-2xl p-4 border border-color mb-5 lg:mb-6">
-            <div className="flex justify-between items-center">
-              <label className="text-[10px] lg:text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
-                Total
-              </label>
-              <span className="text-lg lg:text-xl font-bold text-primary tabular-nums">
-                {total || '0.00'}
+              <span className="font-bold text-xs text-primary truncate max-w-[55px]">
+                {baseCode}
               </span>
+              <ChevronDown size={10} className="text-muted shrink-0" />
+            </button>
+
+            {/* Swap / Flip Button */}
+            <button
+              onClick={() => {
+                const temp = fromToken;
+                setFromToken(toToken as any);
+                setToToken(temp as any);
+              }}
+              className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center hover:scale-110 active:scale-95 text-muted hover:text-primary transition-all border border-white/10 shrink-0 cursor-pointer"
+              title="Flip Base and Quote"
+            >
+              <ArrowRightLeft size={11} />
+            </button>
+
+            {/* Quote Asset Pill */}
+            <button
+              onClick={() => setSelectingAssetFor('to')}
+              className="flex items-center gap-1.5 px-2 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] active:scale-[0.98] border border-white/5 transition-all cursor-pointer min-w-0"
+              title="Select Quote / Pricing Asset"
+            >
+              <img
+                src={
+                  toToken?.icon ||
+                  getTokenIcon(toToken?.code || '', chainConfig, toToken?.issuer) ||
+                  `https://ui-avatars.com/api/?name=${quoteCode}&background=random`
+                }
+                className="w-4 h-4 rounded-full bg-tertiary object-cover shrink-0"
+                alt=""
+              />
+              <span className="font-bold text-xs text-primary truncate max-w-[55px]">
+                {quoteCode}
+              </span>
+              <ChevronDown size={10} className="text-muted shrink-0" />
+            </button>
+          </div>
+
+          {/* LMT / MKT Switcher */}
+          <div className="flex gap-0.5 bg-white/5 p-0.5 rounded-lg border border-white/5 shrink-0 ml-1">
+            {(['limit', 'market'] as const).map(type => (
+              <button
+                key={type}
+                onClick={() => handleRateTypeChange(type)}
+                disabled={isLoading}
+                className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                  orderRateType === type
+                    ? 'bg-brand text-white shadow-xs'
+                    : 'text-muted hover:text-primary'
+                }`}
+              >
+                {type === 'limit' ? 'LMT' : 'MKT'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Asset Details, 24h Spread & Low Liquidity Warning */}
+        <div className="mb-3 space-y-1.5 select-none">
+          <div className="flex items-center justify-between px-2 py-1.5 rounded-xl bg-white/[0.02] border border-white/5 text-[10px]">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-muted">Asset:</span>
+              <span className="font-semibold text-primary truncate max-w-[90px]">{domain}</span>
+              {hasIssuer && (
+                <button
+                  onClick={() => {
+                    if (targetToken?.issuer) {
+                      navigator.clipboard.writeText(targetToken.issuer);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-1 py-0.5 rounded bg-white/[0.04] hover:bg-white/[0.08] text-muted hover:text-primary transition-all cursor-pointer"
+                  title={`Copy issuer address: ${targetToken.issuer}`}
+                >
+                  <span className="font-mono text-[9px]">{issuerShort}</span>
+                  {copied ? <Check size={9} className="text-green-400" /> : <Copy size={9} />}
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <span className="text-muted">Spread:</span>
+              <span className="font-mono font-medium text-primary">{spreadPercent}</span>
             </div>
           </div>
 
-          {(error || errorMessage) && (
-            <div className="mb-4 p-3 bg-red-500/10 rounded-xl flex items-start gap-2 border border-red-500/20">
-              <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-red-500 leading-relaxed">{error || errorMessage}</p>
+          {isLowLiq && (
+            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2 text-[11px] text-amber-300">
+              <AlertCircle size={13} className="shrink-0 mt-0.5 text-amber-400" />
+              <div className="leading-tight">
+                <span className="font-semibold">Low Orderbook Depth:</span>
+                <span className="text-amber-300/80 ml-1">
+                  Limited active offers on Stellar DEX for this pair.
+                </span>
+              </div>
             </div>
           )}
+        </div>
 
+        {/* Side Tabs: Buy [Base] / Sell [Base] */}
+        <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/5 mb-3">
+          <button
+            onClick={() => setIsBuy(true)}
+            disabled={isLoading}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all min-h-[34px] cursor-pointer ${
+              isBuy ? 'bg-green-500 text-white shadow-sm' : 'text-muted hover:text-primary'
+            }`}
+          >
+            Buy {baseCode}
+          </button>
+          <button
+            onClick={() => setIsBuy(false)}
+            disabled={isLoading}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all min-h-[34px] cursor-pointer ${
+              !isBuy ? 'bg-red-500 text-white shadow-sm' : 'text-muted hover:text-primary'
+            }`}
+          >
+            Sell {baseCode}
+          </button>
+        </div>
+
+        {/* Available Balance Header */}
+        <div className="flex justify-between items-center px-0.5 mb-2.5 text-[11px] text-muted select-none">
+          <span>Available:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-primary font-bold font-mono tabular-nums">
+              {activeBalance} {activeUnit}
+            </span>
+            <button
+              onClick={() => fetchBalances(true)}
+              className="p-0.5 hover:bg-white/5 rounded transition-colors text-muted hover:text-primary cursor-pointer"
+              title="Refresh balance"
+            >
+              <RefreshCw size={10} className={isRefreshingBalances ? 'animate-spin' : ''} />
+            </button>
+          </div>
+        </div>
+
+        {/* Price Input Field */}
+        <div className="bg-tertiary rounded-xl p-2.5 border border-color mb-2">
+          <div className="flex justify-between items-center mb-1">
+            <label className="text-[9px] font-bold uppercase tracking-wider text-muted">
+              Price
+            </label>
+            {orderRateType === 'market' ? (
+              <span className="text-[8px] px-1.5 py-0.2 rounded bg-brand/10 text-brand font-bold uppercase tracking-wider">
+                Market
+              </span>
+            ) : (
+              <span className="text-[10px] text-muted font-mono">{quoteCode}</span>
+            )}
+          </div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={orderRateType === 'market' && !price ? 'Market Price' : price}
+            onChange={e => {
+              if (orderRateType === 'market') return;
+              const v = e.target.value;
+              if (v === '' || /^\d*\.?\d*$/.test(v)) setPrice(v);
+            }}
+            placeholder="0.00"
+            className="w-full bg-transparent border-none p-0 text-right text-base font-bold tabular-nums focus:ring-0 focus:outline-none placeholder:text-muted/30 disabled:opacity-60 disabled:text-muted"
+            disabled={isLoading || orderRateType === 'market'}
+          />
+        </div>
+
+        {/* Amount Input Field with dynamic value equivalent */}
+        <div className="bg-tertiary rounded-xl p-2.5 border border-color mb-2">
+          <div className="flex justify-between items-center mb-1">
+            <label className="text-[9px] font-bold uppercase tracking-wider text-muted">
+              Amount ({baseCode})
+            </label>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted font-mono">{baseCode}</span>
+              <button
+                onClick={setMaxAmount}
+                className="text-[9px] font-bold text-brand hover:underline uppercase tracking-wider cursor-pointer"
+              >
+                Max
+              </button>
+            </div>
+          </div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={amount}
+            onChange={e => {
+              const v = e.target.value;
+              if (v === '' || /^\d*\.?\d*$/.test(v)) setAmount(v);
+            }}
+            placeholder="0.00"
+            className="w-full bg-transparent border-none p-0 text-right text-base font-bold tabular-nums focus:ring-0 focus:outline-none placeholder:text-muted/30"
+            disabled={isLoading}
+          />
+        </div>
+
+        {/* Total (Quote) Input Field */}
+        <div className="bg-tertiary rounded-xl p-2.5 border border-color mb-2">
+          <div className="flex justify-between items-center mb-1">
+            <label className="text-[9px] font-bold uppercase tracking-wider text-muted">
+              Total ({quoteCode})
+            </label>
+            <span className="text-[10px] text-muted font-mono">{quoteCode}</span>
+          </div>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={total && parseFloat(total) > 0 ? total : ''}
+            onChange={e => {
+              const v = e.target.value;
+              if (v === '' || /^\d*\.?\d*$/.test(v)) {
+                setTotal(v);
+                const numPrice = parseFloat(price);
+                const numTotal = parseFloat(v);
+                if (numPrice > 0 && numTotal > 0) {
+                  setAmount((numTotal / numPrice).toFixed(7));
+                } else if (!v) {
+                  setAmount('');
+                }
+              }
+            }}
+            placeholder="0.00"
+            className="w-full bg-transparent border-none p-0 text-right text-base font-bold tabular-nums focus:ring-0 focus:outline-none placeholder:text-muted/30"
+            disabled={isLoading}
+          />
+        </div>
+
+        {/* Quick Percentage Selectors (25%, 50%, 75%, 100%) */}
+        <div className="grid grid-cols-4 gap-1.5 mb-2.5">
+          {[25, 50, 75, 100].map(pct => (
+            <button
+              key={pct}
+              type="button"
+              onClick={() => setAmountPercentage(pct)}
+              className="py-1 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] active:bg-brand/20 border border-white/5 text-[10px] font-bold text-muted hover:text-primary transition-all cursor-pointer"
+            >
+              {pct}%
+            </button>
+          ))}
+        </div>
+
+        {/* Execution Summary Strip */}
+        <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/5 space-y-1 mb-3 select-none">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-muted">You Pay:</span>
+            <span className="font-mono font-bold text-red-400 tabular-nums">
+              {isBuy
+                ? `${total && parseFloat(total) > 0 ? total : '0.00'} ${quoteCode}`
+                : `${amount && parseFloat(amount) > 0 ? amount : '0.00'} ${baseCode}`}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-muted">You Receive:</span>
+            <span className="font-mono font-bold text-green-400 tabular-nums">
+              {isBuy
+                ? `${amount && parseFloat(amount) > 0 ? amount : '0.00'} ${baseCode}`
+                : `${total && parseFloat(total) > 0 ? total : '0.00'} ${quoteCode}`}
+            </span>
+          </div>
+        </div>
+
+        {(error || errorMessage) && (
+          <div className="mb-3 p-2 bg-red-500/10 rounded-xl flex items-start gap-1.5 border border-red-500/20">
+            <AlertCircle className="w-3.5 h-3.5 text-red-500 mt-0.5 shrink-0" />
+            <p className="text-[11px] text-red-500 leading-tight">{error || errorMessage}</p>
+          </div>
+        )}
+
+        {/* Place Order CTA Button */}
+        <div className="mt-2">
           <button
             onClick={handlePlaceOrder}
             disabled={stellarWallet ? !canPlaceOrder || orderStatus === 'pending' : false}
-            className={`w-full py-4 lg:py-5 rounded-2xl font-bold text-sm uppercase tracking-[0.15em] transition-all min-h-[52px] lg:min-h-[56px] ${
+            className={`w-full py-3.5 rounded-xl font-bold text-xs uppercase tracking-[0.12em] transition-all min-h-[46px] cursor-pointer ${
               !stellarWallet
-                ? 'btn btn-primary bg-brand hover:bg-brand-hover text-white cursor-pointer'
-                : canPlaceOrder && orderStatus !== 'pending'
-                  ? 'btn btn-primary'
-                  : 'bg-tertiary text-muted opacity-50 cursor-not-allowed border border-divider'
+                ? 'btn btn-primary bg-brand hover:bg-brand-hover text-white'
+                : orderStatus === 'pending'
+                  ? 'bg-brand/50 text-white cursor-wait'
+                  : isBuy
+                    ? 'bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-500/20'
+                    : 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/20'
             }`}
           >
             {!stellarWallet ? (
               'Connect Wallet'
             ) : orderStatus === 'pending' ? (
               <span className="flex items-center justify-center gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                Placing...
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                Placing Order...
               </span>
             ) : orderStatus === 'success' ? (
               <span className="flex items-center justify-center gap-2">
-                <CheckCircle className="w-4 h-4" />
+                <CheckCircle className="w-3.5 h-3.5" />
                 {SUCCESS_MESSAGES.ORDER_SUCCESS || 'ORDER PLACED'}
               </span>
             ) : !toToken?.hasTrustline && !toToken?.asset.isNative() ? (
-              `ADD TRUSTLINE & ${isBuy ? 'BUY' : 'SELL'}`
+              `ADD TRUSTLINE & ${isBuy ? 'BUY' : 'SELL'} ${baseCode}`
             ) : (
-              `${isBuy ? 'BUY' : 'SELL'} ${toToken?.code || 'TOKEN'}`
+              `${isBuy ? 'BUY' : 'SELL'} ${baseCode}`
             )}
           </button>
         </div>
-
-        <div
-          className={`bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 shadow-sm p-1 flex flex-col h-[440px] lg:h-auto lg:min-h-0 lg:overflow-hidden overflow-hidden ${
-            activeTab === 'orderBook' ? '' : 'hidden lg:flex'
-          }`}
-        >
-          <OrderBook orderBook={orderBook} setPrice={setPrice} isLoading={isLoading} />
-        </div>
       </div>
+    );
+  };
+
+  return (
+    <>
+      {isMobile ? (
+        /* ============ MOBILE-OPTIMIZED 2-TAB DEFI LAYOUT ============ */
+        <div className="flex flex-col gap-2 w-full">
+          {/* Segmented Switcher: Trade vs Chart */}
+          <div className="flex bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/60 rounded-xl p-1 mb-1">
+            <button
+              onClick={() => setMobileTab('trade')}
+              className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                mobileTab === 'trade'
+                  ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              Trade
+            </button>
+            <button
+              onClick={() => setMobileTab('chart')}
+              className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                mobileTab === 'chart'
+                  ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              Chart & Depth
+            </button>
+          </div>
+
+          {mobileTab === 'trade' ? (
+            <>
+              {/* Order Trade Form */}
+              <div className="w-full">{renderOrderForm()}</div>
+
+              {/* Order Book & Trades Tabbed on Mobile */}
+              <div className="bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 shadow-sm overflow-hidden flex flex-col h-[380px]">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]/50 bg-[var(--color-bg-tertiary)]/40 shrink-0 select-none">
+                  <div className="flex items-center gap-1 bg-[var(--color-bg-secondary)] p-0.5 rounded-xl border border-[var(--color-border)]/40">
+                    <button
+                      onClick={() => setMiddleColumnTab('book')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                        middleColumnTab === 'book'
+                          ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                          : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                      }`}
+                    >
+                      Order Book
+                    </button>
+                    <button
+                      onClick={() => setMiddleColumnTab('trades')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                        middleColumnTab === 'trades'
+                          ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                          : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                      }`}
+                    >
+                      <span>Trades</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+                    </button>
+                  </div>
+                  <button
+                    onClick={refreshOrderBook}
+                    className="p-1.5 rounded-lg hover:bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+                    disabled={isLoading}
+                    title="Refresh"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {middleColumnTab === 'book' ? (
+                    <OrderBook
+                      orderBook={orderBook}
+                      setPrice={setPrice}
+                      isLoading={isLoading}
+                      baseSymbol={fromToken?.code || 'XLM'}
+                      counterSymbol={toToken?.code || 'USDC'}
+                    />
+                  ) : (
+                    <Suspense
+                      fallback={
+                        <div className="w-full h-full flex items-center justify-center bg-secondary">
+                          <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      }
+                    >
+                      <LastTrades
+                        baseAsset={fromToken || undefined}
+                        counterAsset={toToken || undefined}
+                      />
+                    </Suspense>
+                  )}
+                </div>
+              </div>
+
+              {/* Stellar Account Overview Panel on Mobile */}
+              <StellarAccountPanel
+                xlmBalance={
+                  fromToken?.code === 'XLM'
+                    ? fromToken.balance
+                    : toToken?.code === 'XLM'
+                      ? toToken.balance
+                      : '0.00'
+                }
+                spendableXlm={spendableAmount}
+                subentryCount={subentryCount}
+              />
+
+              {/* Open Orders & Trade History directly below */}
+              <div className="w-full bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 overflow-hidden shadow-sm min-h-[300px]">
+                <Suspense
+                  fallback={
+                    <div className="w-full h-32 flex items-center justify-center bg-secondary">
+                      <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  }
+                >
+                  <TradeTransactionUI />
+                </Suspense>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Chart View on Mobile */}
+              <div className="bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 overflow-hidden shadow-sm h-[380px]">
+                <Suspense
+                  fallback={
+                    <div className="w-full h-full flex items-center justify-center bg-secondary">
+                      <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  }
+                >
+                  <StellarTradingChart />
+                </Suspense>
+              </div>
+
+              {/* Recent Market Trades on Mobile */}
+              <div className="bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 shadow-sm overflow-hidden flex flex-col h-[320px]">
+                <div className="px-3 py-2 border-b border-[var(--color-border)]/50 bg-[var(--color-bg-tertiary)]/40 font-bold text-xs uppercase tracking-wider text-primary">
+                  Recent Market Trades
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <Suspense
+                    fallback={
+                      <div className="w-full h-full flex items-center justify-center bg-secondary">
+                        <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    }
+                  >
+                    <LastTrades
+                      baseAsset={fromToken || undefined}
+                      counterAsset={toToken || undefined}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        /* ============ DESKTOP PRO 3-COLUMN / 2-SECTION LAYOUT ============ */
+        <div className="flex flex-col lg:flex-row gap-2 lg:gap-3 items-start w-full">
+          {/* LEFT MAIN SECTION (FLEX-1): TOP ROW (CHART + ORDERBOOK) + BOTTOM ROW (TRANSACTIONS) */}
+          <div className="flex-1 min-w-0 flex flex-col gap-2 w-full">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_290px] xl:grid-cols-[1fr_310px] 2xl:grid-cols-[1fr_330px] gap-2 items-stretch">
+              {/* Candlestick Chart */}
+              <div className="bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 overflow-hidden shadow-sm h-[460px] lg:h-[520px]">
+                <Suspense
+                  fallback={
+                    <div className="w-full h-full flex items-center justify-center bg-secondary">
+                      <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  }
+                >
+                  <StellarTradingChart />
+                </Suspense>
+              </div>
+
+              {/* Tabbed Order Book & Recent Trades */}
+              <div className="bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 shadow-sm overflow-hidden flex flex-col h-[460px] lg:h-[520px]">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]/50 bg-[var(--color-bg-tertiary)]/40 shrink-0 select-none">
+                  <div className="flex items-center gap-1 bg-[var(--color-bg-secondary)] p-0.5 rounded-xl border border-[var(--color-border)]/40">
+                    <button
+                      onClick={() => setMiddleColumnTab('book')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                        middleColumnTab === 'book'
+                          ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                          : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                      }`}
+                    >
+                      Order Book
+                    </button>
+                    <button
+                      onClick={() => setMiddleColumnTab('trades')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                        middleColumnTab === 'trades'
+                          ? 'bg-[var(--color-brand-primary)] text-white shadow-xs'
+                          : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                      }`}
+                    >
+                      <span>Trades</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+                    </button>
+                  </div>
+                  <button
+                    onClick={refreshOrderBook}
+                    className="p-1.5 rounded-lg hover:bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+                    disabled={isLoading}
+                    title="Refresh"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {middleColumnTab === 'book' ? (
+                    <OrderBook
+                      orderBook={orderBook}
+                      setPrice={setPrice}
+                      isLoading={isLoading}
+                      baseSymbol={fromToken?.code || 'XLM'}
+                      counterSymbol={toToken?.code || 'USDC'}
+                    />
+                  ) : (
+                    <Suspense
+                      fallback={
+                        <div className="w-full h-full flex items-center justify-center bg-secondary">
+                          <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      }
+                    >
+                      <LastTrades
+                        baseAsset={fromToken || undefined}
+                        counterAsset={toToken || undefined}
+                      />
+                    </Suspense>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Row: Trade Transactions (Spans Full Width under Chart + OrderBook) */}
+            <div className="w-full bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 overflow-hidden shadow-sm min-h-[300px]">
+              <Suspense
+                fallback={
+                  <div className="w-full h-32 flex items-center justify-center bg-secondary">
+                    <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                  </div>
+                }
+              >
+                <TradeTransactionUI />
+              </Suspense>
+            </div>
+          </div>
+
+          {/* RIGHT SIDE AREA: ORDER TRADE FORM + ACCOUNT PANEL (Ecommerce-style sticky natural height) */}
+          <div
+            ref={sidebarRef}
+            style={stickyStyle}
+            className="w-full lg:w-[320px] xl:w-[340px] 2xl:w-[360px] shrink-0 flex flex-col gap-2 h-fit"
+          >
+            {renderOrderForm()}
+
+            <StellarAccountPanel
+              xlmBalance={
+                fromToken?.code === 'XLM'
+                  ? fromToken.balance
+                  : toToken?.code === 'XLM'
+                    ? toToken.balance
+                    : '0.00'
+              }
+              spendableXlm={spendableAmount}
+              subentryCount={subentryCount}
+            />
+          </div>
+        </div>
+      )}
 
       <StellarAssetSelectorModal
         isOpen={selectingAssetFor !== null}
@@ -1007,7 +867,7 @@ const OrderBookSwapUI = () => {
           if (selectingAssetFor === 'from') setFromToken(token as any);
           else setToToken(token as any);
         }}
-        title={`Select ${selectingAssetFor === 'from' ? 'Sell' : 'Buy'} Asset`}
+        title={`Select ${selectingAssetFor === 'from' ? 'Base (Trading)' : 'Quote (Pricing)'} Asset`}
       />
     </>
   );

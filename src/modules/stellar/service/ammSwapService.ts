@@ -1,4 +1,5 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
+import BigNumber from 'bignumber.js';
 
 import type { LiquidityPool, SwapOptions, SwapPath, SwapQuote } from '../types/ammSwap.types';
 import { StellarSequenceTracker } from '../utils/StellarSequenceTracker';
@@ -50,25 +51,32 @@ export class AmmSwapService extends StellarBaseService {
     outputReserve: string,
     feeRate: number = 0.0003
   ): { outputAmount: string; priceImpact: number } {
-    const input = parseFloat(inputAmount);
-    const reserveIn = parseFloat(inputReserve);
-    const reserveOut = parseFloat(outputReserve);
+    const input = new BigNumber(inputAmount);
+    const reserveIn = new BigNumber(inputReserve);
+    const reserveOut = new BigNumber(outputReserve);
+    const fee = new BigNumber(feeRate);
 
-    if (isNaN(input) || isNaN(reserveIn) || isNaN(reserveOut) || input <= 0) {
+    if (
+      input.isNaN() ||
+      reserveIn.isNaN() ||
+      reserveOut.isNaN() ||
+      input.isLessThanOrEqualTo(0) ||
+      reserveIn.isLessThanOrEqualTo(0) ||
+      reserveOut.isLessThanOrEqualTo(0)
+    ) {
       throw new Error('Invalid input parameters for swap calculation');
     }
 
-    const inputWithFee = input * (1 - feeRate);
+    const inputWithFee = input.times(new BigNumber(1).minus(fee));
+    const outputAmount = inputWithFee.times(reserveOut).dividedBy(reserveIn.plus(inputWithFee));
 
-    const outputAmount = (inputWithFee * reserveOut) / (reserveIn + inputWithFee);
-
-    const spotPrice = reserveOut / reserveIn;
-    const effectivePrice = outputAmount / input;
-    const priceImpact = ((spotPrice - effectivePrice) / spotPrice) * 100;
+    const spotPrice = reserveOut.dividedBy(reserveIn);
+    const effectivePrice = outputAmount.dividedBy(input);
+    const priceImpact = spotPrice.minus(effectivePrice).dividedBy(spotPrice).times(100).abs();
 
     return {
-      outputAmount: outputAmount.toFixed(7),
-      priceImpact: Math.abs(priceImpact),
+      outputAmount: outputAmount.toFixed(7, BigNumber.ROUND_DOWN),
+      priceImpact: priceImpact.toNumber(),
     };
   }
 

@@ -14,6 +14,10 @@ const RPC_CONFIG: Record<number, { name: string; rpcs: string[] }> = {
   11155111: { name: 'sepolia', rpcs: RPC_URLS.SEPOLIA },
   97: { name: 'bsc_testnet', rpcs: RPC_URLS.BSC_TESTNET },
   80002: { name: 'amoy', rpcs: RPC_URLS.AMOY },
+  421614: { name: 'arb_sepolia', rpcs: RPC_URLS.ARB_SEPOLIA },
+  11155420: { name: 'opt_sepolia', rpcs: RPC_URLS.OPT_SEPOLIA },
+  84532: { name: 'base_sepolia', rpcs: RPC_URLS.BASE_SEPOLIA },
+  43113: { name: 'avax_fuji', rpcs: RPC_URLS.AVAX_FUJI },
 };
 
 class RPCManager {

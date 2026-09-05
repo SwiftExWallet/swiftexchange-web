@@ -82,11 +82,32 @@ export const RPC_URLS = {
 
   AMOY: [
     'https://polygon-amoy-bor-rpc.publicnode.com',
-    'https://rpc-amoy.polygon.technology',
     'https://polygon-amoy.drpc.org',
-    'https://polygon-amoy.gateway.tatum.io/',
-    'https://polygon-amoy.public.blastapi.io',
-    'https://polygon-amoy-pokt.nodies.app',
+    'https://amoy.polygon.technology',
+  ],
+
+  ARB_SEPOLIA: [
+    'https://sepolia-rollup.arbitrum.io/rpc',
+    'https://arbitrum-sepolia-rpc.publicnode.com',
+    'https://arbitrum-sepolia.drpc.org',
+  ],
+
+  OPT_SEPOLIA: [
+    'https://sepolia.optimism.io',
+    'https://optimism-sepolia-rpc.publicnode.com',
+    'https://optimism-sepolia.drpc.org',
+  ],
+
+  BASE_SEPOLIA: [
+    'https://sepolia.base.org',
+    'https://base-sepolia-rpc.publicnode.com',
+    'https://base-sepolia.drpc.org',
+  ],
+
+  AVAX_FUJI: [
+    'https://api.avax-test.network/ext/bc/C/rpc',
+    'https://avalanche-fuji-c-chain-rpc.publicnode.com',
+    'https://avalanche-fuji.drpc.org',
   ],
 
   STR: ['https://horizon.stellar.org'],
@@ -104,6 +125,10 @@ export const EXPLORER_URLS = {
   SEPOLIA: 'https://sepolia.etherscan.io',
   BSC_TESTNET: 'https://testnet.bscscan.com',
   AMOY: 'https://www.oklink.com/amoy',
+  ARB_SEPOLIA: 'https://sepolia.arbiscan.io',
+  OPT_SEPOLIA: 'https://sepolia-optimism.etherscan.io',
+  BASE_SEPOLIA: 'https://sepolia.basescan.org',
+  AVAX_FUJI: 'https://testnet.snowtrace.io',
   STR: 'https://stellar.expert/explorer/public',
   STR_TESTNET: 'https://stellar.expert/explorer/testnet',
   DYDX: 'https://www.mintscan.io/dydx',
@@ -118,6 +143,14 @@ export const RPC = {
   BASERPC: RPC_URLS.BASE[0],
   BSCRPC: RPC_URLS.BNB[0],
   STRRPC: RPC_URLS.STR[0],
+  STRRPC_TESTNET: RPC_URLS.STR_TESTNET[0],
+  SEPOLIARPC: RPC_URLS.SEPOLIA[0],
+  BSC_TESTNETRPC: RPC_URLS.BSC_TESTNET[0],
+  AMOYRPC: RPC_URLS.AMOY[0],
+  ARB_SEPOLIARPC: RPC_URLS.ARB_SEPOLIA[0],
+  OPT_SEPOLIARPC: RPC_URLS.OPT_SEPOLIA[0],
+  BASE_SEPOLIARPC: RPC_URLS.BASE_SEPOLIA[0],
+  AVAX_FUJIRPC: RPC_URLS.AVAX_FUJI[0],
 };
 
 export const NATIVE_ADDRESS = '0X0000000000000000000000000000000000000000';
@@ -131,3 +164,7 @@ export const GET_LOGO_URL = (slug: string) => GET_TOKEN_LOGO_URL(slug, NATIVE_AD
 export const GET_TOKEN_LOGO_URL = (slug: string, address: string) =>
   `${ASSET_CDN_BASE}/${slug}/${address}.png`;
 export const GET_RESOURCES_LIST_URL = (filename: string) => `${RESOURCE_BASE_URL}/${filename}`;
+export const GET_STELLAR_TOKEN_LIST_URL = (network: string) =>
+  network === 'testnet'
+    ? GET_RESOURCES_LIST_URL('stellar_testnet_tokens.json')
+    : GET_RESOURCES_LIST_URL('stellar_tokens.json');

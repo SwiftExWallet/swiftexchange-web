@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 
 import { validateAddress } from '../../../validator/AddressValidator';
 import { addLocalTransaction } from '../../evm/service/localTransactionService';
-import { CHAIN_REGISTRY } from '../../evm/utils/Chainregistry';
+import { getTokensForChain } from '../../evm/service/tokenListService';
+import { CHAIN_REGISTRY, getChainById } from '../../evm/utils/Chainregistry';
 import {
   buildAddTrustlineTransaction,
   checkTrustlineExists,
@@ -25,55 +26,63 @@ export const useReceiveAssets = () => {
 
   const assets = useMemo(() => {
     const list: any[] = [];
-    for (const config of CHAIN_REGISTRY) {
-      if (config.receiveEnable) {
-        const isStellar = config.chainId === 'pubnet';
-        const chainPrefix = isStellar ? 'stellar' : 'evm';
-        const walletType = isStellar ? WalletType.STELLAR : WalletType.EVM;
-        const addressType = isStellar ? 'stellar' : 'evm';
+    const networkChains = CHAIN_REGISTRY.filter(
+      c => c.networkType === currentNetwork && c.available
+    );
 
-        const nativeId = `${chainPrefix}-${config.chainId}-native`;
+    for (const config of networkChains) {
+      if (!config.receiveEnable) continue;
+      const isStellar = config.chainId === 'pubnet' || config.chainId === 'testnet';
+      const chainPrefix = isStellar ? 'stellar' : 'evm';
+      const walletType = isStellar ? WalletType.STELLAR : WalletType.EVM;
+      const addressType = isStellar ? 'stellar' : 'evm';
+
+      // 1. Native asset
+      const nativeId = `${chainPrefix}-${config.chainId}-native`;
+      list.push({
+        id: nativeId,
+        value: nativeId,
+        symbol: config.nativeCurrency.symbol,
+        name: config.nativeCurrency.name,
+        image: config.nativeCurrency.logoURI || config.logoURI,
+        label: `${config.nativeCurrency.symbol} (${config.name})`,
+        network: config.name,
+        chainId: config.chainId,
+        chainType: addressType,
+        walletType,
+        decimals: config.nativeCurrency.decimals,
+        tokenAddress: config.nativeCurrency.address,
+        addressType,
+        isNative: true,
+      });
+
+      // 2. Supported tokens
+      const chainTokens = getTokensForChain(config.chainId);
+      for (const t of chainTokens) {
+        if (t.isNative || t.symbol.toUpperCase() === config.nativeCurrency.symbol.toUpperCase()) {
+          continue;
+        }
+        const assetId = `${chainPrefix}-${config.chainId}-${t.symbol}`;
         list.push({
-          id: nativeId,
-          value: nativeId,
-          symbol: config.nativeCurrency.symbol,
-          name: config.nativeCurrency.name,
-          image: config.nativeCurrency.logoURI,
-          label: `${config.nativeCurrency.symbol} (${config.name})`,
+          id: assetId,
+          value: assetId,
+          symbol: t.symbol,
+          name: t.name,
+          image: t.logoURI,
+          label: `${t.symbol} (${config.name})`,
           network: config.name,
           chainId: config.chainId,
           chainType: addressType,
           walletType,
-          decimals: config.nativeCurrency.decimals,
-          tokenAddress: config.nativeCurrency.address,
+          decimals: t.decimals,
+          tokenAddress: t.address,
           addressType,
-          isNative: true,
-        });
-
-        config.assets.forEach(asset => {
-          if (asset.symbol === config.nativeCurrency.symbol) return;
-          const assetId = `${chainPrefix}-${config.chainId}-${asset.symbol}`;
-          list.push({
-            id: assetId,
-            value: assetId,
-            symbol: asset.symbol,
-            name: asset.name,
-            image: asset.logoURI,
-            label: `${asset.symbol} (${config.name})`,
-            network: config.name,
-            chainId: config.chainId,
-            chainType: addressType,
-            walletType,
-            decimals: asset.decimals,
-            tokenAddress: asset.address,
-            addressType,
-            isNative: false,
-          });
+          isNative: false,
         });
       }
     }
     return list;
-  }, []);
+  }, [currentNetwork]);
 
   const assetParam = searchParams.get('asset');
   const chainIdParam = searchParams.get('chainId');
@@ -81,10 +90,13 @@ export const useReceiveAssets = () => {
 
   const currentAsset = useMemo(() => {
     if (assetParam && chainIdParam) {
-      return assets.find(a => {
+      const stellarChainId = currentNetwork === 'testnet' ? 'testnet' : 'pubnet';
+      const paramIdStr = chainIdParam === 'stellar' ? stellarChainId : String(chainIdParam);
+
+      const found = assets.find(a => {
         const aChainIdStr = String(a.chainId);
-        const paramIdStr = chainIdParam === 'stellar' ? 'pubnet' : chainIdParam;
-        if (a.symbol !== assetParam || aChainIdStr !== paramIdStr) return false;
+        if (a.symbol.toUpperCase() !== assetParam.toUpperCase() || aChainIdStr !== paramIdStr)
+          return false;
 
         if (addressParam) {
           const aIsNative =
@@ -102,26 +114,92 @@ export const useReceiveAssets = () => {
         }
         return true;
       });
+
+      if (found) return found;
+
+      // Fallback direct resolver
+      const config = getChainById(paramIdStr);
+      if (config) {
+        const isStellar = config.chainId === 'pubnet' || config.chainId === 'testnet';
+        const chainPrefix = isStellar ? 'stellar' : 'evm';
+        const walletType = isStellar ? WalletType.STELLAR : WalletType.EVM;
+        const addressType = isStellar ? 'stellar' : 'evm';
+        const isNativeParam =
+          !addressParam ||
+          addressParam.toLowerCase() === 'native' ||
+          addressParam.toLowerCase() === '0x0000000000000000000000000000000000000000';
+
+        if (
+          isNativeParam ||
+          assetParam.toUpperCase() === config.nativeCurrency.symbol.toUpperCase()
+        ) {
+          return {
+            id: `${chainPrefix}-${config.chainId}-native`,
+            value: `${chainPrefix}-${config.chainId}-native`,
+            symbol: config.nativeCurrency.symbol,
+            name: config.nativeCurrency.name,
+            image: config.nativeCurrency.logoURI || config.logoURI,
+            label: `${config.nativeCurrency.symbol} (${config.name})`,
+            network: config.name,
+            chainId: config.chainId,
+            chainType: addressType,
+            walletType,
+            decimals: config.nativeCurrency.decimals,
+            tokenAddress: config.nativeCurrency.address,
+            addressType,
+            isNative: true,
+          };
+        }
+
+        const chainTokens = getTokensForChain(config.chainId);
+        const matched = chainTokens.find(
+          t =>
+            (addressParam &&
+              addressParam.toLowerCase() !== 'native' &&
+              t.address.toLowerCase() === addressParam.toLowerCase()) ||
+            t.symbol.toUpperCase() === assetParam.toUpperCase()
+        );
+
+        if (matched) {
+          return {
+            id: `${chainPrefix}-${config.chainId}-${matched.symbol}`,
+            value: `${chainPrefix}-${config.chainId}-${matched.symbol}`,
+            symbol: matched.symbol,
+            name: matched.name,
+            image: matched.logoURI,
+            label: `${matched.symbol} (${config.name})`,
+            network: config.name,
+            chainId: config.chainId,
+            chainType: addressType,
+            walletType,
+            decimals: matched.decimals,
+            tokenAddress: matched.address,
+            addressType,
+            isNative: false,
+          };
+        }
+      }
     }
     return undefined;
-  }, [assets, assetParam, chainIdParam, addressParam]);
+  }, [assets, assetParam, chainIdParam, addressParam, currentNetwork]);
 
   useEffect(() => {
-    if (assets.length === 0) return;
+    if (!assetParam || !chainIdParam) {
+      if (assets.length > 0) {
+        const connectedFirst = assets.find(a => {
+          return !!connectedWallets[a.walletType as WalletType];
+        });
 
-    if (!currentAsset) {
-      const connectedFirst = assets.find(a => {
-        return !!connectedWallets[a.walletType as WalletType];
-      });
+        const fallback = connectedFirst ?? assets[0];
+        const targetChainId =
+          fallback.chainId === 'pubnet' || fallback.chainId === 'testnet'
+            ? 'stellar'
+            : String(fallback.chainId);
 
-      const fallback = connectedFirst ?? assets[0];
-      const targetChainId = fallback.chainId === 'pubnet' ? 'stellar' : String(fallback.chainId);
-
-      if (assetParam !== fallback.symbol || chainIdParam !== targetChainId) {
         setSearchParams({ asset: fallback.symbol, chainId: targetChainId }, { replace: true });
       }
     }
-  }, [currentAsset, assets, assetParam, chainIdParam, setSearchParams, connectedWallets]);
+  }, [assets, assetParam, chainIdParam, setSearchParams, connectedWallets]);
 
   const walletAddress = useMemo(() => {
     if (!currentAsset) return '';
@@ -266,8 +344,7 @@ export const useReceiveAssets = () => {
     isAddressValid,
     isConnected: Object.keys(connectedWallets).length > 0,
     isWalletTypeConnected:
-      !!currentAsset &&
-      !!connectedWallets[currentAsset.walletType as WalletType],
+      !!currentAsset && !!connectedWallets[currentAsset.walletType as WalletType],
     handleCopy,
     handleShare,
     copyFeedback,

@@ -1,12 +1,20 @@
 import { sendCustomNotification } from '@/service/notificationService';
 import { Wallet, getAddress, verifyTypedData } from 'ethers';
 
-import { ASTER_REST_URL } from '../../perps/adapters/aster';
+import { useWalletStore } from '../store/walletConnectStore';
 import { destroyAESKey, generateAndStoreAESKey, retrieveAESKey } from './keyVaultIndexedDB';
 
-const BLOB_KEY = '_sx_aster_agentkey';
-const ADDR_KEY = '_sx_aster_agentaddr';
+const BLOB_KEY_PREFIX = '_sx_aster_agentkey';
+const ADDR_KEY_PREFIX = '_sx_aster_agentaddr';
 const AGENT_NAME = '@swiftex-desktop';
+
+function getBlobKey(network: string = 'mainnet') {
+  return `${BLOB_KEY_PREFIX}_${network}`;
+}
+
+function getAddrKey(network: string = 'mainnet') {
+  return `${ADDR_KEY_PREFIX}_${network}`;
+}
 
 function getAsterAgentDomain(chainId: number) {
   return {
@@ -36,7 +44,8 @@ function buildApproveAgentData(
   agentAddress: string,
   nonce: number,
   expired: number,
-  chainId: number
+  chainId: number,
+  asterChain: string = 'Mainnet'
 ) {
   return {
     domain: getAsterAgentDomain(chainId),
@@ -57,7 +66,7 @@ function buildApproveAgentData(
       CanSpotTrade: true,
       CanPerpTrade: true,
       CanWithdraw: false,
-      AsterChain: 'Mainnet',
+      AsterChain: asterChain,
       User: getAddress(evmAddress),
       Nonce: nonce,
     },
@@ -132,7 +141,16 @@ export async function submitApproveAgent(params: {
   canSpotTrade: boolean;
   canPerpTrade: boolean;
   canWithdraw: boolean;
+  asterChain?: string;
+  network?: 'mainnet' | 'testnet';
 }) {
+  const isTestnet =
+    params.network === 'testnet' ||
+    params.signatureChainId === 97 ||
+    params.signatureChainId === 421614 ||
+    params.signatureChainId === 11155111;
+  const asterChain = params.asterChain || (isTestnet ? 'Testnet' : 'Mainnet');
+
   const rawParams = [
     `agentName=${params.agentName}`,
     `agentAddress=${getAddress(params.agentAddress)}`,
@@ -140,7 +158,7 @@ export async function submitApproveAgent(params: {
     `canSpotTrade=${params.canSpotTrade.toString()}`,
     `canPerpTrade=${params.canPerpTrade.toString()}`,
     `canWithdraw=${params.canWithdraw.toString()}`,
-    `asterChain=Mainnet`,
+    `asterChain=${asterChain}`,
     `user=${getAddress(params.user)}`,
     `nonce=${params.nonce}`,
     `signature=${params.signature}`,
@@ -148,10 +166,12 @@ export async function submitApproveAgent(params: {
   ];
 
   const queryString = rawParams.join('&');
-  const url = `${ASTER_REST_URL}/fapi/v3/approveAgent?${queryString}`;
+  const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
+  const url = `${baseUrl}/fapi/v3/approveAgent?${queryString}`;
 
   console.groupCollapsed('[aster] submitApproveAgent → request');
   console.log('url:', url);
+  console.log('network:', params.network, 'isTestnet:', isTestnet, 'asterChain:', asterChain);
   console.groupEnd();
 
   const controller = new AbortController();
@@ -177,17 +197,17 @@ export async function submitApproveAgent(params: {
     clearTimeout(timeoutId);
   }
 
-  const data = await res.json();
+  const data = await res.json().catch(() => null);
 
   console.groupCollapsed('[aster] submitApproveAgent → response');
   console.log('status:', res.status, res.statusText);
   console.log('data:', data);
   console.groupEnd();
 
-  if (data.code !== 200) {
-    throw new Error(
-      `Aster API approval failed: ${data.msg || 'Unknown error'} (code: ${data.code})`
-    );
+  if (!res.ok || !data || (data.code && data.code !== 200 && data.code !== 0) || data.error) {
+    const errMsg =
+      data?.error || data?.msg || data?.message || (data ? JSON.stringify(data) : res.statusText);
+    throw new Error(`Aster API approval failed: ${errMsg} (code: ${data?.code || res.status})`);
   }
 }
 
@@ -308,7 +328,8 @@ async function signTypedData(
 
 export async function deriveAsterAgentKey(
   evmAddress: string,
-  provider: any
+  provider: any,
+  network?: 'mainnet' | 'testnet'
 ): Promise<{
   agentAddress: string;
   wallet: Wallet;
@@ -316,7 +337,11 @@ export async function deriveAsterAgentKey(
   nonce: string;
   expired: string;
 }> {
-  let chainId = 56;
+  const currentNetwork = network || useWalletStore.getState().network || 'mainnet';
+  const isTestnet = currentNetwork === 'testnet';
+  const asterChain = isTestnet ? 'Testnet' : 'Mainnet';
+
+  let chainId = isTestnet ? 97 : 56;
 
   try {
     const rawChainId = await provider.request({ method: 'eth_chainId' });
@@ -327,7 +352,7 @@ export async function deriveAsterAgentKey(
     }
     console.log(`[aster] Dynamically fetched active chainId from wallet: ${chainId}`);
   } catch (err) {
-    console.warn('[aster] Failed to fetch active eth_chainId, falling back to 56', err);
+    console.warn(`[aster] Failed to fetch active eth_chainId, falling back to ${chainId}`, err);
   }
 
   const agentWallet = new Wallet(Wallet.createRandom().privateKey);
@@ -335,11 +360,19 @@ export async function deriveAsterAgentKey(
   const nonce = Date.now() * 1000;
   const expired = Date.now() + 30 * 24 * 60 * 60 * 1000;
 
-  const typedData = buildApproveAgentData(evmAddress, agentWallet.address, nonce, expired, chainId);
+  const typedData = buildApproveAgentData(
+    evmAddress,
+    agentWallet.address,
+    nonce,
+    expired,
+    chainId,
+    asterChain
+  );
 
   console.groupCollapsed('[aster] deriveAsterAgentKey → signing payload');
   console.log('evmAddress (signer):', evmAddress);
   console.log('agentWallet.address:', agentWallet.address);
+  console.log('network:', currentNetwork, 'asterChain:', asterChain, 'chainId:', chainId);
   console.log('domain:', typedData.domain);
   console.log('primaryType:', typedData.primaryType);
   console.log('types.ApproveAgent:', typedData.types.ApproveAgent);
@@ -380,6 +413,8 @@ export async function deriveAsterAgentKey(
     canSpotTrade: true,
     canPerpTrade: true,
     canWithdraw: false,
+    asterChain,
+    network: currentNetwork,
   });
 
   return {
@@ -391,7 +426,11 @@ export async function deriveAsterAgentKey(
   };
 }
 
-export async function encryptAndStoreAgentKey(privKeyHex: string): Promise<string> {
+export async function encryptAndStoreAgentKey(
+  privKeyHex: string,
+  network?: string
+): Promise<string> {
+  const net = network || useWalletStore.getState().network || 'mainnet';
   let aesKey = await retrieveAESKey();
   if (!aesKey) aesKey = await generateAndStoreAESKey();
 
@@ -402,19 +441,22 @@ export async function encryptAndStoreAgentKey(privKeyHex: string): Promise<strin
   const blob = await encryptBytes(keyBytes, aesKey);
   keyBytes.fill(0);
 
-  localStorage.setItem(BLOB_KEY, JSON.stringify(blob));
-  localStorage.setItem(ADDR_KEY, agentWallet.address);
+  localStorage.setItem(getBlobKey(net), JSON.stringify(blob));
+  localStorage.setItem(getAddrKey(net), agentWallet.address);
 
   return agentWallet.address;
 }
 
-export async function restoreAgentWallet(): Promise<Wallet | null> {
-  const raw = localStorage.getItem(BLOB_KEY);
+export async function restoreAgentWallet(network?: string): Promise<Wallet | null> {
+  const net = network || useWalletStore.getState().network || 'mainnet';
+  const raw =
+    localStorage.getItem(getBlobKey(net)) ||
+    (net === 'mainnet' ? localStorage.getItem(BLOB_KEY_PREFIX) : null);
   if (!raw) return null;
 
   const aesKey = await retrieveAESKey();
   if (!aesKey) {
-    purgeAgentKey();
+    purgeAgentKey(net);
     return null;
   }
 
@@ -422,7 +464,7 @@ export async function restoreAgentWallet(): Promise<Wallet | null> {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    purgeAgentKey();
+    purgeAgentKey(net);
     return null;
   }
 
@@ -434,25 +476,42 @@ export async function restoreAgentWallet(): Promise<Wallet | null> {
     return new Wallet(privKeyHex);
   } catch {
     if (keyBytes) keyBytes.fill(0);
-    purgeAgentKey();
+    purgeAgentKey(net);
     return null;
   }
 }
 
-export function getStoredAgentAddress(): string | null {
-  return localStorage.getItem(ADDR_KEY);
+export function getStoredAgentAddress(network?: string): string | null {
+  const net = network || useWalletStore.getState().network || 'mainnet';
+  return (
+    localStorage.getItem(getAddrKey(net)) ||
+    (net === 'mainnet' ? localStorage.getItem(ADDR_KEY_PREFIX) : null)
+  );
 }
 
-export function hasStoredAgentKey(): boolean {
-  return !!localStorage.getItem(BLOB_KEY);
+export function hasStoredAgentKey(network?: string): boolean {
+  const net = network || useWalletStore.getState().network || 'mainnet';
+  return !!(
+    localStorage.getItem(getBlobKey(net)) ||
+    (net === 'mainnet' && localStorage.getItem(BLOB_KEY_PREFIX))
+  );
 }
 
-export function purgeAgentKey(): void {
-  localStorage.removeItem(BLOB_KEY);
-  localStorage.removeItem(ADDR_KEY);
+export function purgeAgentKey(network?: string): void {
+  if (network) {
+    localStorage.removeItem(getBlobKey(network));
+    localStorage.removeItem(getAddrKey(network));
+  } else {
+    localStorage.removeItem(getBlobKey('mainnet'));
+    localStorage.removeItem(getAddrKey('mainnet'));
+    localStorage.removeItem(getBlobKey('testnet'));
+    localStorage.removeItem(getAddrKey('testnet'));
+    localStorage.removeItem(BLOB_KEY_PREFIX);
+    localStorage.removeItem(ADDR_KEY_PREFIX);
+  }
 }
 
-export async function purgeAgentKeyAndAes(): Promise<void> {
-  purgeAgentKey();
+export async function purgeAgentKeyAndAes(network?: string): Promise<void> {
+  purgeAgentKey(network);
   await destroyAESKey();
 }

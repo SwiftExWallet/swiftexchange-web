@@ -2,6 +2,7 @@ import { ChevronDown, Plus } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 
 import InfoBanner from '../../../../components/common/InfoBanner';
+import { useExchangeManager } from '../../core/ExchangeManager';
 import { useAccountStore } from '../../core/stores/accountStore';
 import { useMarketStore } from '../../core/stores/marketStore';
 import {
@@ -39,6 +40,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   onOpenDepositModal,
 }) => {
   const store = useOrderEntryStore();
+  const currentNetwork = useExchangeManager(state => state.currentNetwork);
   const [isAssetModeModalOpen, setIsAssetModeModalOpen] = useState(false);
   const [isTifOpen, setIsTifOpen] = useState(false);
 
@@ -202,7 +204,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           type="button"
           onClick={onOpenDepositModal}
           className="w-4 h-4 rounded-full border border-brand/50 text-brand hover:bg-brand/10 flex items-center justify-center transition-colors cursor-pointer"
-          title="Deposit"
+          title={currentNetwork === 'testnet' ? 'Claim Testnet Faucet Funds' : 'Deposit'}
         >
           <Plus size={11} strokeWidth={2.5} />
         </button>
