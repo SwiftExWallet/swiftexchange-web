@@ -1,38 +1,27 @@
-# Swiftex Wallet Exchange 🚀
-
-<div align="center">
+# Swiftex Wallet Exchange
 
 **A Non-Custodial Multi-Chain DeFi Trading Platform**
 
-[![React](https://img.shields.io/badge/React-18-blue.svg)](https://reactjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
-[![Vite](https://img.shields.io/badge/Vite-5.0-646CFF.svg)](https://vitejs.dev/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![React](https://img.shields.io/badge/React-18-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-blue) ![Vite](https://img.shields.io/badge/Vite-7-purple) ![Stellar SDK](https://img.shields.io/badge/Stellar%20SDK-v14-brightgreen) ![License](https://img.shields.io/badge/License-MIT-green)
 
-[Live Demo](https://app.swiftexchange.io/)
-
-</div>
-
----
+[Live Demo](https://swiftexchange.io)
 
 ## 📖 Table of Contents
 
 - [Overview](#-overview)
 - [Key Features](#-key-features)
 - [Supported Networks](#-supported-networks)
-- [Architecture](#-architecture)
+- [Architecture](#️-architecture)
 - [Getting Started](#-getting-started)
 - [User Flow](#-user-flow)
-- [Technology Stack](#-technology-stack)
+- [Technology Stack](#️-technology-stack)
 - [Security](#-security)
 - [Development](#-development)
 - [Deployment](#-deployment)
 
----
-
 ## 🌟 Overview
 
-**Swiftex Wallet Exchange** is an open-source, non-custodial decentralized exchange that enables seamless trading across multiple blockchain ecosystems. Connect your wallet, manage assets, swap tokens, and trade perpetual derivatives on **Aster** — all while maintaining full control of your funds.
+Swiftex Wallet Exchange is an open-source, non-custodial decentralized exchange that enables seamless trading across multiple blockchain ecosystems. Connect your wallet, manage assets, swap tokens, and trade perpetual derivatives on Aster — all while maintaining full control of your funds.
 
 ### What Makes Swiftex Different?
 
@@ -44,7 +33,16 @@
 - ✅ **Real-Time Updates**: Live market data via WebSocket
 - ✅ **Open Source**: Fully auditable codebase
 
----
+## 📸 Screenshots
+
+<p align="center">
+  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755051/Screenshot_2026-09-07_at_9.47.44_AM_mpzycz.webp" width="45%" alt="Dashboard" />
+  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755050/Screenshot_2026-09-07_at_9.44.44_AM_y0o8qo.webp" width="45%" alt="Trading View" />
+</p>
+<p align="center">
+  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755050/Screenshot_2026-09-07_at_9.44.15_AM_iezbgr.webp" width="45%" alt="Swap Screen" />
+  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755049/Screenshot_2026-09-07_at_9.43.32_AM_puwb0x.webp" width="45%" alt="Wallet Connect" />
+</p>
 
 ## 🎯 Key Features
 
@@ -64,20 +62,24 @@
 
 ### 📈 Perpetual Trading (Aster)
 
-- **Order Types**:
-  - Market Orders
-  - Limit Orders
-  - Take-Profit / Stop-Loss
-  - Post-Only Orders
-  - Conditional / Stop Orders
+**Order Types:**
 
-- **Margin Modes**:
-  - ✅ Cross Margin
-  - ✅ Isolated Margin
+- Market Orders
+- Limit Orders
+- Take-Profit / Stop-Loss
+- Post-Only Orders
+- Conditional / Stop Orders
 
-- **Agent Wallet**: Approve a session trading key once so orders can be placed without a wallet pop-up on every trade — revocable at any time
-- **Real-Time Data**: Live order books, trades, and price charts
-- **Trading Modes**: Pro Mode for advanced order flow, Simple Mode for quick market exposure
+**Margin Modes:**
+
+- ✅ Cross Margin
+- ✅ Isolated Margin
+
+**Agent Wallet**: Approve a session trading key once so orders can be placed without a wallet pop-up on every trade — revocable at any time
+
+**Real-Time Data**: Live order books, trades, and price charts
+
+**Trading Modes**: Pro Mode for advanced order flow, Simple Mode for quick market exposure
 
 ### 📊 Market Intelligence
 
@@ -87,18 +89,14 @@
 - Market statistics
 - Portfolio tracking with P&L
 
----
-
 ## 🌐 Supported Networks
 
-| Network       | Features                                  | Status    |
-| ------------- | ----------------------------------------- | --------- |
-| **Ethereum**  | Swaps, Transfers, Bridging, Aster Perps   | ✅ Active |
-| **BNB Chain** | Swaps, Transfers, Bridging, Aster Perps   | ✅ Active |
-| **Arbitrum**  | Aster Perps                               | ✅ Active |
-| **Stellar**   | AMM Swaps, Order Book Trading, Trustlines | ✅ Active |
-
----
+| Network   | Features                                  | Status    |
+| --------- | ----------------------------------------- | --------- |
+| Ethereum  | Swaps, Transfers, Bridging, Aster Perps   | ✅ Active |
+| BNB Chain | Swaps, Transfers, Bridging, Aster Perps   | ✅ Active |
+| Arbitrum  | Aster Perps                               | ✅ Active |
+| Stellar   | AMM Swaps, Order Book Trading, Trustlines | ✅ Active |
 
 ## 🏗️ Architecture
 
@@ -153,80 +151,78 @@
 - **Client-Side Only**: Backend services are stateless proxies
 - **Wallet Approval Required**: Connecting, depositing, and withdrawing always require explicit signature from your main wallet
 
----
-
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- **Node.js** v22 or higher ([Download](https://nodejs.org/))
-- **npm** or **yarn** package manager
+- **Node.js v22 or higher** ([Download](https://nodejs.org/)) — required. The test suite uses the `--experimental-require-module` Node flag, which needs Node.js v22+ to run correctly. Using an older version (even if the build/dev server works) will cause `npm run test` to fail.
+- npm or yarn package manager
 - A compatible wallet:
-  - EVM: MetaMask, Coinbase Wallet, Binance Wallet, OKX Wallet, Trust Wallet, Rainbow, etc.
-  - Stellar: Freighter, Lobstr, xBull, Rabet
+  - **EVM**: MetaMask, Coinbase Wallet, Binance Wallet, OKX Wallet, Trust Wallet, Rainbow, etc.
+  - **Stellar**: Freighter, Lobstr, xBull, Rabet
 
 ### Installation
 
 1. **Clone the repository**
 
-```bash
-git clone https://github.com/karanbisht-123/swiftexchange-web.git
-cd swiftexchange-web
-```
+   ```bash
+   git clone https://github.com/karanbisht-123/swiftexchange-web.git
+   cd swiftexchange-web
+   ```
 
 2. **Install dependencies**
 
-```bash
-npm install
-```
+   ```bash
+   npm install
+   ```
 
 3. **Set up environment variables**
 
-Create a `.env` file in the root directory:
+   Create a `.env` file in the root directory:
 
-```env
-# WalletConnect Configuration
-VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
-VITE_WALLETCONNECT_RELAY_URL=wss://relay.walletconnect.com
+   ```env
+   # WalletConnect Configuration
+   VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
+   VITE_WALLETCONNECT_RELAY_URL=wss://relay.walletconnect.com
 
-# Development / Testnet Environment
-VITE_BASE_SERVER_URL_TEST=https://dev.swiftexchange.io/api/v1
-VITE_API_DEVICE_AUTH_DEV=your_dev_auth_token
+   # Development Environment
+   VITE_BASE_SERVER_URL_DEV=https://dev-api.swiftex.exchange
+   VITE_BASE_PROXY_URL_DEV=https://dev-proxy.swiftex.exchange
+   VITE_API_DEVICE_AUTH_DEV=your_dev_auth_token
 
-# Production Environment
-VITE_BASE_SERVER_URL_PROD=https://beta-v2.swiftexchange.io/api/v1
-VITE_API_DEVICE_AUTH_PROD=your_prod_auth_token
-```
+   # Production Environment
+   VITE_BASE_SERVER_URL_PROD=https://api.swiftex.exchange
+   VITE_BASE_PROXY_URL_PROD=https://proxy.swiftex.exchange
+   VITE_API_DEVICE_AUTH_PROD=your_prod_auth_token
+   ```
 
 4. **Start development server**
 
-```bash
-npm run dev
-```
+   ```bash
+   npm run dev
+   ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
-
----
+   Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## 👤 User Flow
 
 ### First-Time User Journey
 
-#### Step 1: Connect Wallet
+**Step 1: Connect Wallet**
 
 - Click "Connect Wallet" button
 - Choose your wallet provider
 - Approve connection in your wallet
 
-#### Step 2: View Your Assets
+**Step 2: View Your Assets**
 
 - See all your token balances across connected chains
 - Real-time price updates
 - Portfolio value tracking
 
-#### Step 3: Perform Actions
+**Step 3: Perform Actions**
 
-**For EVM/Stellar Operations:**
+_For EVM/Stellar Operations:_
 
 - Swap tokens on Stellar AMM
 - Bridge assets between chains
@@ -234,7 +230,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 - Manage Stellar trustlines
 - Each action requires wallet approval
 
-**For Aster Perpetual Trading:**
+_For Aster Perpetual Trading:_
 
 1. **Connect & Authorize**
    - Connect your EVM wallet
@@ -245,7 +241,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
    - This key can place and manage orders but can never move your funds
    - Revoke access anytime from settings
 
-3. **Fund Your Account** (if needed)
+3. **Fund Your Account (if needed)**
    - Deposit collateral to your Aster trading account
    - Funds settle on-chain and appear in your balance
 
@@ -257,44 +253,42 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
    - Choose cross or isolated margin
    - Monitor positions and P&L
 
----
-
 ## 🛠️ Technology Stack
 
 ### Frontend
 
-| Technology            | Purpose                                  |
-| --------------------- | ---------------------------------------- |
-| **React 18**          | UI framework with concurrent features    |
-| **Vite 5**            | Lightning-fast build tool and dev server |
-| **TypeScript**        | Type-safe development                    |
-| **Tailwind CSS**      | Utility-first styling                    |
-| **@tailwindcss/vite** | Native Tailwind integration for Vite     |
+| Technology        | Purpose                                  |
+| ----------------- | ---------------------------------------- |
+| React 18          | UI framework with concurrent features    |
+| Vite 5            | Lightning-fast build tool and dev server |
+| TypeScript        | Type-safe development                    |
+| Tailwind CSS      | Utility-first styling                    |
+| @tailwindcss/vite | Native Tailwind integration for Vite     |
 
 ### Blockchain Integration
 
-| Library                        | Purpose                                          |
-| ------------------------------ | ------------------------------------------------ |
-| **WalletConnect v2**           | Multi-wallet connection protocol                 |
-| **Ethers.js**                  | EVM blockchain interaction                       |
-| **@stellar/stellar-sdk**       | Stellar network operations                       |
-| **Aster REST / WebSocket API** | Perpetual trading, order books, and account data |
+| Library                    | Purpose                                          |
+| -------------------------- | ------------------------------------------------ |
+| WalletConnect v2           | Multi-wallet connection protocol                 |
+| Ethers.js                  | EVM blockchain interaction                       |
+| @stellar/stellar-sdk (v14) | Stellar network operations                       |
+| Aster REST / WebSocket API | Perpetual trading, order books, and account data |
 
 ### State & Real-Time Data
 
-| Tool          | Purpose                                   |
-| ------------- | ----------------------------------------- |
-| **Zustand**   | Lightweight state management              |
-| **WebSocket** | Real-time market data and account updates |
+| Tool      | Purpose                                   |
+| --------- | ----------------------------------------- |
+| Zustand   | Lightweight state management              |
+| WebSocket | Real-time market data and account updates |
 
 ### Development Tools
 
-| Tool                           | Purpose                                     |
-| ------------------------------ | ------------------------------------------- |
-| **vite-plugin-node-polyfills** | Node.js polyfills for browser compatibility |
-| **vite-plugin-remove-console** | Remove console logs in production builds    |
-| **ESLint**                     | Code linting                                |
-| **Prettier**                   | Code formatting                             |
+| Tool                       | Purpose                                     |
+| -------------------------- | ------------------------------------------- |
+| vite-plugin-node-polyfills | Node.js polyfills for browser compatibility |
+| vite-plugin-remove-console | Remove console logs in production builds    |
+| ESLint                     | Code linting                                |
+| Prettier                   | Code formatting                             |
 
 ### Backend Services
 
@@ -302,22 +296,20 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 - **Stellar Horizon**: Stellar network API
 - **Aster API**: Market data, order routing, and account queries
 
----
-
 ## 🔐 Security
 
 ### Non-Custodial Architecture
 
 Swiftex never has access to your private keys:
 
-✅ **What We Do:**
+**✅ What We Do:**
 
 - Request wallet signatures for actions
 - Use an in-memory, trading-only agent wallet for Aster order flow
 - Relay signed transactions to blockchain networks
 - Provide UI for managing your assets
 
-❌ **What We Don't Do:**
+**❌ What We Don't Do:**
 
 - Store private keys or mnemonics
 - Have access to your funds
@@ -329,8 +321,8 @@ Swiftex never has access to your private keys:
 **How It Works:**
 
 1. You sign a one-time authorization message with your EVM wallet
-2. You approve a dedicated **agent wallet** with trading-only permissions
-3. The agent wallet can place, modify, and cancel orders — it **cannot** withdraw or transfer funds
+2. You approve a dedicated agent wallet with trading-only permissions
+3. The agent wallet can place, modify, and cancel orders — it cannot withdraw or transfer funds
 4. Agent wallet keys are held in browser memory ONLY for the active session
 5. All order messages are signed locally by the agent wallet
 6. You can revoke the agent wallet's permission at any time
@@ -344,8 +336,6 @@ Swiftex never has access to your private keys:
 - Keep your wallet software updated
 - Never share your seed phrase or private keys
 - Close browser when done trading
-
----
 
 ## 💻 Development
 
@@ -369,13 +359,16 @@ npm run lint:fix
 
 # Format code with Prettier
 npm run format
+
+# Run tests (requires Node.js v22+)
+npm run test
 ```
 
 ### Vite Configuration
 
 The project uses a custom Vite setup optimized for blockchain development:
 
-```typescript
+```javascript
 import react from '@vitejs/plugin-react';
 
 import tailwindcss from '@tailwindcss/vite';
@@ -458,9 +451,9 @@ swiftex-walletexchange/
 
 ### WalletConnect Setup
 
-Get your Project ID from [WalletConnect Cloud](https://cloud.walletconnect.com/):
+Get your Project ID from WalletConnect Cloud:
 
-1. Create an account on WalletConnect Cloud
+1. Create an account on [WalletConnect Cloud](https://cloud.walletconnect.com/)
 2. Create a new project
 3. Copy your Project ID
 4. Add to `.env` as `VITE_WALLETCONNECT_PROJECT_ID`
@@ -480,8 +473,6 @@ The proxy handles:
 - Aster market data and account queries
 - Rate limiting and caching
 
----
-
 ## 🚢 Deployment
 
 ### Build for Production
@@ -494,8 +485,6 @@ Output will be in the `dist/` folder.
 
 ### Deploy to Vercel
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/karanbisht-123/swiftexchange-web)
-
 **Vercel Configuration:**
 
 - Framework: Vite
@@ -505,7 +494,7 @@ Output will be in the `dist/` folder.
 
 ### Deploy to Netlify
 
-**Netlify Configuration** (`netlify.toml`):
+**Netlify Configuration (`netlify.toml`):**
 
 ```toml
 [build]
@@ -529,19 +518,15 @@ Set all required environment variables in your hosting platform:
 - `VITE_BASE_SERVER_URL_PROD`
 - `VITE_API_DEVICE_AUTH_PROD`
 
-**Important:** Never commit `.env` file to git.
-
----
+> **Important:** Never commit `.env` file to git.
 
 ## 📱 Mobile App
 
 Swiftex is also available as a mobile application for iOS and Android, providing the same features with native mobile optimizations.
 
----
-
 ## 🗺️ Roadmap
 
-### Current
+**Current**
 
 - ✅ Multi-wallet WalletConnect integration
 - ✅ Stellar asset management
@@ -550,23 +535,19 @@ Swiftex is also available as a mobile application for iOS and Android, providing
 - ✅ Real-time WebSocket data
 - ✅ Cross & isolated margin support
 
----
-
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
 
 ## 🆘 Support
 
 Need help? We're here for you:
 
-- **Website**: [swiftexchange.io](http://swiftexchange.io/)
-- **X (Twitter)**: [@SwiftEx_Wallet](https://x.com/SwiftEx_Wallet)
-- **Instagram**: [@swiftexwallet](https://www.instagram.com/swiftexwallet/)
-- **Discord**: [Join our community](https://discord.com/invite/TkZrnv97MV)
-- **LinkedIn**: [Swiftex Wallet](https://www.linkedin.com/company/swiftex-wallet/)
+- **Website**: [swiftexchange.io](https://swiftexchange.io)
+- **X (Twitter)**: [@SwiftEx_Wallet](https://twitter.com/SwiftEx_Wallet)
+- **Instagram**: [@swiftexwallet](https://instagram.com/swiftexwallet)
+- **Discord**: [Join our community](https://discord.gg/)
+- **LinkedIn**: [Swiftex Wallet](https://linkedin.com/)
 - **GitHub Repository**: [swiftexchange-web](https://github.com/karanbisht-123/swiftexchange-web)
 - **GitHub Issues**: [Report a bug](https://github.com/karanbisht-123/swiftexchange-web/issues)
 
@@ -574,14 +555,12 @@ Need help? We're here for you:
 
 Built with amazing tools and protocols:
 
-- [Aster](https://www.asterdex.com/) - Decentralized perpetual trading
+- [Aster](https://aster.exchange/) - Decentralized perpetual trading
 - [Stellar Development Foundation](https://stellar.org/) - Fast, low-cost transfers
 - [WalletConnect](https://walletconnect.com/) - Multi-wallet connectivity
 - [Vite](https://vitejs.dev/) - Lightning-fast frontend tooling
 - [React](https://react.dev/) - UI library
 - [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
-
----
 
 ## ⚠️ Disclaimer
 
@@ -616,12 +595,16 @@ This software is provided "as is" without warranty of any kind.
 
 ---
 
-<div align="center">
+<p align="center">
+  Built with ❤️ by the Swiftex Team
+</p>
 
-**Built with ❤️ by the Swiftex Team**
+<p align="center">
+  <a href="https://swiftexchange.io">Website</a> •
+  <a href="https://twitter.com/SwiftEx_Wallet">X</a> •
+  <a href="https://instagram.com/swiftexwallet">Instagram</a> •
+  <a href="https://discord.gg/">Discord</a> •
+  <a href="https://linkedin.com/">LinkedIn</a>
+</p>
 
-[Website](http://swiftexchange.io/) • [X](https://x.com/SwiftEx_Wallet) • [Instagram](https://www.instagram.com/swiftexwallet/) • [Discord](https://discord.com/invite/TkZrnv97MV) • [LinkedIn](https://www.linkedin.com/company/swiftex-wallet/)
-
-⭐ Star us on GitHub if you find this project useful!
-
-</div>
+⭐ **Star us on GitHub if you find this project useful!**
