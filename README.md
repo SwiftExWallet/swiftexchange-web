@@ -9,23 +9,23 @@
 [![Stellar SDK](https://img.shields.io/badge/Stellar_SDK-v14.4-black?logo=stellar&logoColor=white)](https://stellar.org/)
 [![Ethers.js](https://img.shields.io/badge/Ethers.js-v6.15-blue)](https://docs.ethers.org/v6/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Perps Status](https://img.shields.io/badge/Perps_Status-Under_Active_Development-orange.svg)](<>)
-[![Pricing](<https://img.shields.io/badge/Perps_Pricing-100%25_Free_(No_Pro_Tier)-success.svg>)](<>)
+[![Perps Status](https://img.shields.io/badge/Perps_Status-Under_Active_Development-orange.svg)](https://swiftexchange.io)
 
-[Live Web Platform](https://swiftexchange.io) • [Documentation](https://swiftexchange.io) • [Community](https://discord.gg/)
+[Live Web Platform](https://swiftexchange.io) • [iOS App Store](https://apps.apple.com/us/app/swiftex-wallet/id6759080930) • [Google Play](https://play.google.com/store/apps/details?id=org.app.swiftEx.wallet&pcampaignid=web_share) • [Discord](https://discord.com/invite/TkZrnv97MV)
 
 ---
 
 ## 📖 Table of Contents
 
 - [Overview](#-overview)
-- [What Makes Swiftex Different](#-what-makes-swiftex-different)
+- [Mobile Applications](#-mobile-applications)
 - [Screenshots](#-screenshots)
 - [Supported Networks & Ecosystems](#-supported-networks--ecosystems)
 - [Perpetual Futures Trading (Aster DEX)](#-perpetual-futures-trading-aster-dex)
 - [System Architecture](#-system-architecture)
   - [High-Level Architecture Diagram](#high-level-architecture-diagram)
   - [Aster Perpetual Trading Lifecycle](#aster-perpetual-trading-lifecycle)
+  - [WalletConnect Transaction & Broadcast Flow](#walletconnect-transaction--broadcast-flow)
   - [Stellar Direct SDK Integration](#stellar-direct-sdk-integration)
 - [Key Features](#-key-features)
 - [User Journey](#-user-journey)
@@ -46,16 +46,14 @@
 
 Swiftex gives traders complete sovereign control of their private keys while delivering a CEX-grade user experience: manage assets across 7+ major EVM chains and Stellar, execute cross-chain swaps, bridge assets, and trade perpetual derivatives on Aster DEX with zero repetitive wallet approval popups.
 
-### ✨ What Makes Swiftex Different
+---
 
-| Feature                   | Swiftex Exchange                                                      | Traditional DEXs / Web3 Apps                         |
-| :------------------------ | :-------------------------------------------------------------------- | :--------------------------------------------------- |
-| **Asset Custody**         | **100% Non-Custodial** (Keys stay in browser memory)                  | Often custodial or semi-custodial                    |
-| **Multi-Ecosystem**       | **EVM (7 chains) + Stellar** in one unified dashboard                 | Siloed to either EVM or a single non-EVM chain       |
-| **Perpetuals Access**     | **100% Free** — No Pro tier, no subscriptions, all features unlocked  | Gated features, subscription tiers, or locked tools  |
-| **Perps Development**     | **Actively developing** next-gen Aster DEX integration                | Stagnant or closed-source implementations            |
-| **Trade Execution**       | **Agent Session Key** (Sign once, trade seamlessly without popups)    | Wallet popup confirmation on every single order      |
-| **Network Communication** | Direct Stellar SDK for Horizon + Secure authenticated EVM/Aster proxy | Unoptimized generic public RPCs prone to rate limits |
+## 📱 Mobile Applications
+
+Swiftex is available on both iOS and Android. Trade, swap, and manage assets directly from your mobile device:
+
+- 🍏 **iOS (App Store)**: [Download on Apple App Store](https://apps.apple.com/us/app/swiftex-wallet/id6759080930)
+- 🤖 **Android (Google Play)**: [Get it on Google Play](https://play.google.com/store/apps/details?id=org.app.swiftEx.wallet&pcampaignid=web_share)
 
 ---
 
@@ -94,15 +92,6 @@ Swiftex natively connects to **7 EVM networks** alongside the **Stellar Network*
 > [!NOTE]  
 > **Status: Under Active Development (Beta)**  
 > Perpetual trading powered by the Aster DEX protocol is currently in active development. Features, market coverage, and execution flows are continuously expanded and refined.
-
-> [!TIP]  
-> **100% Free For Everyone — No "Pro" Tier**  
-> Unlike platforms that lock advanced order books, depth charts, or algorithmic order types behind paid subscriptions, **Swiftex offers all trading capabilities completely free**. Every trader receives full institutional-grade functionality:
->
-> - No monthly or yearly subscriptions
-> - No locked indicators or hidden features
-> - Full access to all order types (Market, Limit, Stop, Chase, Batch)
-> - Real-time Level 2 orderbook depth and WebSocket market streaming
 
 ### How Swiftex Integrates Aster DEX
 
@@ -206,6 +195,42 @@ flowchart TB
    • User can modify, chase, or close positions instantly
 ```
 
+### WalletConnect Transaction & Broadcast Flow
+
+The following diagram illustrates how EVM transactions (token transfers, cross-chain swaps, bridges, or collateral deposits) originate in the Swiftex web dApp, get securely signed on your mobile device, and get broadcast directly to the blockchain:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant WebApp as Swiftex Web dApp
+    participant Relay as WalletConnect v2 Relay (WSS)
+    participant WalletApp as Mobile Wallet App (Swiftex / MetaMask / Trust)
+    participant RPC as Blockchain RPC Node (EVM Network)
+
+    User->>WebApp: Initiates Action (Transfer, Swap, or Deposit)
+    WebApp->>WebApp: Constructs unsigned tx params (to, data, value, chainId)
+    WebApp->>Relay: Sends encrypted eth_sendTransaction via session topic
+    Relay-->>WalletApp: Pushes notification & encrypted payload to device
+    WalletApp->>User: Displays confirmation prompt (fees, recipient, contract)
+    User->>WalletApp: Approves via Biometrics / Passcode
+    WalletApp->>WalletApp: Signs transaction with device-secured private key
+    WalletApp->>RPC: Broadcasts signed raw transaction directly (eth_sendRawTransaction)
+    RPC-->>WalletApp: Emits on-chain Transaction Hash (txHash)
+    WalletApp->>Relay: Returns txHash over encrypted session topic
+    Relay-->>WebApp: Relays txHash to Swiftex client
+    WebApp->>User: Displays pending transaction notification & explorer link
+    RPC-->>WebApp: Transaction mined and confirmed on-chain
+```
+
+#### How the Transaction Lifecycle Works:
+
+1. **Unsigned Payload Assembly**: Swiftex constructs the exact transaction parameters (`to`, `value`, `data`, `chainId`) in-browser without having access to or needing your private key.
+2. **End-to-End Encrypted Relay**: The transaction request is serialized, encrypted using symmetric keys negotiated during pairing, and relayed securely over `wss://relay.walletconnect.com`.
+3. **Hardware Enclave Signing**: Your mobile wallet app decrypts the request and prompts you with the full details (gas limits, contract method, amounts) for your explicit biometric/passcode approval.
+4. **Direct Wallet-to-Chain Broadcast**: **The wallet app itself broadcasts the signed raw transaction directly to the blockchain RPC node** (`eth_sendRawTransaction`). Swiftex never intercepts or handles your private keys.
+5. **Real-Time Receipt & Tracking**: The wallet returns the generated `txHash` back across the encrypted relay to Swiftex, which updates the UI and monitors the transaction until confirmation.
+
 ### Stellar Direct SDK Integration
 
 > [!IMPORTANT]  
@@ -236,7 +261,7 @@ flowchart TB
 
 ### 📈 Perpetual Derivatives (Aster DEX)
 
-- **Zero Fees for Pro Features**: All chart tools, order types, and depth analytics are 100% free.
+- **Comprehensive Order Suite**: Market, Limit, Stop-Loss, Take-Profit, Chase, and Batch order execution.
 - **Agent Wallet Speed**: Zero popup delays on order entry.
 - **Advanced Order Controls**: Take-profit, stop-loss, post-only, reduce-only, and chase orders.
 - **Multi-Asset Collateral**: Use multiple supported tokens as unified margin collateral.
@@ -307,7 +332,7 @@ flowchart TB
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/karanbisht-123/swiftexchange-web.git
+   git clone https://github.com/SwiftExWallet/swiftexchange-web.git
    cd swiftexchange-web
    ```
 
@@ -448,12 +473,11 @@ swiftex-walletexchange/
 - [x] Multi-chain EVM wallet integration via WalletConnect v2 (ETH, ARB, BSC, POL, AVAX, BASE, OP)
 - [x] Stellar native asset management, AMM Swaps, and SDEX order books
 - [x] Direct Stellar SDK integration bypassing proxy
+- [x] Native Mobile Applications live on iOS (App Store) & Android (Google Play)
 - [x] Aster Perpetual Trading integration with Ephemeral Agent Wallets
 - [x] Cross-margin and isolated-margin trading modes
 - [x] Real-time L2 order books and depth feeds over WebSocket
 - [ ] Multi-Asset collateral expansion for Aster Perps (In Development)
-- [ ] Algorithmic TWAP & Iceberg execution modes (In Development)
-- [ ] Mobile native applications (iOS & Android)
 
 ---
 
@@ -470,8 +494,8 @@ Join our growing community of traders and developers:
 - **Official Website**: [swiftexchange.io](https://swiftexchange.io)
 - **Twitter / X**: [@SwiftEx_Wallet](https://twitter.com/SwiftEx_Wallet)
 - **Instagram**: [@swiftexwallet](https://instagram.com/swiftexwallet)
-- **Discord Community**: [Join Discord](https://discord.gg/)
-- **LinkedIn**: [Swiftex Wallet](https://linkedin.com/)
+- **Discord Community**: [Join Discord](https://discord.com/invite/TkZrnv97MV)
+- **LinkedIn**: [Swiftex Wallet](https://www.linkedin.com/authwall?trk=bf&trkIn)
 - **GitHub Issues**: [Report an Issue / Suggest a Feature](https://github.com/SwiftExWallet/swiftexchange-web/issues)
 
 ---
