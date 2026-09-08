@@ -1,611 +1,481 @@
 # Swiftex Wallet Exchange
 
-**A Non-Custodial Multi-Chain DeFi Trading Platform**
+**Institutional-Grade Non-Custodial Multi-Chain DeFi Trading Platform & Perpetual Futures**
 
-![React](https://img.shields.io/badge/React-18-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-blue) ![Vite](https://img.shields.io/badge/Vite-7-purple) ![Stellar SDK](https://img.shields.io/badge/Stellar%20SDK-v14-brightgreen) ![License](https://img.shields.io/badge/License-MIT-green)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-7.1-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.2-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Stellar SDK](https://img.shields.io/badge/Stellar_SDK-v14.4-black?logo=stellar&logoColor=white)](https://stellar.org/)
+[![Ethers.js](https://img.shields.io/badge/Ethers.js-v6.15-blue)](https://docs.ethers.org/v6/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Perps Status](https://img.shields.io/badge/Perps_Status-Under_Active_Development-orange.svg)](<>)
+[![Pricing](<https://img.shields.io/badge/Perps_Pricing-100%25_Free_(No_Pro_Tier)-success.svg>)](<>)
 
-[Live Demo](https://swiftexchange.io)
+[Live Web Platform](https://swiftexchange.io) • [Documentation](https://swiftexchange.io) • [Community](https://discord.gg/)
+
+---
 
 ## 📖 Table of Contents
 
 - [Overview](#-overview)
+- [What Makes Swiftex Different](#-what-makes-swiftex-different)
+- [Screenshots](#-screenshots)
+- [Supported Networks & Ecosystems](#-supported-networks--ecosystems)
+- [Perpetual Futures Trading (Aster DEX)](#-perpetual-futures-trading-aster-dex)
+- [System Architecture](#-system-architecture)
+  - [High-Level Architecture Diagram](#high-level-architecture-diagram)
+  - [Aster Perpetual Trading Lifecycle](#aster-perpetual-trading-lifecycle)
+  - [Stellar Direct SDK Integration](#stellar-direct-sdk-integration)
 - [Key Features](#-key-features)
-- [Supported Networks](#-supported-networks)
-- [Architecture](#️-architecture)
-- [Getting Started](#-getting-started)
-- [User Flow](#-user-flow)
+- [User Journey](#-user-journey)
 - [Technology Stack](#️-technology-stack)
-- [Security](#-security)
-- [Development](#-development)
-- [Deployment](#-deployment)
+- [Getting Started](#-getting-started)
+- [Environment Configuration](#-environment-configuration)
+- [Security & Risk Model](#-security--risk-model)
+- [Project Directory Structure](#-project-directory-structure)
+- [Roadmap](#-roadmap)
+- [License](#-license)
+- [Support & Community](#-support--community)
+
+---
 
 ## 🌟 Overview
 
-Swiftex Wallet Exchange is an open-source, non-custodial decentralized exchange that enables seamless trading across multiple blockchain ecosystems. Connect your wallet, manage assets, swap tokens, and trade perpetual derivatives on Aster — all while maintaining full control of your funds.
+**Swiftex Wallet Exchange** is an open-source, non-custodial decentralized trading hub connecting the EVM ecosystem and the Stellar Network into a single, unified interface.
 
-### What Makes Swiftex Different?
+Swiftex gives traders complete sovereign control of their private keys while delivering a CEX-grade user experience: manage assets across 7+ major EVM chains and Stellar, execute cross-chain swaps, bridge assets, and trade perpetual derivatives on Aster DEX with zero repetitive wallet approval popups.
 
-- ✅ **Truly Non-Custodial**: You control your keys, we never see them
-- ✅ **Multi-Chain Native**: EVM and Stellar in one platform
-- ✅ **Advanced Trading**: Perpetual derivatives on Aster with cross & isolated margin
-- ✅ **Agent Wallet Trading**: Approve a dedicated trading key once, trade without repeated wallet pop-ups
-- ✅ **WalletConnect v2**: Connect from desktop or mobile
-- ✅ **Real-Time Updates**: Live market data via WebSocket
-- ✅ **Open Source**: Fully auditable codebase
+### ✨ What Makes Swiftex Different
+
+| Feature                   | Swiftex Exchange                                                      | Traditional DEXs / Web3 Apps                         |
+| :------------------------ | :-------------------------------------------------------------------- | :--------------------------------------------------- |
+| **Asset Custody**         | **100% Non-Custodial** (Keys stay in browser memory)                  | Often custodial or semi-custodial                    |
+| **Multi-Ecosystem**       | **EVM (7 chains) + Stellar** in one unified dashboard                 | Siloed to either EVM or a single non-EVM chain       |
+| **Perpetuals Access**     | **100% Free** — No Pro tier, no subscriptions, all features unlocked  | Gated features, subscription tiers, or locked tools  |
+| **Perps Development**     | **Actively developing** next-gen Aster DEX integration                | Stagnant or closed-source implementations            |
+| **Trade Execution**       | **Agent Session Key** (Sign once, trade seamlessly without popups)    | Wallet popup confirmation on every single order      |
+| **Network Communication** | Direct Stellar SDK for Horizon + Secure authenticated EVM/Aster proxy | Unoptimized generic public RPCs prone to rate limits |
+
+---
 
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755051/Screenshot_2026-09-07_at_9.47.44_AM_mpzycz.webp" width="45%" alt="Dashboard" />
-  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755050/Screenshot_2026-09-07_at_9.44.44_AM_y0o8qo.webp" width="45%" alt="Trading View" />
+  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755051/Screenshot_2026-09-07_at_9.47.44_AM_mpzycz.webp" width="48%" alt="Dashboard" />
+  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755050/Screenshot_2026-09-07_at_9.44.44_AM_y0o8qo.webp" width="48%" alt="Trading View" />
 </p>
 <p align="center">
-  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755050/Screenshot_2026-09-07_at_9.44.15_AM_iezbgr.webp" width="45%" alt="Swap Screen" />
-  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755049/Screenshot_2026-09-07_at_9.43.32_AM_puwb0x.webp" width="45%" alt="Wallet Connect" />
+  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755050/Screenshot_2026-09-07_at_9.44.15_AM_iezbgr.webp" width="48%" alt="Swap Screen" />
+  <img src="https://res.cloudinary.com/dz1xabyjf/image/upload/v1788755049/Screenshot_2026-09-07_at_9.43.32_AM_puwb0x.webp" width="48%" alt="Wallet Connect" />
 </p>
+
+---
+
+## 🌐 Supported Networks & Ecosystems
+
+Swiftex natively connects to **7 EVM networks** alongside the **Stellar Network**, providing an expansive cross-chain asset universe:
+
+| Network               | Chain ID / Type    | Native Gas Token | Supported Capabilities                            | Aster Perps Bridge | Explorer                                        |
+| :-------------------- | :----------------- | :--------------- | :------------------------------------------------ | :----------------: | :---------------------------------------------- |
+| **Ethereum**          | `1` (EVM Mainnet)  | ETH              | Balance, Transfer, Swaps, Cross-Chain Bridge      |       ✅ Yes       | [Etherscan](https://etherscan.io)               |
+| **Arbitrum One**      | `42161` (EVM L2)   | ETH              | Balance, Transfer, Swaps, Cross-Chain Bridge      |       ✅ Yes       | [Arbiscan](https://arbiscan.io)                 |
+| **BNB Smart Chain**   | `56` (EVM L1)      | BNB              | Balance, Transfer, Swaps, Cross-Chain Bridge      |       ✅ Yes       | [BscScan](https://bscscan.com)                  |
+| **Polygon PoS**       | `137` (EVM L1/L2)  | POL              | Balance, Transfer, Swaps, Cross-Chain Bridge      |         —          | [PolygonScan](https://polygonscan.com)          |
+| **Avalanche C-Chain** | `43114` (EVM L1)   | AVAX             | Balance, Transfer, Swaps, Cross-Chain Bridge      |         —          | [Snowtrace](https://snowtrace.io)               |
+| **Base**              | `8453` (EVM L2)    | ETH              | Balance, Transfer, Swaps, Cross-Chain Bridge      |         —          | [BaseScan](https://basescan.org)                |
+| **Optimism**          | `10` (EVM L2)      | ETH              | Balance, Transfer, Swaps, Cross-Chain Bridge      |         —          | [OP Etherscan](https://optimistic.etherscan.io) |
+| **Stellar**           | `pubnet` (Non-EVM) | XLM              | AMM Swaps, Order Book Trading, Trustlines, Bridge |         —          | [StellarExpert](https://stellar.expert)         |
+
+---
+
+## 📈 Perpetual Futures Trading (Aster DEX)
+
+> [!NOTE]  
+> **Status: Under Active Development (Beta)**  
+> Perpetual trading powered by the Aster DEX protocol is currently in active development. Features, market coverage, and execution flows are continuously expanded and refined.
+
+> [!TIP]  
+> **100% Free For Everyone — No "Pro" Tier**  
+> Unlike platforms that lock advanced order books, depth charts, or algorithmic order types behind paid subscriptions, **Swiftex offers all trading capabilities completely free**. Every trader receives full institutional-grade functionality:
+>
+> - No monthly or yearly subscriptions
+> - No locked indicators or hidden features
+> - Full access to all order types (Market, Limit, Stop, Chase, Batch)
+> - Real-time Level 2 orderbook depth and WebSocket market streaming
+
+### How Swiftex Integrates Aster DEX
+
+Swiftex interacts with Aster's high-performance perpetual architecture (Chain ID `1666`) while preserving full non-custodial integrity:
+
+1. **Ephemeral Agent Wallet (One-Click Trading)**:
+   - Users sign a one-time cryptographic authorization (EIP-712 / personal_sign) using their primary EVM wallet.
+   - An ephemeral **Agent Wallet session key** is generated in browser memory.
+   - The agent key is authorized **strictly for order creation and cancellation** — it has **zero permission to transfer, withdraw, or siphon collateral**.
+   - Traders execute orders instantly without annoying wallet popups for every single trade.
+   - Session keys automatically wipe on tab closure and can be revoked on-chain at any moment.
+
+2. **Cross-Chain Collateral Bridging**:
+   - Collateral deposits route directly into official Aster vault bridge contracts on **Ethereum**, **BNB Smart Chain**, or **Arbitrum One**.
+   - Collateral credits on-chain directly to the trader's Aster account.
+
+3. **Institutional Order Execution**:
+   - **Order Types**: `MARKET`, `LIMIT`, `STOP`, `STOP_MARKET`, `TAKE_PROFIT`, `TAKE_PROFIT_MARKET`, `CHASE`, and `BATCH_ORDERS`.
+   - **Margin Modes**: Full support for both **Cross Margin** and **Isolated Margin**.
+   - **Multi-Asset Margin Mode**: Leverage equity across multiple supported deposit assets.
+   - **Dynamic Leverage**: Configurable leverage brackets tailored to market volatility.
+
+4. **Low-Latency Streaming**:
+   - Dedicated WebSocket connection (`wss://fstream.asterdex.com/ws`) streams live aggregated trades, real-time depth diffs, and 24hr tickers.
+   - User data stream tracks open orders, position risk, liquidation warnings, and realized/unrealized P&L in real time.
+
+---
+
+## 🏗️ System Architecture
+
+### High-Level Architecture Diagram
+
+```mermaid
+flowchart TB
+    subgraph Client["Frontend Client (React 18 + TypeScript + Vite 7)"]
+        UI["UI Layer: Views, Modals & TradingView Charts"]
+        State["State Management: Zustand Global Store"]
+        AgentKey["Ephemeral Agent Key (In-Memory Session Signer)"]
+        WC["WalletConnect v2 Provider (MetaMask, Coinbase, etc.)"]
+    end
+
+    subgraph Adapters["Protocol & Blockchain Adapters"]
+        EVMAdapter["EVM Service & Transaction Manager (Ethers.js v6)"]
+        StellarAdapter["Stellar Base Service (@stellar/stellar-sdk v14)"]
+        AsterAdapter["Aster Client, WebSocket Engine & Signer"]
+    end
+
+    subgraph Infrastructure["Network & Infrastructure Layer"]
+        Proxy["Swiftex Authenticated Proxy (RPC Routing, Auth & Rate Limiting)"]
+        StellarHorizon["Direct Public Stellar Horizon & Soroban RPC (No Proxy)"]
+        AsterNodes["Aster REST API (fapi) & WebSocket (fstream)"]
+        EVMChains["EVM Blockchains (ETH, ARB, BSC, POL, AVAX, BASE, OP)"]
+        StellarNetwork["Stellar Network (Ledgers, AMMs, SDEX Order Books)"]
+    end
+
+    UI --> State
+    State --> EVMAdapter
+    State --> StellarAdapter
+    State --> AsterAdapter
+    AgentKey --> AsterAdapter
+    WC --> EVMAdapter
+
+    EVMAdapter --> Proxy
+    Proxy --> EVMChains
+
+    StellarAdapter -->|Direct SDK Connection| StellarHorizon
+    StellarHorizon --> StellarNetwork
+
+    AsterAdapter --> AsterNodes
+    EVMAdapter -->|Collateral Deposit Bridges| AsterNodes
+```
+
+### Aster Perpetual Trading Lifecycle
+
+```
+[User Connects EVM Wallet]
+            │
+            ▼
+[One-Time EIP-712 Sign: Authorize Agent Key]
+   • Generates session trading key in browser memory
+   • Granted trading-only scope (NO withdrawal rights)
+            │
+            ▼
+[Deposit Collateral via EVM Bridge (ETH / BSC / ARB)]
+   • Funds credited to user's Aster on-chain margin balance
+            │
+            ▼
+[Configure Trade]
+   • Select Margin: Cross Margin or Isolated Margin
+   • Select Asset Mode: Single-Asset or Multi-Asset
+   • Set Leverage & Order Type (Market / Limit / Stop / Chase)
+            │
+            ▼
+[Instant Order Submission]
+   • Signed locally by in-memory Agent Wallet (No wallet popup!)
+   • Routed to Aster matching engine via REST (fapi)
+            │
+            ▼
+[Real-Time Position Monitoring]
+   • Aster WebSocket stream (fstream) feeds live P&L, depth, and fills
+   • User can modify, chase, or close positions instantly
+```
+
+### Stellar Direct SDK Integration
+
+> [!IMPORTANT]  
+> **Stellar Horizon Architecture**:  
+> Unlike EVM RPC calls which pass through the Swiftex authenticated proxy for security, caching, and rate limiting, **Stellar Horizon operations communicate directly via `@stellar/stellar-sdk`**.
+>
+> - Uses `StellarSDK.Horizon.Server(config.horizonUrl)` directly in the browser client.
+> - Direct querying of account balances, trustlines, recent trades, and SDEX orderbooks.
+> - Direct submission of Stellar transactions to official Horizon nodes (`horizon.stellar.org` and `horizon-testnet.stellar.org`).
+> - Zero intermediary proxy latency for Stellar operations.
+
+---
 
 ## 🎯 Key Features
 
-### 💼 Wallet & Asset Management
+### 💼 Multi-Chain Portfolio & Asset Management
 
-- **Multi-Wallet Support**: Connect EVM (MetaMask, Coinbase Wallet, etc.) and Stellar wallets via WalletConnect v2
-- **Unified Dashboard**: View all your balances across connected chains
-- **Native Transfers**: Send and receive assets directly from the interface
-- **Real-Time Balance Updates**: Automatic balance refresh via WebSocket
+- **Unified Multi-Chain Balances**: View all holdings across Ethereum, Arbitrum, Polygon, Avalanche, BNB Chain, Base, Optimism, and Stellar in a single dashboard.
+- **WalletConnect v2 Standard**: Seamless pairing with 300+ mobile and browser extension wallets.
+- **Native & ERC20 Transfers**: Simple, validated transfers across all supported EVM networks.
 
-### 🔄 Cross-Chain Operations
+### 🔄 Decentralized Cross-Chain & Spot Exchange
 
-- **EVM ↔ Stellar Bridge**: Bridge assets between EVM chains and Stellar network
-- **AMM Swaps**: Trade on Stellar's automated market makers
-- **Order Book Trading**: Execute trades on Stellar's decentralized order books
-- **Trustline Management**: Add and manage Stellar asset trustlines
+- **Stellar AMM Swaps**: Execute swaps directly on Stellar's native automated market maker pools.
+- **Decentralized Order Book (SDEX)**: Place and settle bids/asks on Stellar's native order books.
+- **Trustline Management**: Create, view, and revoke Stellar asset trustlines with one click.
+- **EVM ↔ Stellar Cross-Chain Bridge**: Move assets seamlessly across ecosystem boundaries.
 
-### 📈 Perpetual Trading (Aster)
+### 📈 Perpetual Derivatives (Aster DEX)
 
-**Order Types:**
+- **Zero Fees for Pro Features**: All chart tools, order types, and depth analytics are 100% free.
+- **Agent Wallet Speed**: Zero popup delays on order entry.
+- **Advanced Order Controls**: Take-profit, stop-loss, post-only, reduce-only, and chase orders.
+- **Multi-Asset Collateral**: Use multiple supported tokens as unified margin collateral.
 
-- Market Orders
-- Limit Orders
-- Take-Profit / Stop-Loss
-- Post-Only Orders
-- Conditional / Stop Orders
+### 📊 Professional Market Intelligence
 
-**Margin Modes:**
+- **TradingView Lightweight Charts**: High-speed, responsive price action rendering.
+- **Real-Time Depth Visualization**: Live L2 order book updates over low-latency WebSockets.
+- **Portfolio P&L Tracking**: Live calculation of margin ratios, maintenance margins, and unrealized profit/loss.
 
-- ✅ Cross Margin
-- ✅ Isolated Margin
+---
 
-**Agent Wallet**: Approve a session trading key once so orders can be placed without a wallet pop-up on every trade — revocable at any time
-
-**Real-Time Data**: Live order books, trades, and price charts
-
-**Trading Modes**: Pro Mode for advanced order flow, Simple Mode for quick market exposure
-
-### 📊 Market Intelligence
-
-- Interactive price charts (TradingView Lightweight Charts)
-- Live order book depth
-- Recent trades feed
-- Market statistics
-- Portfolio tracking with P&L
-
-## 🌐 Supported Networks
-
-| Network   | Features                                  | Status    |
-| --------- | ----------------------------------------- | --------- |
-| Ethereum  | Swaps, Transfers, Bridging, Aster Perps   | ✅ Active |
-| BNB Chain | Swaps, Transfers, Bridging, Aster Perps   | ✅ Active |
-| Arbitrum  | Aster Perps                               | ✅ Active |
-| Stellar   | AMM Swaps, Order Book Trading, Trustlines | ✅ Active |
-
-## 🏗️ Architecture
-
-### Application Flow
+## 👤 User Journey
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Interface (React)                    │
-├─────────────────────────────────────────────────────────────┤
-│  WalletConnect v2  │  Asset Manager  │  Trading Interface   │
-├─────────────────────────────────────────────────────────────┤
-│  EVM Integration   │  Stellar SDK    │  Aster API Client    │
-├─────────────────────────────────────────────────────────────┤
-│   Ethers.js        │  Horizon API    │  Aster WebSocket     │
-├─────────────────────────────────────────────────────────────┤
-│  Backend Proxy     │  Stellar RPC    │  Aster REST / Chain  │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│ 1. Connect      │  ──►  │ 2. Unified View │  ──►  │ 3. Trade & Swap │
+│ Any EVM/Stellar │       │ Aggregate Assets│       │ Spot, Bridge or │
+│ Wallet          │       │ Across 8 Chains │       │ Aster Perps     │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
 ```
 
-### Aster Trading Flow
+1. **Connect Wallet**: Click "Connect Wallet" and choose MetaMask, Coinbase Wallet, Trust Wallet, or Stellar wallets (Freighter, Lobstr, xBull).
+2. **View Cross-Chain Assets**: Your balances across Ethereum, Arbitrum, Polygon, Avalanche, BNB Chain, Base, Optimism, and Stellar sync in real time.
+3. **Choose an Action**:
+   - **Spot Swap / Transfer**: Transact natively on any supported EVM chain or Stellar.
+   - **Bridge**: Transfer assets across EVM and Stellar networks.
+   - **Perps Trading**: Approve your Agent Wallet once, deposit margin, and begin leveraged futures trading with zero popup friction.
 
-```
-1. User Connects EVM Wallet
-         ↓
-2. Sign Authorization Message (one-time)
-         ↓
-3. Approve Agent Wallet
-   → Grants a session trading key permission to trade on your behalf
-   → Trading-only scope — it can NEVER withdraw or transfer funds
-   → Revocable at any time from the account settings
-         ↓
-4. Deposit Collateral
-   → Choose network, token, and amount
-   → Confirm the deposit transaction in your wallet
-         ↓
-5. [If Funded] → Enable Trading
-   [If Not]    → Prompt Deposit
-         ↓
-6. Place Orders
-   → Orders are signed by the Agent Wallet — no pop-up per trade
-   → Choose Pro Mode (full order book) or Simple Mode (quick exposure)
-         ↓
-7. Submit to Aster for Execution
-         ↓
-8. Monitor Positions, P&L, and Manage Risk
-```
+---
 
-### Key Design Principles
+## 🛠️ Technology Stack
 
-- **No Private Key Storage**: All signing happens in-browser, keys stay in memory only
-- **Trading-Only Agent Wallet**: The approved agent key can place and cancel orders — it can never withdraw funds
-- **Client-Side Only**: Backend services are stateless proxies
-- **Wallet Approval Required**: Connecting, depositing, and withdrawing always require explicit signature from your main wallet
+### Core Frontend
+
+- **Framework**: [React 18.3](https://react.dev/)
+- **Build Tool**: [Vite 7.1](https://vitejs.dev/)
+- **Language**: [TypeScript 5.8](https://www.typescriptlang.org/)
+- **Styling**: [Tailwind CSS 4.2](https://tailwindcss.com/) with `@tailwindcss/vite`
+- **Routing**: [React Router DOM v7](https://reactrouter.com/)
+
+### Blockchain & Protocols
+
+- **EVM Interaction**: [Ethers.js v6.15](https://docs.ethers.org/v6/)
+- **Stellar Network**: [@stellar/stellar-sdk v14.4](https://stellar.org/) (Direct Horizon SDK integration)
+- **Multi-Wallet Protocol**: [@walletconnect/universal-provider v2.23](https://walletconnect.com/)
+- **Perpetual Derivatives**: [Aster DEX REST & WebSocket APIs](https://www.asterdex.com/)
+
+### State, Charts & Utilities
+
+- **State Management**: [Zustand v5](https://github.com/pmndrs/zustand)
+- **Financial Charting**: [TradingView Lightweight Charts v5](https://www.tradingview.com/lightweight-charts/)
+- **Big Number Math**: [bignumber.js](https://mikemcl.github.io/bignumber.js/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+
+---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- **Node.js v22 or higher** ([Download](https://nodejs.org/)) — required. The test suite uses the `--experimental-require-module` Node flag, which needs Node.js v22+ to run correctly. Using an older version (even if the build/dev server works) will cause `npm run test` to fail.
-- npm or yarn package manager
-- A compatible wallet:
-  - **EVM**: MetaMask, Coinbase Wallet, Binance Wallet, OKX Wallet, Trust Wallet, Rainbow, etc.
-  - **Stellar**: Freighter, Lobstr, xBull, Rabet
+- **Node.js**: `v20.0.0` or higher (Recommended: `v22+` for full test suite compatibility)
+- **npm**: `v10.0.0` or higher
+- **Web3 Wallet**: MetaMask, Coinbase Wallet, Rabby, OKX, Rainbow, or Stellar Freighter
 
 ### Installation
 
-1. **Clone the repository**
+1. **Clone the repository:**
 
    ```bash
    git clone https://github.com/karanbisht-123/swiftexchange-web.git
    cd swiftexchange-web
    ```
 
-2. **Install dependencies**
+2. **Install dependencies:**
 
    ```bash
    npm install
    ```
 
-3. **Set up environment variables**
+3. **Configure Environment Variables:**
 
-   Create a `.env` file in the root directory:
-
-   ```env
-   # WalletConnect Configuration
-   VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
-   VITE_WALLETCONNECT_RELAY_URL=wss://relay.walletconnect.com
-
-   # Development Environment
-   VITE_BASE_SERVER_URL_DEV=https://dev-api.swiftex.exchange
-   VITE_BASE_PROXY_URL_DEV=https://dev-proxy.swiftex.exchange
-   VITE_API_DEVICE_AUTH_DEV=your_dev_auth_token
-
-   # Production Environment
-   VITE_BASE_SERVER_URL_PROD=https://api.swiftex.exchange
-   VITE_BASE_PROXY_URL_PROD=https://proxy.swiftex.exchange
-   VITE_API_DEVICE_AUTH_PROD=your_prod_auth_token
+   ```bash
+   cp .env.example .env
    ```
 
-4. **Start development server**
+   Fill in your WalletConnect Project ID and API credentials (see details below).
 
+4. **Run Local Development Server:**
    ```bash
    npm run dev
    ```
-
-   Open [http://localhost:5173](http://localhost:5173) in your browser.
-
-## 👤 User Flow
-
-### First-Time User Journey
-
-**Step 1: Connect Wallet**
-
-- Click "Connect Wallet" button
-- Choose your wallet provider
-- Approve connection in your wallet
-
-**Step 2: View Your Assets**
-
-- See all your token balances across connected chains
-- Real-time price updates
-- Portfolio value tracking
-
-**Step 3: Perform Actions**
-
-_For EVM/Stellar Operations:_
-
-- Swap tokens on Stellar AMM
-- Bridge assets between chains
-- Send/receive native tokens
-- Manage Stellar trustlines
-- Each action requires wallet approval
-
-_For Aster Perpetual Trading:_
-
-1. **Connect & Authorize**
-   - Connect your EVM wallet
-   - Sign the one-time authorization message
-
-2. **Approve Agent Wallet**
-   - Approve a trading-only agent wallet in one signature
-   - This key can place and manage orders but can never move your funds
-   - Revoke access anytime from settings
-
-3. **Fund Your Account (if needed)**
-   - Deposit collateral to your Aster trading account
-   - Funds settle on-chain and appear in your balance
-
-4. **Start Trading**
-   - Browse markets in Pro Mode or Simple Mode
-   - View real-time order books and charts
-   - Place market or limit orders
-   - Set stop-loss and take-profit levels
-   - Choose cross or isolated margin
-   - Monitor positions and P&L
-
-## 🛠️ Technology Stack
-
-### Frontend
-
-| Technology        | Purpose                                  |
-| ----------------- | ---------------------------------------- |
-| React 18          | UI framework with concurrent features    |
-| Vite 5            | Lightning-fast build tool and dev server |
-| TypeScript        | Type-safe development                    |
-| Tailwind CSS      | Utility-first styling                    |
-| @tailwindcss/vite | Native Tailwind integration for Vite     |
-
-### Blockchain Integration
-
-| Library                    | Purpose                                          |
-| -------------------------- | ------------------------------------------------ |
-| WalletConnect v2           | Multi-wallet connection protocol                 |
-| Ethers.js                  | EVM blockchain interaction                       |
-| @stellar/stellar-sdk (v14) | Stellar network operations                       |
-| Aster REST / WebSocket API | Perpetual trading, order books, and account data |
-
-### State & Real-Time Data
-
-| Tool      | Purpose                                   |
-| --------- | ----------------------------------------- |
-| Zustand   | Lightweight state management              |
-| WebSocket | Real-time market data and account updates |
-
-### Development Tools
-
-| Tool                       | Purpose                                     |
-| -------------------------- | ------------------------------------------- |
-| vite-plugin-node-polyfills | Node.js polyfills for browser compatibility |
-| vite-plugin-remove-console | Remove console logs in production builds    |
-| ESLint                     | Code linting                                |
-| Prettier                   | Code formatting                             |
-
-### Backend Services
-
-- **Swiftex Proxy**: Authenticated proxy for RPC calls and API access
-- **Stellar Horizon**: Stellar network API
-- **Aster API**: Market data, order routing, and account queries
-
-## 🔐 Security
-
-### Non-Custodial Architecture
-
-Swiftex never has access to your private keys:
-
-**✅ What We Do:**
-
-- Request wallet signatures for actions
-- Use an in-memory, trading-only agent wallet for Aster order flow
-- Relay signed transactions to blockchain networks
-- Provide UI for managing your assets
-
-**❌ What We Don't Do:**
-
-- Store private keys or mnemonics
-- Have access to your funds
-- Sign withdrawal or transfer transactions on your behalf
-- Persist agent wallet keys between sessions
-
-### Aster Agent Wallet Model
-
-**How It Works:**
-
-1. You sign a one-time authorization message with your EVM wallet
-2. You approve a dedicated agent wallet with trading-only permissions
-3. The agent wallet can place, modify, and cancel orders — it cannot withdraw or transfer funds
-4. Agent wallet keys are held in browser memory ONLY for the active session
-5. All order messages are signed locally by the agent wallet
-6. You can revoke the agent wallet's permission at any time
-7. Keys are cleared when you close the browser
-
-**Security Best Practices:**
-
-- Always verify transaction details before signing
-- Review and revoke agent wallet permissions you no longer use
-- Use hardware wallets for large amounts
-- Keep your wallet software updated
-- Never share your seed phrase or private keys
-- Close browser when done trading
-
-## 💻 Development
+   Open your browser at [http://localhost:5173](http://localhost:5173).
 
 ### Available Scripts
 
-```bash
-# Start development server with hot reload
-npm run dev
+| Command                 | Action                                                                               |
+| :---------------------- | :----------------------------------------------------------------------------------- |
+| `npm run dev`           | Launch local Vite development server with hot module replacement                     |
+| `npm run build`         | Build optimized production bundle with memory allocation (`max-old-space-size=4096`) |
+| `npm run preview`       | Locally preview production build                                                     |
+| `npm run lint`          | Run ESLint across code files                                                         |
+| `npm run lint:fix`      | Automatically fix ESLint errors                                                      |
+| `npm run format`        | Format codebase using Prettier                                                       |
+| `npm run test`          | Run Vitest unit & integration test suite                                             |
+| `npm run test:ui`       | Run Vitest with visual browser UI                                                    |
+| `npm run test:coverage` | Generate test coverage report                                                        |
 
-# Build for production
-npm run build
+---
 
-# Preview production build locally
-npm run preview
+## ⚙️ Environment Configuration
 
-# Run ESLint
-npm run lint
+Create a `.env` file in the root directory with the following configuration:
 
-# Fix ESLint errors automatically
-npm run lint:fix
+```env
+# ==========================================
+# WalletConnect Configuration
+# ==========================================
+# Get your Project ID at: https://cloud.walletconnect.com/
+VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
+VITE_WALLETCONNECT_RELAY_URL=wss://relay.walletconnect.com
 
-# Format code with Prettier
-npm run format
+# ==========================================
+# Development Environment (Proxy & Server)
+# Note: Stellar Horizon calls bypass proxy and connect directly via Stellar SDK
+# ==========================================
+VITE_BASE_SERVER_URL_DEV=https://dev-api.swiftex.exchange
+VITE_BASE_PROXY_URL_DEV=https://dev-proxy.swiftex.exchange
+VITE_API_DEVICE_AUTH_DEV=your_dev_auth_token
 
-# Run tests (requires Node.js v22+)
-npm run test
+# ==========================================
+# Production Environment (Proxy & Server)
+# ==========================================
+VITE_BASE_SERVER_URL_PROD=https://api.swiftex.exchange
+VITE_BASE_PROXY_URL_PROD=https://proxy.swiftex.exchange
+VITE_API_DEVICE_AUTH_PROD=your_prod_auth_token
 ```
 
-### Vite Configuration
+---
 
-The project uses a custom Vite setup optimized for blockchain development:
+## 🔐 Security & Risk Model
 
-```javascript
-import react from '@vitejs/plugin-react';
+### Non-Custodial Security Core
 
-import tailwindcss from '@tailwindcss/vite';
-import { defineConfig } from 'vite';
-import { nodePolyfills } from 'vite-plugin-node-polyfills';
-import removeConsole from 'vite-plugin-remove-console';
+- **Client-Side Signatures Only**: Your private keys never leave your wallet software.
+- **In-Memory Agent Wallet**: Ephemeral session keys for Aster trading exist only in browser memory and are permanently erased upon closing the session.
+- **Strict Permission Boundaries**: Agent keys are cryptographically restricted to order placement and cancellation. They are mathematically incapable of executing withdrawals or balance transfers.
+- **Direct Stellar Horizon Communication**: Stellar SDK connects directly to trusted Stellar Horizon servers without intermediate manipulation.
 
-export default defineConfig({
-  define: {
-    global: 'globalThis',
-  },
-  plugins: [
-    react(),
-    tailwindcss(),
-    removeConsole(),
-    nodePolyfills({
-      globals: {
-        Buffer: true,
-        global: true,
-      },
-      protocolImports: true,
-    }),
-  ],
-  optimizeDeps: {
-    include: ['buffer', 'process', 'vm-browserify'],
-  },
-});
-```
+### Best Practices for Traders
 
-**Key Features:**
+- Always verify recipient addresses and chain IDs before approving on-chain transactions.
+- Review and revoke session authorizations when trading on shared or public computers.
+- Never share your seed phrase or private keys with anyone. Swiftex team members will **never** ask for your credentials.
 
-- **Node.js Polyfills**: Required for blockchain libraries to work in browser
-- **Console Removal**: Automatically strips console logs in production
-- **Global Definitions**: Defines `global` as `globalThis` for compatibility
-- **Optimized Dependencies**: Pre-bundles common blockchain utilities
+---
 
-### Project Structure
+## 📂 Project Directory Structure
 
 ```
 swiftex-walletexchange/
-├── public/                     # Static assets
+├── public/                         # Static public assets
 ├── src/
-│   ├── abi/                    # Contract ABIs
-│   ├── components/             # Shared/reusable UI components
-│   ├── constants/               # App-wide constants
-│   ├── data/                    # Static/reference data
-│   ├── modules/                 # Feature modules
-│   │   ├── alchemyPay/           # Fiat on-ramp integration
-│   │   ├── commonfeature/        # Shared cross-module features
-│   │   ├── evm/                  # EVM chain module
+│   ├── abi/                        # EVM Smart contract ABIs
+│   ├── components/                 # Global UI components (modals, navbar, buttons)
+│   ├── constants/                  # System constants & network definitions
+│   ├── data/                       # Static reference datasets
+│   ├── modules/                    # Feature modules
+│   │   ├── alchemyPay/             # Fiat on-ramp integration
+│   │   ├── commonfeature/          # Cross-module shared components
+│   │   ├── evm/                    # EVM chains implementation
 │   │   │   ├── components/         # EVM UI components
-│   │   │   ├── feature/            # EVM feature logic
-│   │   │   ├── hook/               # EVM hooks
-│   │   │   ├── service/            # EVM services (wallet, RPC, etc.)
-│   │   │   ├── types/              # EVM TypeScript types
-│   │   │   └── utils/              # EVM helper utilities
-│   │   ├── market/               # Market data module
-│   │   ├── perps/                # Aster perpetual trading module
-│   │   ├── stellar/              # Stellar chain module
-│   │   ├── transaction/          # Transaction handling
-│   │   └── walletconnect/        # WalletConnect v2 integration
-│   ├── pages/                   # Route-level page components
-│   ├── routes/                  # App routing configuration
-│   ├── service/                 # App-level API/service layer
-│   ├── store/                    # Zustand state management
-│   ├── test/                     # Tests
-│   ├── types/                    # Global TypeScript type definitions
-│   ├── utils/                    # Global utility functions
-│   ├── validator/                # Form/input validation
-│   ├── App.tsx                  # Main app component
-│   ├── index.css                # Global styles
-│   ├── main.tsx                 # App entry point
-│   └── vite-env.d.ts            # Vite environment types
-├── .env.example                 # Environment variables template
-├── vite.config.ts               # Vite configuration
-├── tailwind.config.js           # Tailwind CSS configuration
-├── tsconfig.json                # TypeScript configuration
-└── package.json                 # Project dependencies
+│   │   │   ├── feature/            # EVM business logic (swap, bridge, transfer)
+│   │   │   ├── hook/               # Custom EVM React hooks
+│   │   │   ├── service/            # Ethers providers and transaction management
+│   │   │   └── utils/              # Multi-chain registry (ETH, ARB, POL, AVAX, BSC, BASE, OP)
+│   │   ├── market/                 # Market feed & ticker logic
+│   │   ├── perps/                  # Aster Perpetual Trading Module (Beta)
+│   │   │   ├── adapters/aster/     # Aster API, WebSocket, signers, order engines
+│   │   │   ├── components/         # Order books, charts, position tables, margin modals
+│   │   │   ├── context/            # Perps trading state context
+│   │   │   └── hooks/              # Trade calculation & balance sync hooks
+│   │   ├── stellar/                # Stellar chain module (Direct Horizon SDK)
+│   │   │   ├── components/         # SDEX orderbook, AMM swap interfaces
+│   │   │   ├── hook/               # Stellar balance and trade hooks
+│   │   │   └── service/            # Direct StellarSDK.Horizon server interactions
+│   │   ├── transaction/            # Transaction history & tracker
+│   │   └── walletconnect/          # WalletConnect v2 integration & Agent Key manager
+│   ├── pages/                      # Application route views (Swap, Trade, Perps, Assets)
+│   ├── routes/                     # Router hierarchy
+│   ├── service/                    # Base API service & authenticated proxy client
+│   ├── store/                      # Zustand state slices
+│   ├── test/                       # Unit and integration test suites
+│   ├── types/                      # Global TypeScript definitions
+│   ├── utils/                      # Helper utilities
+│   ├── App.tsx                     # Main layout & provider wrapper
+│   ├── index.css                   # Global Tailwind styles
+│   └── main.tsx                    # React application entry point
+├── LICENSE                         # Apache License, Version 2.0
+├── package.json                    # Project configuration & dependencies
+├── tsconfig.json                   # TypeScript compiler configuration
+└── vite.config.ts                  # Vite bundler configuration
 ```
 
-### WalletConnect Setup
-
-Get your Project ID from WalletConnect Cloud:
-
-1. Create an account on [WalletConnect Cloud](https://cloud.walletconnect.com/)
-2. Create a new project
-3. Copy your Project ID
-4. Add to `.env` as `VITE_WALLETCONNECT_PROJECT_ID`
-
-### Proxy Authentication
-
-All API calls go through Swiftex's authenticated proxy:
-
-- **Development**: Use `VITE_API_DEVICE_AUTH_DEV` token
-- **Production**: Use `VITE_API_DEVICE_AUTH_PROD` token
-- Contact the Swiftex team to get your authentication tokens
-
-The proxy handles:
-
-- RPC calls to EVM networks
-- Stellar Horizon API calls
-- Aster market data and account queries
-- Rate limiting and caching
-
-## 🚢 Deployment
-
-### Build for Production
-
-```bash
-npm run build
-```
-
-Output will be in the `dist/` folder.
-
-### Deploy to Vercel
-
-**Vercel Configuration:**
-
-- Framework: Vite
-- Build Command: `npm run build`
-- Output Directory: `dist`
-- Install Command: `npm install`
-
-### Deploy to Netlify
-
-**Netlify Configuration (`netlify.toml`):**
-
-```toml
-[build]
-  command = "npm run build"
-  publish = "dist"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-```
-
-### Environment Variables in Production
-
-Set all required environment variables in your hosting platform:
-
-**Required Variables:**
-
-- `VITE_WALLETCONNECT_PROJECT_ID`
-- `VITE_WALLETCONNECT_RELAY_URL`
-- `VITE_BASE_SERVER_URL_PROD`
-- `VITE_BASE_PROXY_URL_PROD`
-- `VITE_API_DEVICE_AUTH_PROD`
-
-> **Important:** Never commit `.env` file to git.
-
-## 📱 Mobile App
-
-Swiftex is also available as a mobile application for iOS and Android, providing the same features with native mobile optimizations.
+---
 
 ## 🗺️ Roadmap
 
-**Current**
+- [x] Multi-chain EVM wallet integration via WalletConnect v2 (ETH, ARB, BSC, POL, AVAX, BASE, OP)
+- [x] Stellar native asset management, AMM Swaps, and SDEX order books
+- [x] Direct Stellar SDK integration bypassing proxy
+- [x] Aster Perpetual Trading integration with Ephemeral Agent Wallets
+- [x] Cross-margin and isolated-margin trading modes
+- [x] Real-time L2 order books and depth feeds over WebSocket
+- [ ] Multi-Asset collateral expansion for Aster Perps (In Development)
+- [ ] Algorithmic TWAP & Iceberg execution modes (In Development)
+- [ ] Mobile native applications (iOS & Android)
 
-- ✅ Multi-wallet WalletConnect integration
-- ✅ Stellar asset management
-- ✅ Aster perpetual trading integration
-- ✅ Agent wallet trading permissions
-- ✅ Real-time WebSocket data
-- ✅ Cross & isolated margin support
+---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
 
-## 🆘 Support
+---
 
-Need help? We're here for you:
+## 🆘 Support & Community
 
-- **Website**: [swiftexchange.io](https://swiftexchange.io)
-- **X (Twitter)**: [@SwiftEx_Wallet](https://twitter.com/SwiftEx_Wallet)
+Join our growing community of traders and developers:
+
+- **Official Website**: [swiftexchange.io](https://swiftexchange.io)
+- **Twitter / X**: [@SwiftEx_Wallet](https://twitter.com/SwiftEx_Wallet)
 - **Instagram**: [@swiftexwallet](https://instagram.com/swiftexwallet)
-- **Discord**: [Join our community](https://discord.gg/)
+- **Discord Community**: [Join Discord](https://discord.gg/)
 - **LinkedIn**: [Swiftex Wallet](https://linkedin.com/)
-- **GitHub Repository**: [swiftexchange-web](https://github.com/karanbisht-123/swiftexchange-web)
-- **GitHub Issues**: [Report a bug](https://github.com/karanbisht-123/swiftexchange-web/issues)
-
-## 🙏 Acknowledgments
-
-Built with amazing tools and protocols:
-
-- [Aster](https://aster.exchange/) - Decentralized perpetual trading
-- [Stellar Development Foundation](https://stellar.org/) - Fast, low-cost transfers
-- [WalletConnect](https://walletconnect.com/) - Multi-wallet connectivity
-- [Vite](https://vitejs.dev/) - Lightning-fast frontend tooling
-- [React](https://react.dev/) - UI library
-- [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
-
-## ⚠️ Disclaimer
-
-**Important: Read Before Using**
-
-Swiftex Wallet Exchange is non-custodial software. Use at your own risk.
-
-**Risks:**
-
-- Trading cryptocurrencies and derivatives involves substantial risk of loss
-- You are solely responsible for securing your wallet and funds
-- Market conditions can be volatile and unpredictable
-- You may lose all or part of your investment
-
-**Always:**
-
-- ✅ Do your own research (DYOR)
-- ✅ Never invest more than you can afford to lose
-- ✅ Keep your seed phrase secure and private
-- ✅ Use hardware wallets for large amounts
-- ✅ Verify all transaction details before signing
-- ✅ Review agent wallet permissions periodically
-
-**Never:**
-
-- ❌ Share your private keys or seed phrases
-- ❌ Trust unsolicited messages
-- ❌ Use public WiFi without VPN
-- ❌ Click suspicious links
-
-This software is provided "as is" without warranty of any kind.
+- **GitHub Issues**: [Report an Issue / Suggest a Feature](https://github.com/SwiftExWallet/swiftexchange-web/issues)
 
 ---
 
 <p align="center">
-  Built with ❤️ by the Swiftex Team
+  Built with ❤️ by the <b>Swiftex Team</b> • Empowering sovereign decentralized finance
 </p>
-
-<p align="center">
-  <a href="https://swiftexchange.io">Website</a> •
-  <a href="https://twitter.com/SwiftEx_Wallet">X</a> •
-  <a href="https://instagram.com/swiftexwallet">Instagram</a> •
-  <a href="https://discord.gg/">Discord</a> •
-  <a href="https://linkedin.com/">LinkedIn</a>
-</p>
-
-⭐ **Star us on GitHub if you find this project useful!**
