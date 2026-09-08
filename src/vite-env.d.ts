@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_BASE_SERVER_URL_TEST?: string;
   readonly VITE_BASE_SERVER_URL_PROD?: string;
   readonly VITE_ENABLE_TESTNET?: string;
+  readonly VITE_ENABLE_MAINNET?: string;
   readonly VITE_API_DEVICE_AUTH: string;
   readonly VITE_API_DEVICE_JWT: string;
   readonly VITE_API_USER_AUTH: string;

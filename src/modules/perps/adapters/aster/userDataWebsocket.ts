@@ -5,11 +5,13 @@ import { usePositionStore } from '../../core/stores/positionStore';
 export interface AsterUserDataWebSocketOptions {
   url: string;
   listenKey: string;
+  onListenKeyExpired?: () => Promise<string | null>;
 }
 
 export class AsterUserDataWebSocket {
   private url: string;
   private listenKey: string;
+  private onListenKeyExpired?: () => Promise<string | null>;
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private isConnecting = false;
@@ -18,6 +20,7 @@ export class AsterUserDataWebSocket {
   constructor(options: AsterUserDataWebSocketOptions) {
     this.url = options.url;
     this.listenKey = options.listenKey;
+    this.onListenKeyExpired = options.onListenKeyExpired;
   }
 
   public async connect(): Promise<void> {
@@ -99,11 +102,22 @@ export class AsterUserDataWebSocket {
         this.handleOrderUpdate(data.o);
         break;
       case 'listenKeyExpired':
-        console.warn(
-          '[Aster UserData WS] ListenKey Expired! Must request a new one and reconnect.'
-        );
-        // TODO: Request new listenKey from REST API in Phase 2
-        this.disconnect();
+        console.warn('[Aster UserData WS] ListenKey Expired! Attempting to refresh listenKey...');
+        if (this.onListenKeyExpired) {
+          this.onListenKeyExpired()
+            .then(newKey => {
+              if (newKey) {
+                this.listenKey = newKey;
+                this.disconnect();
+                this.connect();
+              } else {
+                this.attemptReconnect();
+              }
+            })
+            .catch(() => this.attemptReconnect());
+        } else {
+          this.attemptReconnect();
+        }
         break;
       case 'MARGIN_CALL':
         console.warn('[Aster UserData WS] Margin Call!', data);

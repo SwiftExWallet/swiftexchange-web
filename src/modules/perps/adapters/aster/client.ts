@@ -1,6 +1,7 @@
 import type { PerpNetwork } from '../../core/config/networks';
 import type { PerpExchange } from '../../core/interfaces/exchange';
 import type { Candle, Market, OrderBook, Ticker } from '../../core/models';
+import { orderBookStore } from '../../core/stores/orderbookStore';
 import { type AssetCtx, useTickerStore } from '../../core/stores/tickerStore';
 import { ASTER_ENDPOINTS, getAsterRestUrl } from './constants';
 import { AsterMapper } from './mapper';
@@ -42,7 +43,9 @@ export class AsterClient implements PerpExchange {
       const contexts: Record<string, AssetCtx> = {};
       for (const t of tickerData) {
         const symbol = t.symbol.replace('USDT', '-USDT');
-        contexts[symbol] = AsterMapper.mapTicker(t);
+        const mapped = AsterMapper.mapTicker(t);
+        contexts[symbol] = mapped;
+        contexts[t.symbol] = mapped;
       }
       useTickerStore.getState().setMultipleAssetCtxs(contexts);
     }
@@ -69,7 +72,29 @@ export class AsterClient implements PerpExchange {
     _callback?: (ob: OrderBook) => void
   ): Promise<void> {
     const coin = this.extractCoinFromSymbol(symbol);
+    // 1. Subscribe to WebSocket depth updates
     this.wsClient.subscribeOrderBook(coin);
+
+    // 2. Concurrently fetch instant REST depth snapshot to guarantee instant orderbook render
+    this.getOrderBook(symbol)
+      .then(ob => {
+        if (ob && ob.bids && ob.asks && (ob.bids.length > 0 || ob.asks.length > 0)) {
+          const updateId = ob.updateId ?? 0;
+          orderBookStore.applySnapshot(symbol, ob.bids, ob.asks, updateId);
+          const altSymbol = symbol.includes('-')
+            ? symbol.replace('-', '')
+            : symbol.replace(/USDT$/, '-USDT');
+          orderBookStore.applySnapshot(altSymbol, ob.bids, ob.asks, updateId);
+        }
+      })
+      .catch(err => {
+        console.warn('[AsterClient] HTTP initial depth snapshot fetch error:', err);
+      });
+  }
+
+  public async unsubscribeOrderBook(symbol: string): Promise<void> {
+    const coin = this.extractCoinFromSymbol(symbol);
+    this.wsClient.unsubscribeOrderBook(coin);
   }
 
   public async subscribeTicker(
@@ -79,6 +104,11 @@ export class AsterClient implements PerpExchange {
   ): Promise<void> {
     const coin = this.extractCoinFromSymbol(symbol);
     this.wsClient.subscribeTrades(coin);
+  }
+
+  public async unsubscribeTicker(symbol: string): Promise<void> {
+    const coin = this.extractCoinFromSymbol(symbol);
+    this.wsClient.unsubscribeTrades(coin);
   }
 
   public subscribeCandles(coin: string, interval: string): void {

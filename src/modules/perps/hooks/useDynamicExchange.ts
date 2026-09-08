@@ -86,6 +86,27 @@ export function useDynamicExchange() {
             useLeverageStore.getState().setAllBrackets(bracketsMap);
           })
           .catch(err => console.error('[useDynamicExchange] getBrackets failed:', err));
+      } else {
+        // Hyperliquid risk brackets derived from market metadata
+        const bracketsMap: Record<string, any[]> = {};
+        markets.forEach(m => {
+          const maxLev = m.maxLeverage || 20;
+          const mmr = Number((1 / (maxLev * 2)).toFixed(4));
+          const bracketList = [
+            {
+              bracket: 1,
+              initialLeverage: maxLev,
+              notionalCap: 1000000,
+              notionalFloor: 0,
+              maintMarginRatio: mmr,
+              cum: 0,
+            },
+          ];
+          bracketsMap[m.symbol] = bracketList;
+          bracketsMap[m.symbol.replace('-', '')] = bracketList;
+          bracketsMap[m.baseAsset] = bracketList;
+        });
+        useLeverageStore.getState().setAllBrackets(bracketsMap);
       }
 
       if (markets.length === 0) {

@@ -78,69 +78,49 @@ export const ConnectWalletButton: React.FC = () => {
     );
   }
 
+  // Select primary active address to display (Aster-style: clean address + dropdown)
+  const primaryWallet =
+    validConnectedWallets.find(([type]) => type === 'evm')?.[1] || validConnectedWallets[0]?.[1];
+  const primaryAddress = primaryWallet ? formatAddress(primaryWallet.address) : '';
+
   return (
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setShowDropdown(v => !v)}
-        className="flex items-center bg-tertiary shadow rounded-lg gap-2 pl-1.5 pr-3 py-1.5 transition-colors cursor-pointer"
+        className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1.5 rounded-lg bg-[var(--color-bg-tertiary)]/70 hover:bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] transition-all cursor-pointer select-none group shadow-xs active:scale-[0.98]"
+        title={primaryAddress}
       >
-        <div className="flex items-center -space-x-2">
-          {validConnectedWallets.slice(0, 3).map(([type, conn]) => (
+        <div className="flex items-center -space-x-1.5">
+          {validConnectedWallets.slice(0, 2).map(([type, conn]) => (
             <div
               key={type}
-              style={{
-                background: 'var(--color-bg-secondary)',
-                border: '2px solid var(--color-bg-tertiary)',
-              }}
-              className="w-7 h-7 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0"
+              className="w-5 h-5 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0 ring-1.5 ring-[var(--color-bg-primary)] bg-[var(--color-bg-secondary)]"
               title={conn.peerName || conn.walletId}
             >
               <img
                 src={getWalletIcon(conn.walletId, type, conn.peerIcon)}
                 alt={conn.peerName || conn.walletId}
-                className="w-full h-full object-contain rounded-full"
+                className="w-full h-full object-contain"
                 onError={e => {
-                  e.currentTarget.style.display = 'none';
-                  const p = e.currentTarget.parentElement;
-                  if (p) {
-                    p.textContent = type[0].toUpperCase();
-                    p.style.color = 'var(--color-text-muted)';
-                    p.style.fontWeight = '700';
-                    p.style.fontSize = '0.75rem';
+                  const img = e.currentTarget as HTMLImageElement;
+                  if (img.src !== WALLETCONNECT_ICON) {
+                    img.src = WALLETCONNECT_ICON;
                   }
                 }}
               />
             </div>
           ))}
-          {validConnectedWallets.length > 3 && (
-            <div
-              style={{
-                background: 'var(--color-brand-primary)',
-                border: '2px solid var(--color-bg-tertiary)',
-                color: '#fff',
-              }}
-              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-            >
-              +{validConnectedWallets.length - 3}
-            </div>
-          )}
         </div>
 
-        <div className="hidden sm:flex items-center gap-1">
-          <div
-            style={{ background: 'var(--color-success)' }}
-            className="w-1.5 h-1.5 rounded-full animate-pulse"
-          />
-          <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            {validConnectedWallets.length === 1
-              ? formatAddress(validConnectedWallets[0][1].address)
-              : `${validConnectedWallets.length} wallets`}
-          </span>
-        </div>
+        <span className="hidden sm:inline text-xs font-semibold tracking-wide font-mono text-[var(--color-text-primary)]">
+          {primaryAddress}
+        </span>
 
         <ChevronDown
-          className={`w-3.5 h-3.5 transition-transform ${showDropdown ? 'rotate-180' : ''}`}
-          style={{ color: 'var(--color-text-muted)' }}
+          size={13}
+          className={`text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] transition-transform duration-200 ${
+            showDropdown ? 'rotate-180' : ''
+          }`}
         />
       </button>
 

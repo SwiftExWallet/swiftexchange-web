@@ -13,6 +13,7 @@ import {
 } from '../../../../walletconnect/services/hyperliquidAgentKeyManager';
 import { walletService } from '../../../../walletconnect/services/walletService';
 import { useWalletStore } from '../../../../walletconnect/store/walletConnectStore';
+import { useExchangeManager } from '../../../core/ExchangeManager';
 
 export type DeriveState = 'idle' | 'signing' | 'ready' | 'error';
 
@@ -137,6 +138,7 @@ export interface UseHyperliquidAgentResult {
 }
 
 export function useHyperliquidAgent(): UseHyperliquidAgentResult {
+  const currentExchange = useExchangeManager(s => s.currentExchange);
   const evmWallet = useWalletStore(state => state.connectedWallets.evm);
   const userAddr = evmWallet?.address ?? null;
   const network = useWalletStore(state => state.network);
@@ -159,7 +161,7 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
         purgeStore();
       }
     }
-  }, [userAddr, network, restoreKey, purgeStore]);
+  }, [userAddr, network, currentExchange, restoreKey, purgeStore]);
 
   const deriveAgentKey = useCallback(async () => {
     if (!userAddr) throw new Error('EVM wallet not connected');

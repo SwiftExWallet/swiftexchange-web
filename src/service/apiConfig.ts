@@ -21,7 +21,9 @@ export function getCurrentNetwork(): 'mainnet' | 'testnet' {
   if (typeof window === 'undefined') return 'mainnet';
   try {
     const isTestnetEnabled = import.meta.env.VITE_ENABLE_TESTNET === 'true';
+    const isMainnetEnabled = import.meta.env.VITE_ENABLE_MAINNET !== 'false' || !isTestnetEnabled;
     if (!isTestnetEnabled) return 'mainnet';
+    if (!isMainnetEnabled) return 'testnet';
     const stored = localStorage.getItem('network');
     return stored === 'testnet' ? 'testnet' : 'mainnet';
   } catch {

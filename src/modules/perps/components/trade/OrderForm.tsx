@@ -1,5 +1,5 @@
 import { ChevronDown, Plus } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import InfoBanner from '../../../../components/common/InfoBanner';
 import { useExchangeManager } from '../../core/ExchangeManager';
@@ -10,6 +10,7 @@ import {
   type WorkingType,
   useOrderEntryStore,
 } from '../../core/stores/orderEntryStore';
+import { useTickerStore } from '../../core/stores/tickerStore';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
 import { validateOrder } from '../../utils/orderValidation';
 import { AssetModeModal } from './AssetModeModal';
@@ -41,6 +42,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 }) => {
   const store = useOrderEntryStore();
   const currentNetwork = useExchangeManager(state => state.currentNetwork);
+  const currentExchange = useExchangeManager(state => state.currentExchange);
+  const isLoadingBalance = useAccountStore(state => state.isLoading);
+  const multiAssetsMargin = useAccountStore(state => state.multiAssetsMargin);
   const [isAssetModeModalOpen, setIsAssetModeModalOpen] = useState(false);
   const [isTifOpen, setIsTifOpen] = useState(false);
 
@@ -48,11 +52,24 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const markets = useMarketStore(state => state.markets);
   const market = markets[selectedSymbol] || null;
 
+  useEffect(() => {
+    if (selectedSymbol) {
+      store.syncForSymbol(selectedSymbol);
+    }
+  }, [selectedSymbol]);
+
   const baseAsset = market?.baseAsset || selectedSymbol.split('-')[0] || 'ASSET';
-  const quoteAsset = market?.quoteAsset || selectedSymbol.split('-')[1] || 'USDT';
+  const quoteAsset =
+    currentExchange === 'hyperliquid'
+      ? 'USDC'
+      : market?.quoteAsset ||
+        (selectedSymbol.includes('-') ? selectedSymbol.split('-')[1] : 'USDT');
 
   const baseBalance = useAccountStore(state => state.balances[baseAsset]);
-  const quoteBalance = useAccountStore(state => state.balances[quoteAsset]);
+  const quoteBalance = useAccountStore(
+    state =>
+      state.balances[quoteAsset] || (quoteAsset === 'USDC' ? state.balances['USD'] : undefined)
+  );
 
   const relevantBalances = useMemo(() => {
     return [baseBalance, quoteBalance].filter(Boolean);
@@ -149,9 +166,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       const eqBase = currentPrice > 0 ? size / currentPrice : 0;
       return `≈${eqBase.toFixed(baseDecimals)} ${baseAsset}`;
     } else {
-      return `≈${orderCost.toFixed(2)} USDT`;
+      return `≈${orderCost.toFixed(2)} ${quoteAsset}`;
     }
-  }, [store.size, store.sizeAsset, currentPrice, orderCost, baseDecimals, baseAsset]);
+  }, [store.size, store.sizeAsset, currentPrice, orderCost, baseDecimals, baseAsset, quoteAsset]);
 
   const handleCurrencyToggle = (curr: string) => {
     const newAsset = curr === baseAsset ? 'base' : 'quote';
@@ -168,9 +185,21 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
   };
 
+  const markPrice = useTickerStore(
+    state => parseFloat(state.assetCtxByMarket[selectedSymbol]?.markPx || '0') || currentPrice
+  );
+
   const handleBboFill = () => {
     if (currentPrice > 0) {
       store.setPrice(currentPrice.toFixed(priceDecimals));
+    }
+  };
+
+  const handleTriggerFill = () => {
+    const targetPx =
+      store.workingType === 'MARK_PRICE' ? markPrice || currentPrice : currentPrice || markPrice;
+    if (targetPx > 0) {
+      store.setStopPrice(targetPx.toFixed(priceDecimals));
     }
   };
 
@@ -198,7 +227,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       <div className="flex justify-between items-center text-[12px] text-secondary pt-0.5">
         <div className="flex items-center gap-1.5">
           <span>Avbl</span>
-          <span className="text-primary font-medium">{calcWalletBalance.toFixed(2)} USDT</span>
+          {isLoadingBalance ? (
+            <div className="h-3.5 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+          ) : (
+            <span className="text-primary font-medium">
+              {calcWalletBalance.toFixed(2)} {quoteAsset}
+            </span>
+          )}
         </div>
         <button
           type="button"
@@ -225,14 +260,20 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         >
           {store.leverage}x
         </button>
-        <button
-          type="button"
-          onClick={() => setIsAssetModeModalOpen(true)}
-          className="w-9 bg-tertiary border border-color hover:border-border-dark rounded-md py-1.5 text-[12px] font-medium text-primary transition-colors flex items-center justify-center cursor-pointer"
-          title="Multi-Asset Mode"
-        >
-          M
-        </button>
+        {currentExchange === 'aster' && (
+          <button
+            type="button"
+            onClick={() => setIsAssetModeModalOpen(true)}
+            className={`w-9 border rounded-md py-1.5 text-[12px] font-bold transition-all flex items-center justify-center cursor-pointer ${
+              multiAssetsMargin
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 shadow-xs'
+                : 'bg-tertiary border-color hover:border-border-dark text-secondary hover:text-primary'
+            }`}
+            title={multiAssetsMargin ? 'Multi-Asset Mode (Active)' : 'Single-Asset Mode (Active)'}
+          >
+            {multiAssetsMargin ? 'M' : 'S'}
+          </button>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -241,13 +282,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             label="Trigger price"
             value={store.stopPrice}
             onChange={store.setStopPrice}
-            currency="USDT"
+            onFocus={() => store.setActiveInput('stopPrice')}
+            currency={quoteAsset}
             placeholder="0.00"
             triggerOption={store.workingType === 'MARK_PRICE' ? 'Mark' : 'Last'}
             triggerOptions={['Mark', 'Last']}
             onTriggerOptionChange={opt =>
               store.setWorkingType(opt === 'Mark' ? 'MARK_PRICE' : 'CONTRACT_PRICE')
             }
+            onTriggerFill={handleTriggerFill}
             error={validation.errorField === 'stopPrice'}
           />
         )}
@@ -257,7 +300,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             label="Order price"
             value={store.price}
             onChange={store.setPrice}
-            currency="USDT"
+            onFocus={() => store.setActiveInput('price')}
+            currency={quoteAsset}
             placeholder="0.00"
             onBboClick={handleBboFill}
             error={validation.errorField === 'price'}
@@ -270,7 +314,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               label="Activation"
               value={store.activationPrice}
               onChange={store.setActivationPrice}
-              currency="USDT"
+              onFocus={() => store.setActiveInput('activationPrice')}
+              currency={quoteAsset}
               placeholder="Latest price if empty"
             />
             <OrderInput
@@ -290,14 +335,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               label="Chase Offset"
               value={store.chaseOffset}
               onChange={store.setChaseOffset}
-              currency="USDT"
+              currency={quoteAsset}
               placeholder="0"
             />
             <OrderInput
               label="Max Offset"
               value={store.maxChaseOffset}
               onChange={store.setMaxChaseOffset}
-              currency="USDT"
+              currency={quoteAsset}
               placeholder="10"
             />
           </>
@@ -309,14 +354,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               label="Price Lower"
               value={store.scaledPriceLower}
               onChange={store.setScaledPriceLower}
-              currency="USDT"
+              currency={quoteAsset}
               placeholder="0.00"
             />
             <OrderInput
               label="Price Upper"
               value={store.scaledPriceUpper}
               onChange={store.setScaledPriceUpper}
-              currency="USDT"
+              currency={quoteAsset}
               placeholder="0.00"
             />
             <OrderInput
@@ -480,7 +525,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                 label="TP"
                 value={store.attachedTpPrice}
                 onChange={store.setAttachedTpPrice}
-                currency="USDT"
+                currency={quoteAsset}
                 placeholder="0.00"
               />
             </div>
@@ -505,7 +550,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                 label="SL"
                 value={store.attachedSlPrice}
                 onChange={store.setAttachedSlPrice}
-                currency="USDT"
+                currency={quoteAsset}
                 placeholder="0.00"
               />
             </div>
@@ -595,7 +640,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span className="text-primary font-medium">
               {maxPossibleSize > 0
                 ? `${maxPossibleSize.toFixed(store.sizeAsset === 'quote' ? 2 : baseDecimals)} ${currentCurrency}`
-                : '0.00 USDT'}
+                : `0.00 ${quoteAsset}`}
             </span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -603,7 +648,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span className="text-primary font-medium">
               {maxPossibleSize > 0
                 ? `${maxPossibleSize.toFixed(store.sizeAsset === 'quote' ? 2 : baseDecimals)} ${currentCurrency}`
-                : '0.00 USDT'}
+                : `0.00 ${quoteAsset}`}
             </span>
           </div>
         </div>

@@ -9,6 +9,7 @@ export interface LiqCalcParams {
   balances?: Record<string, AccountBalance> | AccountBalance[];
   isMultiAsset?: boolean;
   bracketsBySymbol?: Record<string, LeverageBracket[]>;
+  assetPrices?: Record<string, number | string>;
 }
 
 /**
@@ -63,6 +64,7 @@ export function calculateLiquidationPrice({
   balances = {},
   isMultiAsset = false,
   bracketsBySymbol = {},
+  assetPrices = {},
 }: LiqCalcParams): number | null {
   const size = new BigNumber(position.size || '0');
   const entryPrice = new BigNumber(position.entryPrice || '0');
@@ -118,16 +120,30 @@ export function calculateLiquidationPrice({
   // Calculate Cross Wallet Balance
   let crossWalletBalance = new BigNumber(0);
   if (isMultiAsset) {
-    // Multi-asset mode: sum total margin balance across all assets
+    // Multi-asset mode: sum total margin balance converted to USD using asset prices
     Object.values(balanceMap).forEach(b => {
       const total = new BigNumber(b.total || b.marginBalance || '0');
-      if (total.gt(0)) crossWalletBalance = crossWalletBalance.plus(total);
+      if (total.gt(0)) {
+        const asset = b.asset.toUpperCase();
+        let price = new BigNumber(1);
+        if (asset !== 'USDT' && asset !== 'USDC' && asset !== 'USD') {
+          const matchedPrice =
+            assetPrices[asset] ||
+            assetPrices[`${asset}USDT`] ||
+            assetPrices[`${asset}-USD`] ||
+            assetPrices[`${asset}USD`];
+          if (matchedPrice) {
+            price = new BigNumber(matchedPrice);
+          }
+        }
+        crossWalletBalance = crossWalletBalance.plus(total.times(price));
+      }
     });
   } else {
-    // Single-asset mode (USDT-M)
-    const usdtBal = balanceMap['USDT'] || balanceMap['USD'];
-    if (usdtBal) {
-      crossWalletBalance = new BigNumber(usdtBal.total || usdtBal.marginBalance || '0');
+    // Single-asset mode (USDT-M / USDC-M / USD)
+    const quoteBal = balanceMap['USDT'] || balanceMap['USDC'] || balanceMap['USD'];
+    if (quoteBal) {
+      crossWalletBalance = new BigNumber(quoteBal.total || quoteBal.marginBalance || '0');
     }
   }
 

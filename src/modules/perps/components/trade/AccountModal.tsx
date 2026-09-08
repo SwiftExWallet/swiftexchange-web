@@ -726,13 +726,18 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         const nonce = Date.now() * 1000;
         const fee = String(chainWithdrawDetails.fee || '0');
 
-        const userSignature = await signEVMWithdraw(userWalletSigner, selectedChainId, {
-          destination: destinationAddress,
-          token: selectedWithdrawAsset.name,
-          amount: withdrawAmount,
-          fee,
-          nonce,
-        });
+        const userSignature = await signEVMWithdraw(
+          userWalletSigner,
+          selectedChainId,
+          {
+            destination: destinationAddress,
+            token: selectedWithdrawAsset.name,
+            amount: withdrawAmount,
+            fee,
+            nonce,
+          },
+          currentNetwork === 'testnet' ? 'Testnet' : 'Mainnet'
+        );
 
         await submitWithdraw(asterSigner, userAddr, {
           chainId: selectedChainId,

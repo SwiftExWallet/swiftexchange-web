@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
-import { IS_TESTNET_ENABLED, type NetworkType } from '../config/chains';
+import { IS_MAINNET_ENABLED, IS_TESTNET_ENABLED, type NetworkType } from '../config/chains';
 import {
   buildSiweMessage,
   buildStellarChallenge,
@@ -83,6 +83,7 @@ interface WalletActions {
 
 const getInitialNetwork = (): NetworkType => {
   if (!IS_TESTNET_ENABLED) return 'mainnet';
+  if (!IS_MAINNET_ENABLED) return 'testnet';
   if (typeof window === 'undefined') return 'mainnet';
   try {
     const stored = localStorage.getItem('network');
@@ -609,6 +610,8 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     },
 
     setNetwork: async network => {
+      if (!IS_TESTNET_ENABLED && network === 'testnet') return;
+      if (!IS_MAINNET_ENABLED && network === 'mainnet') return;
       if (network === get().network) return;
       await walletService.setNetwork(network);
       usePortfolioStore.getState().clearAssets();

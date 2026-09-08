@@ -29,19 +29,91 @@ export async function placeOrder(
     type: params.type,
   };
 
-  if (params.quantity !== undefined) p.quantity = params.quantity;
-  if (params.price !== undefined) p.price = params.price;
-  if (params.timeInForce !== undefined) p.timeInForce = params.timeInForce;
-  if (params.stopPrice !== undefined) p.stopPrice = params.stopPrice;
-  if (params.activationPrice !== undefined) p.activationPrice = params.activationPrice;
-  if (params.callbackRate !== undefined) p.callbackRate = params.callbackRate;
-  if (params.workingType !== undefined) p.workingType = params.workingType;
-  if (params.priceProtect !== undefined) p.priceProtect = String(params.priceProtect).toUpperCase();
-  if (params.reduceOnly !== undefined) p.reduceOnly = String(params.reduceOnly);
-  if (params.closePosition !== undefined) p.closePosition = String(params.closePosition);
-  if (params.positionSide !== undefined) p.positionSide = params.positionSide;
-  if (params.newClientOrderId !== undefined) p.newClientOrderId = params.newClientOrderId;
-  if (params.newOrderRespType !== undefined) p.newOrderRespType = params.newOrderRespType;
+  const orderType = (params.type || '').toUpperCase();
+
+  if (params.quantity !== undefined && params.quantity !== '') {
+    p.quantity = params.quantity;
+  }
+
+  // Price is ONLY for LIMIT, STOP, TAKE_PROFIT (never MARKET or STOP_MARKET)
+  if (
+    (orderType === 'LIMIT' || orderType === 'STOP' || orderType === 'TAKE_PROFIT') &&
+    params.price !== undefined &&
+    params.price !== '' &&
+    params.price !== '0'
+  ) {
+    p.price = params.price;
+  }
+
+  // TimeInForce is ONLY for LIMIT, STOP, TAKE_PROFIT (NEVER for MARKET or TRAILING_STOP_MARKET)
+  if (
+    (orderType === 'LIMIT' || orderType === 'STOP' || orderType === 'TAKE_PROFIT') &&
+    params.timeInForce
+  ) {
+    p.timeInForce = params.timeInForce;
+  }
+
+  // StopPrice for STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET
+  if (
+    (orderType === 'STOP' ||
+      orderType === 'STOP_MARKET' ||
+      orderType === 'TAKE_PROFIT' ||
+      orderType === 'TAKE_PROFIT_MARKET') &&
+    params.stopPrice !== undefined &&
+    params.stopPrice !== '' &&
+    params.stopPrice !== '0'
+  ) {
+    p.stopPrice = params.stopPrice;
+  }
+
+  // Trailing stop specific parameters
+  if (orderType === 'TRAILING_STOP_MARKET') {
+    if (params.callbackRate !== undefined && params.callbackRate !== '') {
+      p.callbackRate = params.callbackRate;
+    }
+    if (
+      params.activationPrice !== undefined &&
+      params.activationPrice !== '' &&
+      params.activationPrice !== '0'
+    ) {
+      p.activationPrice = params.activationPrice;
+    }
+  }
+
+  if (
+    params.workingType !== undefined &&
+    (orderType.includes('STOP') || orderType.includes('PROFIT'))
+  ) {
+    p.workingType = params.workingType;
+  }
+
+  if (
+    params.priceProtect !== undefined &&
+    (orderType.includes('STOP') || orderType.includes('PROFIT'))
+  ) {
+    p.priceProtect = String(params.priceProtect).toUpperCase();
+  }
+
+  // Only send reduceOnly if true! Sending reduceOnly: "false" causes unnecessary parameter error on MARKET orders!
+  if (params.reduceOnly === true || String(params.reduceOnly).toLowerCase() === 'true') {
+    p.reduceOnly = 'true';
+  }
+
+  if (params.closePosition === true || String(params.closePosition).toLowerCase() === 'true') {
+    p.closePosition = 'true';
+  }
+
+  if (params.positionSide !== undefined && params.positionSide !== 'BOTH') {
+    p.positionSide = params.positionSide;
+  }
+
+  if (params.newClientOrderId !== undefined && params.newClientOrderId !== '') {
+    p.newClientOrderId = params.newClientOrderId;
+  }
+
+  if (params.newOrderRespType !== undefined) {
+    p.newOrderRespType = params.newOrderRespType;
+  }
 
   return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.ORDER, p);
 }
@@ -173,4 +245,33 @@ export async function getAllOrders(
   if (params.endTime !== undefined) p.endTime = String(params.endTime);
   if (params.limit !== undefined) p.limit = String(params.limit);
   return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ALL_ORDERS, p);
+}
+
+/**
+ * Auto-Cancel All Open Orders (Dead Man's Switch).
+ * @param countdownTime Countdown time in milliseconds. 10000 = 10s. Set to 0 to cancel/disable.
+ */
+export async function countdownCancelAll(
+  signer: Signer,
+  userAddr: string,
+  symbol: string,
+  countdownTime: number
+): Promise<{ symbol: string; countdownTime: number }> {
+  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.COUNTDOWN_CANCEL_ALL, {
+    symbol,
+    countdownTime: String(countdownTime),
+  });
+}
+
+/**
+ * Modify a batch of orders in one request.
+ */
+export async function batchModifyOrders(
+  signer: Signer,
+  userAddr: string,
+  batchOrders: any[]
+): Promise<any[]> {
+  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.BATCH_MODIFY_ORDERS, {
+    batchOrders: JSON.stringify(batchOrders),
+  });
 }

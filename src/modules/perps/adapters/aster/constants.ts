@@ -133,16 +133,19 @@ export const ASTER_ENDPOINTS = {
   MARGIN_TYPE: '/fapi/v3/marginType',
   POSITION_MARGIN: '/fapi/v3/positionMargin',
   MULTI_ASSETS_MARGIN: '/fapi/v3/multiAssetsMargin',
+  POSITION_SIDE_DUAL: '/fapi/v3/positionSide/dual',
   INCOME: '/fapi/v3/income',
 
   // Orders & Trades
   ORDER: '/fapi/v3/order',
   CHASE: '/fapi/v3/chase',
   BATCH_ORDERS: '/fapi/v3/batchOrders',
+  BATCH_MODIFY_ORDERS: '/fapi/v3/batchModifyOrders',
   ALL_OPEN_ORDERS: '/fapi/v3/allOpenOrders',
   OPEN_ORDERS: '/fapi/v3/openOrders',
   ALL_ORDERS: '/fapi/v3/allOrders',
   USER_TRADES: '/fapi/v3/userTrades',
+  COUNTDOWN_CANCEL_ALL: '/fapi/v3/countdownCancelAll',
 
   // Deposit & Withdraw
   DEPOSIT_ADDRESS: '/fapi/v3/deposit/address',

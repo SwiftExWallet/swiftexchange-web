@@ -189,6 +189,23 @@ export async function getMultiAssetsMargin(
   return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.MULTI_ASSETS_MARGIN);
 }
 
+export async function getPositionMode(
+  signer: Signer,
+  userAddr: string
+): Promise<{ dualSidePosition: boolean }> {
+  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.POSITION_SIDE_DUAL);
+}
+
+export async function changePositionMode(
+  signer: Signer,
+  userAddr: string,
+  dualSidePosition: boolean
+): Promise<{ code: number; msg: string }> {
+  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.POSITION_SIDE_DUAL, {
+    dualSidePosition: dualSidePosition ? 'true' : 'false',
+  });
+}
+
 export async function getUserTrades(
   signer: Signer,
   userAddr: string,

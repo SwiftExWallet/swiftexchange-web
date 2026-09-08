@@ -110,14 +110,16 @@ export async function deriveHyperliquidAgentKey(
   };
 }
 
+const HL_AES_KEY_ID = '_k_hl';
+
 export async function encryptAndStoreAgentKey(
   privKeyHex: string,
   isTestnet?: boolean
 ): Promise<string> {
   const activeTestnet =
     isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
-  let aesKey = await retrieveAESKey();
-  if (!aesKey) aesKey = await generateAndStoreAESKey();
+  let aesKey = await retrieveAESKey(HL_AES_KEY_ID);
+  if (!aesKey) aesKey = await generateAndStoreAESKey(HL_AES_KEY_ID);
 
   const agentWallet = new Wallet(privKeyHex);
   const encoder = new TextEncoder();
@@ -140,9 +142,8 @@ export async function restoreAgentWallet(isTestnet?: boolean): Promise<Wallet | 
     (!activeTestnet ? localStorage.getItem(BLOB_KEY_PREFIX) : null);
   if (!raw) return null;
 
-  const aesKey = await retrieveAESKey();
+  const aesKey = await retrieveAESKey(HL_AES_KEY_ID);
   if (!aesKey) {
-    purgeAgentKey(activeTestnet);
     return null;
   }
 
@@ -160,9 +161,9 @@ export async function restoreAgentWallet(isTestnet?: boolean): Promise<Wallet | 
     const privKeyHex = new TextDecoder().decode(keyBytes);
     keyBytes.fill(0);
     return new Wallet(privKeyHex);
-  } catch {
+  } catch (err) {
+    console.warn('[HyperliquidAgentKeyManager] Decryption attempt failed:', err);
     if (keyBytes) keyBytes.fill(0);
-    purgeAgentKey(activeTestnet);
     return null;
   }
 }

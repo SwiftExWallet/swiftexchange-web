@@ -426,13 +426,15 @@ export async function deriveAsterAgentKey(
   };
 }
 
+const ASTER_AES_KEY_ID = '_k_aster';
+
 export async function encryptAndStoreAgentKey(
   privKeyHex: string,
   network?: string
 ): Promise<string> {
   const net = network || useWalletStore.getState().network || 'mainnet';
-  let aesKey = await retrieveAESKey();
-  if (!aesKey) aesKey = await generateAndStoreAESKey();
+  let aesKey = await retrieveAESKey(ASTER_AES_KEY_ID);
+  if (!aesKey) aesKey = await generateAndStoreAESKey(ASTER_AES_KEY_ID);
 
   const agentWallet = new Wallet(privKeyHex);
   const encoder = new TextEncoder();
@@ -454,9 +456,8 @@ export async function restoreAgentWallet(network?: string): Promise<Wallet | nul
     (net === 'mainnet' ? localStorage.getItem(BLOB_KEY_PREFIX) : null);
   if (!raw) return null;
 
-  const aesKey = await retrieveAESKey();
+  const aesKey = await retrieveAESKey(ASTER_AES_KEY_ID);
   if (!aesKey) {
-    purgeAgentKey(net);
     return null;
   }
 
@@ -474,9 +475,9 @@ export async function restoreAgentWallet(network?: string): Promise<Wallet | nul
     const privKeyHex = new TextDecoder().decode(keyBytes);
     keyBytes.fill(0);
     return new Wallet(privKeyHex);
-  } catch {
+  } catch (err) {
+    console.warn('[AsterAgentKeyManager] Decryption attempt failed:', err);
     if (keyBytes) keyBytes.fill(0);
-    purgeAgentKey(net);
     return null;
   }
 }

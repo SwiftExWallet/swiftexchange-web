@@ -118,4 +118,6 @@ export interface AccountBalance {
   locked: string; // Locked in orders
   marginBalance?: string; // Margin balance for futures
   unrealizedPnl?: string; // Unrealized Pnl for futures
+  usdValue?: string; // Calculated or official USD value
+  discountRate?: string; // Optional fee/margin discount rate (e.g. "5%")
 }

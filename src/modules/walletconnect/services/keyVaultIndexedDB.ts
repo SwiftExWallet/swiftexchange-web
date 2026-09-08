@@ -17,7 +17,7 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-export async function generateAndStoreAESKey(): Promise<CryptoKey> {
+export async function generateAndStoreAESKey(keyId: string = KEY_ID): Promise<CryptoKey> {
   const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
     'encrypt',
     'decrypt',
@@ -27,7 +27,7 @@ export async function generateAndStoreAESKey(): Promise<CryptoKey> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
-    const put = store.put(key, KEY_ID);
+    const put = store.put(key, keyId);
     put.onsuccess = () => {
       db.close();
       resolve(key);
@@ -39,34 +39,49 @@ export async function generateAndStoreAESKey(): Promise<CryptoKey> {
   });
 }
 
-export async function retrieveAESKey(): Promise<CryptoKey | null> {
+export async function retrieveAESKey(keyId: string = KEY_ID): Promise<CryptoKey | null> {
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    const key = await new Promise<CryptoKey | null>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
-      const get = store.get(KEY_ID);
-      get.onsuccess = () => {
-        db.close();
-        resolve(get.result || null);
-      };
-      get.onerror = () => {
-        db.close();
-        reject(get.error);
-      };
+      const get = store.get(keyId);
+      get.onsuccess = () => resolve(get.result || null);
+      get.onerror = () => reject(get.error);
     });
+
+    if (key) {
+      db.close();
+      return key;
+    }
+
+    // Fallback to legacy default key if namespaced key is not yet present
+    if (keyId !== KEY_ID) {
+      const fallbackKey = await new Promise<CryptoKey | null>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const get = store.get(KEY_ID);
+        get.onsuccess = () => resolve(get.result || null);
+        get.onerror = () => reject(get.error);
+      });
+      db.close();
+      return fallbackKey;
+    }
+
+    db.close();
+    return null;
   } catch {
     return null;
   }
 }
 
-export async function destroyAESKey(): Promise<void> {
+export async function destroyAESKey(keyId: string = KEY_ID): Promise<void> {
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const del = store.delete(KEY_ID);
+      const del = store.delete(keyId);
       del.onsuccess = () => {
         db.close();
         resolve();

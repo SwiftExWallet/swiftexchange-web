@@ -1,5 +1,5 @@
 import { Bell, Droplets, Flame, Menu } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { ROUTES } from '../../constants/routes';
@@ -13,8 +13,7 @@ import { useNotificationStore } from '../../store/notificationStore';
 import ThemeToggle from '../../utils/ThemeToggle';
 
 const Topbar: React.FC = () => {
-  const { connectedWallets, isRestoringSession, disconnectAll } = useWalletConnect();
-  const isDisconnecting = useWalletStore(state => state.isDisconnecting);
+  const { connectedWallets, isRestoringSession } = useWalletConnect();
   const currentNetwork = useWalletStore(state => state.network);
   const navigate = useNavigate();
   const loc = useLocation();
@@ -51,12 +50,6 @@ const Topbar: React.FC = () => {
       }
     }
   }, [isAnyWalletConnected, isRestoringSession, navigate, loc.pathname, connectedWallets]);
-
-  const handleDisconnectAll = useCallback(async () => {
-    await disconnectAll();
-    hasRedirected.current = false;
-    navigate(ROUTES.HOME);
-  }, [disconnectAll, navigate]);
 
   return (
     <>
@@ -109,38 +102,27 @@ const Topbar: React.FC = () => {
           <NetworkSwitch />
 
           {currentNetwork === 'testnet' && (
-            <button
-              onClick={() => setIsFundModalOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-brand-primary/40 bg-brand-primary/10 text-brand-primary text-xs font-bold hover:bg-brand-primary/20 transition-all cursor-pointer shadow-sm shadow-brand-primary/10 active:scale-95"
-              title="Testnet Faucet & Liquidity"
-            >
-              <Droplets size={14} className="animate-pulse text-brand-primary" />
-              <span className="hidden sm:inline">Fund Wallet</span>
-            </button>
-          )}
-
-          {isAnyWalletConnected ? (
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <ConnectWalletButton />
+            <div className="relative inline-flex p-[2px] rounded-xl overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.35)] hover:shadow-[0_0_25px_rgba(59,130,246,0.55)] transition-all duration-300 group cursor-pointer">
+              <div className="absolute -inset-[200%] animate-[spin_3.5s_linear_infinite] bg-[conic-gradient(from_0deg_at_50%_50%,transparent_0%,#3b82f6_20%,#93c5fd_30%,#ffffff_35%,transparent_38%,transparent_50%,#3b82f6_70%,#93c5fd_80%,#ffffff_85%,transparent_88%)] will-change-transform opacity-95" />
               <button
-                onClick={handleDisconnectAll}
-                disabled={isDisconnecting}
-                className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 text-xs font-medium hover:bg-rose-500/20 transition-colors cursor-pointer disabled:opacity-50"
-                title="Disconnect all wallets"
+                onClick={() => setIsFundModalOpen(true)}
+                style={{
+                  background: 'var(--color-bg-secondary)',
+                  color: 'var(--color-text-primary)',
+                }}
+                className="relative flex items-center justify-center gap-1.5 hover:bg-[var(--color-bg-hover)] rounded-[10px] px-3 py-1.5 text-xs font-semibold transition-colors duration-200 cursor-pointer select-none"
+                title="Testnet Faucet & Liquidity"
               >
-                {isDisconnecting ? (
-                  <>
-                    <span className="w-3 h-3 border-2 border-rose-400 border-t-transparent rounded-full animate-spin" />
-                    <span>Disconnecting</span>
-                  </>
-                ) : (
-                  'Disconnect'
-                )}
+                <Droplets
+                  size={13}
+                  className="text-blue-400 group-hover:scale-110 transition-transform shrink-0"
+                />
+                <span className="hidden sm:inline font-bold tracking-wide">Fund Wallet</span>
               </button>
             </div>
-          ) : (
-            <ConnectWalletButton />
           )}
+
+          <ConnectWalletButton />
 
           <ThemeToggle />
 

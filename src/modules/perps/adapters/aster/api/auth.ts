@@ -65,6 +65,17 @@ function throwIfApiError(data: any): void {
 
 let serverTimeOffset = 0;
 let lastTimeSync = 0;
+let lastGeneratedNonce = 0;
+
+export function generateMonotonicNonce(serverTime: number): string {
+  const baseMicro = Math.floor(serverTime * 1000);
+  if (baseMicro > lastGeneratedNonce) {
+    lastGeneratedNonce = baseMicro;
+  } else {
+    lastGeneratedNonce += 1;
+  }
+  return String(lastGeneratedNonce);
+}
 
 export async function getSyncedServerTime(baseUrl?: string): Promise<number> {
   const restUrl = baseUrl || getAsterRestUrl();
@@ -98,7 +109,7 @@ export async function signedRequest(
   const chainId = getAsterChainId();
   const signerAddr = await signer.getAddress();
   const serverTime = await getSyncedServerTime(effectiveBaseUrl);
-  const nonce = String(serverTime * 1000);
+  const nonce = generateMonotonicNonce(serverTime);
 
   const ordered: Record<string, string> = {
     user: getAddress(userAddr),

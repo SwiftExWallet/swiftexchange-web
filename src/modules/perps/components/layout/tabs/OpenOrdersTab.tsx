@@ -1,30 +1,27 @@
 import React, { useState } from 'react';
 
-import { useOrders } from '../../../adapters/aster/hooks/useOrders';
-import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useOrderStore } from '../../../core/stores/orderStore';
+import { useUnifiedExecution } from '../../../services/useUnifiedExecution';
 
 interface Props {
-  signer: any;
-  userAddr: string;
+  signer?: any;
+  userAddr?: string;
 }
 
-export const OpenOrdersTab: React.FC<Props> = ({ signer, userAddr }) => {
+export const OpenOrdersTab: React.FC<Props> = () => {
   const orders = useOrderStore(state => state.orders);
   const displayOrders = Object.values(orders).filter(
     o => o.status === 'new' || o.status === 'partially_filled'
   );
-  const currentExchange = useExchangeManager(state => state.currentExchange);
-  const { cancel } = useOrders(signer, userAddr);
+  const { isReady, cancelSingleOrder } = useUnifiedExecution();
 
   const [cancelingId, setCancelingId] = useState<string | null>(null);
 
   const handleCancel = async (symbol: string, orderId: string) => {
-    if (!signer) return;
+    if (!isReady) return;
     setCancelingId(orderId);
     try {
-      await cancel({ symbol, orderId: parseInt(orderId, 10) });
-      useOrderStore.getState().removeOrder(orderId);
+      await cancelSingleOrder(symbol, orderId);
     } catch (e) {
       console.error('Failed to cancel order:', e);
     } finally {
@@ -73,17 +70,14 @@ export const OpenOrdersTab: React.FC<Props> = ({ signer, userAddr }) => {
                 </td>
                 <td className="px-2.5 py-1.5 text-secondary uppercase">{o.status}</td>
                 <td className="px-2.5 py-1.5 text-right">
-                  {currentExchange === 'aster' ? (
-                    <button
-                      onClick={() => handleCancel(o.symbol.replace('-', ''), o.id)}
-                      disabled={cancelingId === o.id}
-                      className="text-[10px] bg-tertiary hover:bg-hover px-2 py-0.5 rounded text-primary disabled:opacity-50 transition-colors"
-                    >
-                      {cancelingId === o.id ? '...' : 'Cancel'}
-                    </button>
-                  ) : (
-                    <span className="text-[10px] text-muted">Not Available</span>
-                  )}
+                  <button
+                    onClick={() => handleCancel(o.symbol.replace('-', ''), o.id)}
+                    disabled={cancelingId === o.id || !isReady}
+                    className="text-[10px] bg-tertiary hover:bg-hover px-2 py-0.5 rounded text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title={!isReady ? 'Trading session not active' : 'Cancel Order'}
+                  >
+                    {cancelingId === o.id ? '...' : 'Cancel'}
+                  </button>
                 </td>
               </tr>
             ))

@@ -29,7 +29,7 @@ const OrderbookRow = memo(function OrderbookRow({
   return (
     <div
       className="ob-row-enter flex justify-between items-center px-2 py-0.5 my-[1px] hover:bg-hover cursor-pointer relative leading-none shrink-0 group select-none transition-colors duration-100"
-      onClick={() => useOrderEntryStore.getState().setPrice(price.toString())}
+      onClick={() => useOrderEntryStore.getState().applyOrderbookPrice(price.toString())}
     >
       <div
         className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar transition-all duration-150 ${isAsk ? 'ob-depth-bar--ask-soft' : 'ob-depth-bar--bid-soft'}`}
@@ -365,7 +365,14 @@ export const OrderbookPanel: React.FC = () => {
 
             {/* Spread Row */}
             <div className="flex items-center justify-between px-2.5 py-0.5 border-y border-color shrink-0 h-[26px]">
-              <div className="flex items-center gap-1">
+              <div
+                className="flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                onClick={() =>
+                  lowestAsk > 0 &&
+                  useOrderEntryStore.getState().applyOrderbookPrice(lowestAsk.toString())
+                }
+                title="Click to fill price"
+              >
                 <span className="font-mono-tabular text-[12px] font-bold text-danger">
                   {lowestAsk > 0 ? formatPrice(lowestAsk) : '—'}
                 </span>
@@ -448,7 +455,9 @@ export const OrderbookPanel: React.FC = () => {
                     <div
                       key={trade.id}
                       className="trade-row-enter flex justify-between items-center px-2.5 py-[3px] hover:bg-hover cursor-pointer leading-none"
-                      onClick={() => useOrderEntryStore.getState().setPrice(px.toString())}
+                      onClick={() =>
+                        useOrderEntryStore.getState().applyOrderbookPrice(px.toString())
+                      }
                     >
                       <span
                         className={`font-mono-tabular text-[11px] font-medium ${isBuy ? 'text-success' : 'text-danger'}`}

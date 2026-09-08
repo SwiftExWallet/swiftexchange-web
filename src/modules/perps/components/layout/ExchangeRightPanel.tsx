@@ -13,6 +13,7 @@ import { useMarketStore } from '../../core/stores/marketStore';
 import { usePositionStore } from '../../core/stores/positionStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
+import { useUnifiedExecution } from '../../services/useUnifiedExecution';
 import { AccountModal } from '../trade/AccountModal';
 import { AssetModeModal } from '../trade/AssetModeModal';
 import { LeverageModal } from '../trade/LeverageModal';
@@ -37,6 +38,9 @@ const useTotalWalletBalance = (balances: Record<string, any>) => {
   const assetCtxByMarket = useTickerStore(state => state.assetCtxByMarket);
 
   return Object.values(balances).reduce((acc, b) => {
+    if (b.usdValue && !isNaN(parseFloat(b.usdValue))) {
+      return acc + parseFloat(b.usdValue);
+    }
     let price = 1;
     if (b.asset !== 'USDT' && b.asset !== 'USDC') {
       const symbol = `${b.asset}USDT`;
@@ -44,6 +48,8 @@ const useTotalWalletBalance = (balances: Record<string, any>) => {
         assetCtxByMarket[symbol]?.markPx || assetCtxByMarket[`${b.asset}-USDT`]?.markPx;
       if (markPrice) {
         price = parseFloat(markPrice);
+      } else if (b.asset === 'ASTER') {
+        price = 0.7483;
       } else {
         price = 0;
       }
@@ -60,10 +66,14 @@ export const ExchangeOrderFormPanel: React.FC = () => {
   const { userAddr } = activeAgent;
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
 
-  useAsterDataSync(asterAgent.asterSigner, userAddr);
-  useHyperliquidDataStream(userAddr);
+  useAsterDataSync(asterAgent.asterSigner, asterAgent.userAddr);
+  useHyperliquidDataStream(hyperliquidAgent.userAddr);
 
-  const { place, placeChase, placeBatch } = useOrders(asterAgent.asterSigner, userAddr);
+  const { executeOrder } = useUnifiedExecution();
+  const { placeChase, placeBatch } = useOrders(asterAgent.asterSigner, userAddr);
+  const selectedSymbol = useMarketStore(state => state.selectedSymbol);
+  const assetCtx = useTickerStore(state => state.assetCtxByMarket[selectedSymbol]);
+  const currentMarketPrice = parseFloat(assetCtx?.midPx || assetCtx?.markPx || '0') || 0;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeModal, setActiveModal] = useState<
     'margin' | 'leverage' | 'account' | 'assetMode' | null
@@ -187,34 +197,70 @@ export const ExchangeOrderFormPanel: React.FC = () => {
           maxChaseOffset: formattedMaxChaseOffset,
         });
       } else {
-        await place({
-          symbol: payload.symbol.replace('-', ''),
+        const isMarket = payload.type === 'MARKET';
+        await executeOrder({
+          symbol: payload.symbol,
           side: payload.side,
           type: payload.type,
-          quantity: formattedQty,
-          price:
-            payload.type === 'LIMIT' || payload.type === 'STOP' || payload.type === 'TAKE_PROFIT'
-              ? formattedPrice
-              : undefined,
-          timeInForce:
-            payload.type === 'LIMIT' || payload.type === 'STOP' || payload.type === 'TAKE_PROFIT'
-              ? tif
-              : undefined,
+          price: !isMarket ? formattedPrice || '0' : '0',
+          size: formattedQty || payload.size,
           reduceOnly: payload.isReduceOnly,
-          workingType: payload.workingType,
-          stopPrice:
-            payload.type === 'STOP' ||
-            payload.type === 'STOP_MARKET' ||
-            payload.type === 'TAKE_PROFIT' ||
-            payload.type === 'TAKE_PROFIT_MARKET'
-              ? formattedStopPrice
-              : undefined,
-          activationPrice:
-            payload.type === 'TRAILING_STOP_MARKET' && formattedActivation
-              ? formattedActivation
-              : undefined,
-          callbackRate: payload.type === 'TRAILING_STOP_MARKET' ? payload.callbackRate : undefined,
+          timeInForce: !isMarket ? (payload.isPostOnly ? 'GTX' : tif) : undefined,
+          stopPrice: !isMarket ? formattedStopPrice || formattedActivation : undefined,
+          currentPrice: currentMarketPrice,
         });
+
+        // If attached TP was configured, place TAKE_PROFIT_MARKET order
+        if (
+          payload.attachedTpEnabled &&
+          payload.attachedTpPrice &&
+          parseFloat(payload.attachedTpPrice) > 0
+        ) {
+          const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
+          const formattedTp =
+            formatPrecision(payload.attachedTpPrice, currentMarket?.tickSize) ||
+            payload.attachedTpPrice;
+          try {
+            await executeOrder({
+              symbol: payload.symbol,
+              side: oppositeSide,
+              type: 'TAKE_PROFIT_MARKET',
+              price: '0',
+              size: formattedQty || payload.size,
+              reduceOnly: true,
+              stopPrice: formattedTp,
+              currentPrice: currentMarketPrice,
+            });
+          } catch (tpErr: any) {
+            console.warn('Attached Take Profit order notice:', tpErr);
+          }
+        }
+
+        // If attached SL was configured, place STOP_MARKET order
+        if (
+          payload.attachedSlEnabled &&
+          payload.attachedSlPrice &&
+          parseFloat(payload.attachedSlPrice) > 0
+        ) {
+          const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
+          const formattedSl =
+            formatPrecision(payload.attachedSlPrice, currentMarket?.tickSize) ||
+            payload.attachedSlPrice;
+          try {
+            await executeOrder({
+              symbol: payload.symbol,
+              side: oppositeSide,
+              type: 'STOP_MARKET',
+              price: '0',
+              size: formattedQty || payload.size,
+              reduceOnly: true,
+              stopPrice: formattedSl,
+              currentPrice: currentMarketPrice,
+            });
+          } catch (slErr: any) {
+            console.warn('Attached Stop Loss order notice:', slErr);
+          }
+        }
       }
 
       useNotificationStore.getState().showToast({
@@ -283,8 +329,9 @@ export const ExchangeAccountPanel: React.FC = () => {
   const hyperliquidAgent = useHyperliquidAgent();
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const currentNetwork = useExchangeManager(s => s.currentNetwork);
-  const { isReady: isAsterReady } =
-    currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
+  const activeAgent = currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
+  const isAgentReady = activeAgent.isReady;
+  const isLoadingBalance = useAccountStore(state => state.isLoading);
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
 
   const [activeModal, setActiveModal] = useState<
@@ -308,24 +355,42 @@ export const ExchangeAccountPanel: React.FC = () => {
   );
 
   const balances = useAccountStore(state => state.balances);
+  const multiAssetsMargin = useAccountStore(state => state.multiAssetsMargin);
+  const storeMarginBalance = useAccountStore(state => state.totalMarginBalance);
   const positions = usePositionStore(state => state.positions);
   const totalPnl = useLiveTotalPnl(positions);
-  const walletBalance = useTotalWalletBalance(balances);
+  const calculatedWalletBalance = useTotalWalletBalance(balances);
 
-  const accountEquity = walletBalance + totalPnl;
+  const isAster = currentExchange === 'aster';
+
+  // Perp Total Value is the total USD valuation of all assets in the perpetual account
+  const perpTotalValue = calculatedWalletBalance;
+  const perpCurrency = isAster ? 'USD' : 'USDC';
+
+  // Margin Equity:
+  // In Multi-Asset Mode on Aster: storeMarginBalance (multi-asset collateral equity in USD)
+  // In Single-Asset Mode on Aster: settlement asset balance (USDT) + totalPnl in USDT
+  // On Hyperliquid: (USDC balance + totalPnl) in USDC
+  const marginEquity = isAster
+    ? multiAssetsMargin && storeMarginBalance && parseFloat(storeMarginBalance) > 0
+      ? parseFloat(storeMarginBalance)
+      : parseFloat(balances['USDT']?.total || balances['USDT']?.marginBalance || '0') + totalPnl
+    : parseFloat(balances['USDC']?.total || balances['USD']?.total || '0') + totalPnl;
+
+  const marginCurrency = isAster ? (multiAssetsMargin ? 'USD' : 'USDT') : 'USDC';
 
   return (
     <div className="bg-secondary border border-color rounded-lg p-3 space-y-2.5 h-full min-h-0 overflow-y-auto scrollbar-thin flex flex-col justify-between">
       <div className="space-y-2.5">
         {/* Action Buttons */}
-        {currentNetwork === 'testnet' ? (
+        {currentNetwork === 'testnet' && isAster ? (
           <button
             type="button"
             onClick={() => handleOpenAccount('faucet')}
             className="w-full bg-gradient-to-r from-amber-500/20 to-brand/20 hover:from-amber-500/30 hover:to-brand/30 text-amber-300 border border-amber-500/40 py-2 rounded-md text-[12px] font-semibold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm"
           >
             <Sparkles size={14} className="text-amber-400" />
-            Claim Testnet Faucet
+            Claim Aster Faucet
           </button>
         ) : (
           <div className="flex gap-1.5">
@@ -365,29 +430,45 @@ export const ExchangeAccountPanel: React.FC = () => {
           <h4 className="text-[11px] font-medium text-primary mb-0.5">Account Equity</h4>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Spot Total Value</span>
-            <span className="text-primary font-medium">{isAsterReady ? '0.00 USD' : '--'}</span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span className="text-primary font-medium">
+                {isAgentReady ? `0.00 ${perpCurrency}` : '--'}
+              </span>
+            )}
           </div>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Perp Total Value</span>
-            <span className="text-primary font-medium">
-              {isAsterReady ? `${walletBalance.toFixed(2)} USD` : '--'}
-            </span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span className="text-primary font-medium">
+                {isAgentReady ? `${perpTotalValue.toFixed(2)} ${perpCurrency}` : '--'}
+              </span>
+            )}
           </div>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Perpetuals Unrealized Pnl</span>
-            <span
-              className={`font-medium ${
-                !isAsterReady
-                  ? 'text-primary'
-                  : totalPnl > 0
-                    ? 'text-success'
-                    : totalPnl < 0
-                      ? 'text-danger'
-                      : 'text-primary'
-              }`}
-            >
-              {!isAsterReady ? '--' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)} USD`}
-            </span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span
+                className={`font-medium ${
+                  !isAgentReady
+                    ? 'text-primary'
+                    : totalPnl > 0
+                      ? 'text-success'
+                      : totalPnl < 0
+                        ? 'text-danger'
+                        : 'text-primary'
+                }`}
+              >
+                {!isAgentReady
+                  ? '--'
+                  : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)} ${perpCurrency}`}
+              </span>
+            )}
           </div>
         </div>
 
@@ -397,7 +478,7 @@ export const ExchangeAccountPanel: React.FC = () => {
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Account Margin Ratio</span>
             <div className="flex items-center gap-1">
-              {isAsterReady && (
+              {isAgentReady && !isLoadingBalance && (
                 <div
                   className={`w-2 h-2 rounded-full ${
                     crossMarginRatio > 80
@@ -408,46 +489,67 @@ export const ExchangeAccountPanel: React.FC = () => {
                   }`}
                 />
               )}
-              <span
-                className={`font-medium ${
-                  !isAsterReady
-                    ? 'text-primary'
-                    : crossMarginRatio > 80
-                      ? 'text-danger'
-                      : crossMarginRatio > 50
-                        ? 'text-warning'
-                        : 'text-success'
-                }`}
-              >
-                {isAsterReady ? `${crossMarginRatio.toFixed(2)}%` : '--'}
-              </span>
+              {isLoadingBalance ? (
+                <div className="h-3 w-10 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+              ) : (
+                <span
+                  className={`font-medium ${
+                    !isAgentReady
+                      ? 'text-primary'
+                      : crossMarginRatio > 80
+                        ? 'text-danger'
+                        : crossMarginRatio > 50
+                          ? 'text-warning'
+                          : 'text-success'
+                  }`}
+                >
+                  {isAgentReady ? `${crossMarginRatio.toFixed(2)}%` : '--'}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Account Maintenance Margin</span>
-            <span className="text-primary font-medium">
-              {isAsterReady ? `${totalMaintenanceMargin.toFixed(2)} USD` : '--'}
-            </span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span className="text-primary font-medium">
+                {isAgentReady ? `${totalMaintenanceMargin.toFixed(2)} ${marginCurrency}` : '--'}
+              </span>
+            )}
           </div>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span className="flex items-center gap-1">
               Account Equity <HelpCircle size={10} className="text-secondary" />
             </span>
-            <span className="text-primary font-medium">
-              {isAsterReady ? `${accountEquity.toFixed(2)} USD` : '--'}
-            </span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span className="text-primary font-medium">
+                {isAgentReady ? `${marginEquity.toFixed(2)} ${marginCurrency}` : '--'}
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Multi-Asset Mode button */}
-      <button
-        type="button"
-        onClick={() => setActiveModal('assetMode')}
-        className="w-full py-1.5 text-[11px] text-secondary bg-tertiary rounded hover:text-primary hover:bg-hover transition-colors cursor-pointer mt-1"
-      >
-        Multi-Asset Mode
-      </button>
+      {/* Asset Mode status button - Aster DEX only (Hyperliquid is USDC-only collateral) */}
+      {isAster && (
+        <button
+          type="button"
+          onClick={() => setActiveModal('assetMode')}
+          className="w-full py-2 px-3 text-[11px] flex items-center justify-between text-secondary bg-tertiary rounded-md hover:text-primary hover:bg-hover transition-colors cursor-pointer mt-1 border border-color shadow-2xs"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-primary">
+              {multiAssetsMargin ? 'Multi-Asset Mode' : 'Single-Asset Mode'}
+            </span>
+          </div>
+          <span className="text-[10px] text-muted hover:text-primary transition-colors">
+            Switch Mode
+          </span>
+        </button>
+      )}
 
       <AssetModeModal isOpen={activeModal === 'assetMode'} onClose={() => setActiveModal(null)} />
       <AccountModal

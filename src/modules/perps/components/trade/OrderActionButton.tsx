@@ -35,6 +35,7 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
   const activeAgent = currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
   const { isReady: isAgentReady, deriveAgentKey, deriveState, error: deriveError } = activeAgent;
   const hasFunds = walletBalance > 0;
+  const quoteAsset = currentExchange === 'hyperliquid' ? 'USDC' : 'USDT';
   const isDepositError = deriveState === 'error' && deriveError?.message?.includes('Must deposit');
 
   if (!isEvmConnected) {
@@ -83,7 +84,11 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
             <>
               <AlertCircle className="w-4 h-4 text-rose-400" />
               <span>
-                {isDepositError ? 'Deposit to Enable Trading' : 'Signature Rejected — Try Again'}
+                {isDepositError
+                  ? currentNetwork === 'testnet'
+                    ? 'Claim Faucet to Activate'
+                    : 'Deposit to Activate'
+                  : 'Signature Rejected — Try Again'}
               </span>
             </>
           ) : (
@@ -97,57 +102,66 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
         <p className="text-[10px] text-center text-secondary leading-tight">
           {isSigning
             ? 'Confirm the signature request in your wallet'
-            : `One-time signature to activate gas-free execution on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
+            : isDepositError
+              ? `Account requires initial deposit or faucet funds to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`
+              : `One-time signature to activate gas-free execution on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
         </p>
       </div>
     );
   }
 
-  if (!hasFunds) {
-    return (
-      <div className="mt-2 space-y-1.5">
-        <button
-          type="button"
-          onClick={onOpenDepositModal}
-          className="w-full h-10 bg-brand hover:bg-brand-hover text-white rounded-lg font-semibold text-[13px] transition-all cursor-pointer shadow-sm flex items-center justify-center gap-2 active:scale-[0.99]"
-        >
-          <span>
-            {currentNetwork === 'testnet' ? 'Claim Testnet Faucet' : 'Deposit Funds to Trade'}
-          </span>
-        </button>
-        <p className="text-[10px] text-center text-muted">
-          Available margin is 0.00 {currentExchange === 'hyperliquid' ? 'USDC' : 'USDT'}
-        </p>
-      </div>
-    );
-  }
+  const isInvalid = isValid === false || !!validationError || !hasFunds;
 
-  const isInvalid = isValid === false || !!validationError;
+  const handleAction = (side: 'BUY' | 'SELL') => {
+    if (!hasFunds) {
+      onOpenDepositModal();
+      return;
+    }
+    if (!isInvalid) {
+      onSubmit(side);
+    }
+  };
 
   return (
-    <div className="flex gap-2 mt-2">
-      <button
-        type="button"
-        onClick={() => !isInvalid && onSubmit('BUY')}
-        disabled={isLoading || isInvalid}
-        className="flex-1 h-10 flex flex-col items-center justify-center rounded-lg font-semibold text-[13px] bg-success text-white hover:bg-success/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm cursor-pointer active:scale-[0.99]"
-      >
-        <span>{isLoading ? 'Placing...' : 'Buy / Long'}</span>
-        {actionSubtext && (
-          <span className="text-[10px] font-medium opacity-90">{actionSubtext}</span>
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={() => !isInvalid && onSubmit('SELL')}
-        disabled={isLoading || isInvalid}
-        className="flex-1 h-10 flex flex-col items-center justify-center rounded-lg font-semibold text-[13px] bg-danger text-white hover:bg-danger/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm cursor-pointer active:scale-[0.99]"
-      >
-        <span>{isLoading ? 'Placing...' : 'Sell / Short'}</span>
-        {actionSubtext && (
-          <span className="text-[10px] font-medium opacity-90">{actionSubtext}</span>
-        )}
-      </button>
+    <div className="mt-2 space-y-1.5">
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => handleAction('BUY')}
+          disabled={isLoading || (!hasFunds ? false : isInvalid)}
+          className="flex-1 h-10 flex flex-col items-center justify-center rounded-lg font-semibold text-[13px] bg-success text-white hover:bg-success/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm cursor-pointer active:scale-[0.99]"
+        >
+          <span>{isLoading ? 'Placing...' : !hasFunds ? 'Deposit / Buy' : 'Buy / Long'}</span>
+          {actionSubtext && hasFunds && (
+            <span className="text-[10px] font-medium opacity-90">{actionSubtext}</span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleAction('SELL')}
+          disabled={isLoading || (!hasFunds ? false : isInvalid)}
+          className="flex-1 h-10 flex flex-col items-center justify-center rounded-lg font-semibold text-[13px] bg-danger text-white hover:bg-danger/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm cursor-pointer active:scale-[0.99]"
+        >
+          <span>{isLoading ? 'Placing...' : !hasFunds ? 'Deposit / Sell' : 'Sell / Short'}</span>
+          {actionSubtext && hasFunds && (
+            <span className="text-[10px] font-medium opacity-90">{actionSubtext}</span>
+          )}
+        </button>
+      </div>
+
+      {!hasFunds && (
+        <div className="flex items-center justify-center gap-1.5 text-[11px] text-secondary">
+          <span>Available Margin: 0.00 {quoteAsset}</span>
+          <span>•</span>
+          <button
+            type="button"
+            onClick={onOpenDepositModal}
+            className="text-brand hover:underline font-medium cursor-pointer"
+          >
+            {currentNetwork === 'testnet' ? 'Claim Testnet Faucet' : 'Deposit Funds'}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

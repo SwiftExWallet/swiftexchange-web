@@ -1,3 +1,5 @@
+import BigNumber from 'bignumber.js';
+
 import type { AccountBalance, Market } from '../core/models';
 import type { OrderSide, OrderType } from '../core/stores/orderEntryStore';
 
@@ -5,6 +7,15 @@ export interface ValidationResult {
   isValid: boolean;
   error?: string;
   errorField?: 'price' | 'size' | 'stopPrice' | 'callbackRate';
+}
+
+function isMultipleOf(val: number | string, step: number | string): boolean {
+  const bnVal = new BigNumber(val);
+  const bnStep = new BigNumber(step);
+  if (bnStep.isZero() || bnStep.isNaN() || bnVal.isNaN()) return true;
+  const div = bnVal.div(bnStep);
+  const diff = div.minus(div.integerValue()).abs();
+  return diff.lt(1e-7);
 }
 
 export function validateOrder(
@@ -49,11 +60,7 @@ export function validateOrder(
       return { isValid: false, error: 'Enter a valid price', errorField: 'price' };
     }
     if (market.tickSize && market.tickSize > 0) {
-      const precision = Math.max(0, -Math.floor(Math.log10(market.tickSize)));
-      const factor = Math.pow(10, Math.min(8, precision + 2));
-      const intPrice = Math.round(price * factor);
-      const intTick = Math.round(market.tickSize * factor);
-      if (intTick > 0 && intPrice % intTick !== 0) {
+      if (!isMultipleOf(priceStr, market.tickSize)) {
         return {
           isValid: false,
           error: `Price must be a multiple of ${market.tickSize} ${quoteAsset}`,
@@ -135,11 +142,7 @@ export function validateOrder(
     }
 
     if (market.stepSize && market.stepSize > 0) {
-      const precision = Math.max(0, -Math.floor(Math.log10(market.stepSize)));
-      const factor = Math.pow(10, Math.min(8, precision + 2));
-      const intBase = Math.round(baseSize * factor);
-      const intStep = Math.round(market.stepSize * factor);
-      if (intStep > 0 && intBase % intStep !== 0) {
+      if (!isMultipleOf(sizeStr, market.stepSize)) {
         return {
           isValid: false,
           error: `Size must be a multiple of ${market.stepSize} ${baseAsset}`,

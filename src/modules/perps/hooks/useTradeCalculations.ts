@@ -20,31 +20,45 @@ export function useTradeCalculations(
   const assetCtxByMarket = useTickerStore(state => state.assetCtxByMarket);
 
   const multiAssetsMargin = useAccountStore(state => state.multiAssetsMargin);
+  const availableBalance = useAccountStore(state => state.availableBalance);
 
   const parsedSize = new BigNumber(inputSize || '0');
   const currentPrice = new BigNumber(assetCtxByMarket[symbol]?.markPx || '0');
 
   // Wallet Balance
   const walletBalance = useMemo(() => {
-    if (!multiAssetsMargin) {
-      // In Single-Asset Mode, your buying power is only the settlement currency (USDT)
-      const quoteAsset = symbol.split('-')[1] || 'USDT';
-      const quoteBal = balances[quoteAsset];
-      return quoteBal ? new BigNumber(quoteBal.total).toNumber() : 0;
+    if (multiAssetsMargin && availableBalance && parseFloat(availableBalance) > 0) {
+      return new BigNumber(availableBalance).toNumber();
     }
 
-    // In Multi-Asset Mode, it's the total equity across all supported assets
+    if (!multiAssetsMargin) {
+      // In Single-Asset Mode, buying power is the settlement currency (USDC or USDT or USD)
+      const quoteAsset = symbol.includes('-')
+        ? symbol.split('-')[1]
+        : symbol.endsWith('USDC')
+          ? 'USDC'
+          : 'USDT';
+      const quoteBal =
+        balances[quoteAsset] || balances['USDC'] || balances['USD'] || balances['USDT'];
+      return quoteBal ? new BigNumber(quoteBal.available || quoteBal.total || '0').toNumber() : 0;
+    }
+
+    // In Multi-Asset Mode fallback, calculate total equity across all supported assets
     return Object.values(balances).reduce((acc, b) => {
+      if (b.usdValue && !isNaN(parseFloat(b.usdValue))) {
+        return acc + parseFloat(b.usdValue);
+      }
       let price = new BigNumber(1);
       if (b.asset !== 'USDT' && b.asset !== 'USDC') {
         const markPrice =
           assetCtxByMarket[`${b.asset}-USDT`]?.markPx || assetCtxByMarket[`${b.asset}USDT`]?.markPx;
         if (markPrice) price = new BigNumber(markPrice);
+        else if (b.asset === 'ASTER') price = new BigNumber('0.783681');
         else price = new BigNumber(0);
       }
       return acc + new BigNumber(b.total).times(price).toNumber();
     }, 0);
-  }, [balances, assetCtxByMarket, multiAssetsMargin, symbol]);
+  }, [balances, assetCtxByMarket, multiAssetsMargin, availableBalance, symbol]);
 
   // Max Position Size Calculation (0% to 100% slider bounds)
   const maxPossibleSize = useMemo(() => {
@@ -124,8 +138,16 @@ export function useTradeCalculations(
     const mmrBn = new BigNumber(mmr);
     const levBn = new BigNumber(leverage);
 
-    const longLiq = currentPrice.minus(currentPrice.div(levBn)).plus(mmrBn.times(currentPrice));
-    const shortLiq = currentPrice.plus(currentPrice.div(levBn)).minus(mmrBn.times(currentPrice));
+    // Standard derivative exchange isolated liquidation formula:
+    // Long: Entry * (1 - 1/Lev) / (1 - MMR)
+    // Short: Entry * (1 + 1/Lev) / (1 + MMR)
+    const longDenom = new BigNumber(1).minus(mmrBn);
+    const longNumerator = currentPrice.times(new BigNumber(1).minus(new BigNumber(1).div(levBn)));
+    const longLiq = longDenom.gt(0) ? longNumerator.div(longDenom) : new BigNumber(0);
+
+    const shortDenom = new BigNumber(1).plus(mmrBn);
+    const shortNumerator = currentPrice.times(new BigNumber(1).plus(new BigNumber(1).div(levBn)));
+    const shortLiq = shortDenom.gt(0) ? shortNumerator.div(shortDenom) : new BigNumber(0);
 
     return {
       long: longLiq.gt(0) ? longLiq.toNumber() : 0,

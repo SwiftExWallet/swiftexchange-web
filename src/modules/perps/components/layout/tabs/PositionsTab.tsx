@@ -1,20 +1,21 @@
 import React, { memo, useMemo, useState } from 'react';
 
 import { ConfirmationModal } from '../../../../../components/common/ConfirmationModal';
-import { usePositionActions } from '../../../adapters/aster/hooks/usePositionActions';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
+import { useUnifiedExecution } from '../../../services/useUnifiedExecution';
 import {
   calculateLiquidationPrice,
   formatPricePrecision,
 } from '../../../utils/liquidationCalculator';
+import { PositionTpSlModal } from '../../trade/PositionTpSlModal';
 
 interface Props {
-  signer: any;
-  userAddr: string;
+  signer?: any;
+  userAddr?: string;
 }
 
 interface PositionRowProps {
@@ -23,25 +24,23 @@ interface PositionRowProps {
   balances: Record<string, any> | any[];
   isMultiAsset: boolean;
   bracketsBySymbol: Record<string, any[]>;
-  signer: any;
-  userAddr: string;
+  signer?: any;
+  userAddr?: string;
 }
 
 const PositionRow = memo(
-  ({
-    position,
-    allPositions,
-    balances,
-    isMultiAsset,
-    bracketsBySymbol,
-    signer,
-    userAddr,
-  }: PositionRowProps) => {
+  ({ position, allPositions, balances, isMultiAsset, bracketsBySymbol }: PositionRowProps) => {
     const [closeModalOpen, setCloseModalOpen] = useState(false);
     const [reverseModalOpen, setReverseModalOpen] = useState(false);
+    const [tpSlModalOpen, setTpSlModalOpen] = useState(false);
 
     const assetCtx = useTickerStore(state => state.assetCtxByMarket[position.symbol]);
-    const { isProcessing, closePosition, reversePosition } = usePositionActions(signer, userAddr);
+    const {
+      isReady,
+      loading: isProcessing,
+      closePosition,
+      reversePosition,
+    } = useUnifiedExecution();
 
     const market = useMarketStore(
       state =>
@@ -49,14 +48,18 @@ const PositionRow = memo(
     );
 
     const handleConfirmClose = async () => {
+      if (!isReady) return;
       const isLong = parseFloat(position.size) > 0;
-      await closePosition(position.symbol, position.size, isLong);
+      const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
+      await closePosition(position.symbol, position.size, isLong, curPx);
       setCloseModalOpen(false);
     };
 
     const handleConfirmReverse = async () => {
+      if (!isReady) return;
       const isLong = parseFloat(position.size) > 0;
-      await reversePosition(position.symbol, position.size, isLong);
+      const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
+      await reversePosition(position.symbol, position.size, isLong, curPx);
       setReverseModalOpen(false);
     };
 
@@ -152,7 +155,11 @@ const PositionRow = memo(
           </div>
         </td>
         <td className="px-2.5 py-1.5 text-primary">
-          <button className="flex items-center space-x-1 text-secondary hover:text-primary transition-colors text-[11px]">
+          <button
+            type="button"
+            onClick={() => setTpSlModalOpen(true)}
+            className="flex items-center space-x-1 text-secondary hover:text-primary transition-colors text-[11px] cursor-pointer"
+          >
             <span>Add</span>
             <svg
               width="11"
@@ -173,8 +180,9 @@ const PositionRow = memo(
         <td className="px-2.5 py-1.5">
           <button
             onClick={() => setReverseModalOpen(true)}
-            disabled={isProcessing}
-            className="text-warning cursor-pointer hover:opacity-80 transition-opacity disabled:opacity-50 text-[11px] font-medium"
+            disabled={isProcessing || !isReady}
+            className="text-warning hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed text-[11px] font-medium cursor-pointer"
+            title={!isReady ? 'Trading session not active' : 'Reverse position'}
           >
             Reverse
           </button>
@@ -182,9 +190,9 @@ const PositionRow = memo(
         <td className="px-2.5 py-1.5 text-right">
           <button
             onClick={() => setCloseModalOpen(true)}
-            disabled={isProcessing}
-            className="text-secondary hover:text-danger hover:bg-danger/10 p-1 rounded transition-colors disabled:opacity-50 inline-flex items-center justify-center"
-            title="Close Position"
+            disabled={isProcessing || !isReady}
+            className="text-secondary hover:text-danger hover:bg-danger/10 p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center cursor-pointer"
+            title={!isReady ? 'Trading session not active' : 'Close Position'}
           >
             {isProcessing ? (
               <span className="text-[10px]">...</span>
@@ -297,6 +305,12 @@ const PositionRow = memo(
           confirmText="Confirm Reverse"
           confirmButtonType="primary"
         />
+
+        <PositionTpSlModal
+          isOpen={tpSlModalOpen}
+          onClose={() => setTpSlModalOpen(false)}
+          position={position}
+        />
       </tr>
     );
   }
@@ -308,7 +322,16 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
   const isMultiAsset = useAccountStore(state => state.multiAssetsMargin);
   const bracketsBySymbol = useLeverageStore(state => state.bracketsBySymbol);
 
+  const [closeAllModalOpen, setCloseAllModalOpen] = useState(false);
+  const { isReady, loading: isClosingAll, closeAllPositions } = useUnifiedExecution();
+
   const positionList = useMemo(() => Object.values(positions), [positions]);
+
+  const handleConfirmCloseAll = async () => {
+    if (!isReady) return;
+    await closeAllPositions(positionList);
+    setCloseAllModalOpen(false);
+  };
 
   return (
     <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-thin">
@@ -327,9 +350,19 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
             <th className="px-2.5 py-1.5 font-medium">Reverse</th>
             <th className="px-2.5 py-1.5 font-medium text-right">
               {positionList.length > 0 && (
-                <span className="text-warning cursor-pointer hover:opacity-80 transition-opacity">
-                  Close All
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setCloseAllModalOpen(true)}
+                  disabled={isClosingAll || !isReady}
+                  className="text-warning hover:opacity-80 transition-opacity font-semibold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title={
+                    !isReady
+                      ? 'Active trading session required to close positions'
+                      : 'Market close all open positions'
+                  }
+                >
+                  {isClosingAll ? 'Closing...' : 'Close All'}
+                </button>
               )}
             </th>
           </tr>
@@ -357,6 +390,43 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
           )}
         </tbody>
       </table>
+
+      {/* Close All Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={closeAllModalOpen}
+        title="Close All Positions"
+        message={
+          <div className="flex flex-col gap-2 p-3 bg-secondary rounded-lg border border-color text-xs mt-2">
+            <p className="text-primary font-medium">
+              Are you sure you want to market close all{' '}
+              <strong className="text-warning">{positionList.length}</strong> open positions?
+            </p>
+            <div className="text-muted text-[11px] space-y-1 mt-1 max-h-40 overflow-y-auto">
+              {positionList.map(p => (
+                <div
+                  key={p.symbol}
+                  className="flex justify-between items-center py-0.5 border-b border-color/40 last:border-0"
+                >
+                  <span className="font-semibold text-secondary">{p.symbol.replace('-', '')}</span>
+                  <span
+                    className={
+                      parseFloat(p.size) > 0
+                        ? 'text-success font-medium'
+                        : 'text-danger font-medium'
+                    }
+                  >
+                    {parseFloat(p.size) > 0 ? 'LONG' : 'SHORT'} {Math.abs(parseFloat(p.size))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        }
+        onConfirm={handleConfirmCloseAll}
+        onCancel={() => setCloseAllModalOpen(false)}
+        confirmText={isClosingAll ? 'Closing...' : 'Confirm Market Close All'}
+        confirmButtonType="danger"
+      />
     </div>
   );
 };
