@@ -125,24 +125,9 @@ export async function connectStellarWalletConnectSingle(
   ctx.modals.set('stellar', modal);
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      modal.closeModal();
-      reject(new Error('Connection timeout'));
-    }, CONNECTION_TIMEOUT_MS);
-
     let modalOpened = false;
-    const unsubscribe = modal.subscribeModal(state => {
-      if (state.open) {
-        modalOpened = true;
-      } else if (modalOpened && !state.open) {
-        clearTimeout(timeout);
-        unsubscribe();
-        provider.abortPairing?.();
-        reject(new Error('User closed the modal'));
-      }
-    });
 
-    provider.on('display_uri', (uri: string) => {
+    const onDisplayUri = (uri: string) => {
       ctx.openMobileDeepLink(walletId, uri);
       if (!isMobileDevice() || walletId === 'walletconnect') {
         modal.openModal({ uri });
@@ -156,13 +141,44 @@ export async function connectStellarWalletConnectSingle(
           console.error(err);
         });
       }
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      unsubscribe();
+      try {
+        if (typeof provider.removeListener === 'function') {
+          provider.removeListener('display_uri', onDisplayUri);
+        } else if (typeof provider.off === 'function') {
+          provider.off('display_uri', onDisplayUri);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      modal.closeModal();
+      reject(new Error('Connection timeout'));
+    }, CONNECTION_TIMEOUT_MS);
+
+    const unsubscribe = modal.subscribeModal(state => {
+      if (state.open) {
+        modalOpened = true;
+      } else if (modalOpened && !state.open) {
+        cleanup();
+        provider.abortPairing?.();
+        reject(new Error('User closed the modal'));
+      }
     });
+
+    provider.on('display_uri', onDisplayUri);
 
     provider
       .connect({ namespaces })
       .then((session: any) => {
-        clearTimeout(timeout);
-        unsubscribe();
+        cleanup();
         modal.closeModal();
 
         const account: string | undefined = session.namespaces?.stellar?.accounts?.[0];
@@ -195,8 +211,7 @@ export async function connectStellarWalletConnectSingle(
         resolve(stellarSession);
       })
       .catch((error: any) => {
-        clearTimeout(timeout);
-        unsubscribe();
+        cleanup();
         modal.closeModal();
         reject(error);
       });

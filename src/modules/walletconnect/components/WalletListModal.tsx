@@ -214,7 +214,7 @@ export const WalletListModal: React.FC = () => {
         showError(err?.message || 'Connection failed. Please try again.');
       }
     },
-    [connectWallet, connectingWallet, disconnectingType]
+    [connectWallet, connectingWallet, disconnectingType, handleComplete]
   );
 
   const handleDisconnect = useCallback(

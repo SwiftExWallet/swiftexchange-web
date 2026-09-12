@@ -3,14 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { parseRawChainId, switchOrAddChain } from '../../evm/utils/evmChainUtils';
 import { adjustFeeDataForMinGas } from '../../evm/utils/evmUtils';
 import { buildUnifiedNamespaces, getEVMChains } from '../config/chains';
-import { disconnectAll } from '../services/wallet/disconnect';
+import { disconnect, disconnectAll } from '../services/wallet/disconnect';
 import {
   handleAccountsChanged,
   handleChainChanged,
   handleSessionUpdate,
 } from '../services/wallet/eventListeners';
 import { connectChainWallet } from '../services/wallet/evmConnect';
-import { wrapProviderRequests } from '../services/wallet/providerRegistry';
+import {
+  getInstalledWallets,
+  isExtensionInstalled,
+  wrapProviderRequests,
+} from '../services/wallet/providerRegistry';
 import { saveSession } from '../services/wallet/sessionPersistence';
 import { signDydxMessage, signSiweMessage, signStellarChallenge } from '../services/wallet/signing';
 import { connectUnified } from '../services/wallet/unifiedConnect';
@@ -128,6 +132,43 @@ describe('Unified Multi-Chain & EVM Request Verification', () => {
       expect(emittedStates).toContainEqual({ type: 'evm', state: 'connected' });
 
       delete (window as any).ethereum;
+    });
+
+    it('does not resolve Trust Wallet as MetaMask when isMetaMask is spoofed', async () => {
+      const { ctx } = createMockWalletServiceContext('mainnet');
+      const injectedTrustProvider = createMockInjectedProvider({
+        accounts: ['0xTrustWalletUser000000000000000000000001'],
+        chainId: 1,
+        isMetaMask: true,
+        isTrustWallet: true,
+      });
+
+      (window as any).ethereum = injectedTrustProvider;
+
+      expect(isExtensionInstalled(ctx, 'metamask')).toBe(false);
+      expect(getInstalledWallets(ctx)).not.toContain('metamask');
+      expect(getInstalledWallets(ctx)).toContain('trust');
+
+      delete (window as any).ethereum;
+    });
+
+    it('cleans up ctx.providers and session when disconnecting a single session', async () => {
+      const { ctx } = createMockWalletServiceContext('mainnet');
+      const mockProvider = createMockUniversalProvider({
+        accounts: ['0x1111111111111111111111111111111111111111'],
+        chainId: 1,
+      });
+      ctx.providers.set('evm', mockProvider);
+      ctx.sessions.set('evm', {
+        type: 'evm',
+        walletId: 'trust',
+        evmAddress: '0x1111111111111111111111111111111111111111',
+      });
+
+      await disconnect(ctx, 'evm');
+
+      expect(ctx.providers.has('evm')).toBe(false);
+      expect(ctx.sessions.has('evm')).toBe(false);
     });
   });
 

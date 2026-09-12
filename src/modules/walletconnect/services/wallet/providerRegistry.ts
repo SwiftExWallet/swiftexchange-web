@@ -10,8 +10,8 @@ import type { WalletServiceContext, WalletType } from './types';
 // ---------------------------------------------------------------------------
 
 const EIP6963_RDNS_MAP: Record<string, string[]> = {
-  metamask: ['io.metamask'],
-  trust: ['com.trustwallet.app'],
+  metamask: ['io.metamask', 'io.metamask.flask', 'io.metamask.mobile'],
+  trust: ['com.trustwallet.app', 'com.trustwallet', 'com.trustwallet.wallet'],
   phantom: ['app.phantom'],
   rabby: ['io.rabby'],
   coinbase: ['com.coinbase.wallet'],
@@ -24,6 +24,24 @@ for (const [walletId, rdnsList] of Object.entries(EIP6963_RDNS_MAP)) {
   for (const rdns of rdnsList) {
     RDNS_TO_WALLET_ID[rdns] = walletId;
   }
+}
+
+function isGenuineMetaMask(provider: any): boolean {
+  if (!provider?.isMetaMask) return false;
+  return !(
+    provider.isTrust ||
+    provider.isTrustWallet ||
+    provider.isRabby ||
+    provider.isPhantom ||
+    provider.isCoinbaseWallet ||
+    provider.isBraveWallet ||
+    provider.isOKExWallet ||
+    provider.isOkxWallet ||
+    provider.isBitKeep ||
+    provider.isTokenPocket ||
+    provider.isEnkrypt ||
+    provider.isApex
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -44,13 +62,11 @@ export async function resolveEvmProvider(
 ): Promise<any | null> {
   const win = window as any;
 
-  // re-dispatch EIP-6963 discovery and wait briefly for late injectors
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('eip6963:requestProvider'));
     await new Promise(r => setTimeout(r, 50));
   }
 
-  // Check EIP-6963 first
   if (walletId in EIP6963_RDNS_MAP) {
     for (const rdns of EIP6963_RDNS_MAP[walletId]) {
       if (ctx.eip6963Providers.has(rdns)) {
@@ -59,14 +75,12 @@ export async function resolveEvmProvider(
     }
   }
 
-  // EIP-5749: window.ethereum.providers[] multi-injection array
   const injectedProviders: any[] | undefined = win.ethereum?.providers;
   if (Array.isArray(injectedProviders)) {
     const found = findInProvidersArray(injectedProviders, walletId);
     if (found) return found;
   }
 
-  // dedicated globals exposed outside window.ethereum
   switch (walletId) {
     case 'trust':
       if (win.trustwallet) return win.trustwallet;
@@ -76,18 +90,10 @@ export async function resolveEvmProvider(
       break;
   }
 
-  //single-injection flags (only when providers[] isn't present)
-
   if (!Array.isArray(injectedProviders) && win.ethereum) {
     switch (walletId) {
       case 'metamask':
-        if (
-          win.ethereum.isMetaMask &&
-          !win.ethereum.isTrust &&
-          !win.ethereum.isRabby &&
-          !win.ethereum.isPhantom
-        )
-          return win.ethereum;
+        if (isGenuineMetaMask(win.ethereum)) return win.ethereum;
         break;
       case 'trust':
         if (win.ethereum.isTrust || win.ethereum.isTrustWallet) return win.ethereum;
@@ -110,17 +116,10 @@ export async function resolveEvmProvider(
   return null;
 }
 
-/**
- * Scans the EIP-5749 providers[] array with spoofer-aware flag checks.
- */
 function findInProvidersArray(providers: any[], walletId: string): any | null {
   switch (walletId) {
     case 'metamask':
-      return (
-        providers.find(
-          p => p.isMetaMask && !p.isTrust && !p.isTrustWallet && !p.isRabby && !p.isPhantom
-        ) ?? null
-      );
+      return providers.find(p => isGenuineMetaMask(p)) ?? null;
     case 'trust':
       return providers.find(p => p.isTrust || p.isTrustWallet) ?? null;
     case 'coinbase':
@@ -144,20 +143,21 @@ export function isExtensionInstalled(ctx: WalletServiceContext, walletId: string
   if (walletId === 'walletconnect' || walletId === 'swiftex') return false;
   const win = window as any;
 
-  // Check EIP-6963 synchronously
   if (walletId in EIP6963_RDNS_MAP) {
     if (EIP6963_RDNS_MAP[walletId].some(rdns => ctx.eip6963Providers.has(rdns))) return true;
   }
 
-  // Stellar wallets
   if (walletId === 'freighter') return !!(win.freighterApi || win.freighter);
   if (walletId === 'lobstr') return !!win.lobstr;
 
-  // EVM flags
   const win_ = win;
   switch (walletId) {
-    case 'metamask':
-      return !!win_.ethereum?.isMetaMask;
+    case 'metamask': {
+      if (Array.isArray(win_.ethereum?.providers)) {
+        return !!findInProvidersArray(win_.ethereum.providers, 'metamask');
+      }
+      return isGenuineMetaMask(win_.ethereum);
+    }
     case 'trust':
       return !!(win_.trustwallet || win_.ethereum?.isTrust || win_.ethereum?.isTrustWallet);
     case 'coinbase':
@@ -176,14 +176,19 @@ export function getInstalledWallets(ctx: WalletServiceContext): string[] {
   const win = window as any;
   const installed = new Set<string>();
 
-  // EIP-6963 discovered wallets (authoritative)
   for (const [rdns] of ctx.eip6963Providers.entries()) {
     const walletId = RDNS_TO_WALLET_ID[rdns];
     if (walletId) installed.add(walletId);
   }
 
-  if (win.ethereum?.isMetaMask) installed.add('metamask');
-  if (win.ethereum?.isTrust || win.trustwallet) installed.add('trust');
+  if (Array.isArray(win.ethereum?.providers)) {
+    if (findInProvidersArray(win.ethereum.providers, 'metamask')) installed.add('metamask');
+  } else if (isGenuineMetaMask(win.ethereum)) {
+    installed.add('metamask');
+  }
+
+  if (win.ethereum?.isTrust || win.ethereum?.isTrustWallet || win.trustwallet)
+    installed.add('trust');
   if (win.ethereum?.isCoinbaseWallet) installed.add('coinbase');
   if (win.phantom?.ethereum || win.ethereum?.isPhantom) installed.add('phantom');
   if (win.ethereum?.isRabby) installed.add('rabby');
@@ -226,7 +231,14 @@ export async function getOrCreateProvider(ctx: WalletServiceContext, key: string
         return existing;
       }
     } else {
-      return existing;
+      try {
+        existing.removeAllListeners?.();
+      } catch {
+        // ignore
+      }
+      for (const [k, p] of ctx.providers.entries()) {
+        if (p === existing) ctx.providers.delete(k);
+      }
     }
   }
 

@@ -146,6 +146,7 @@ export function createMockInjectedProvider(
     chainId?: number | string;
     isMetaMask?: boolean;
     isTrust?: boolean;
+    isTrustWallet?: boolean;
     isRabby?: boolean;
     customHandlers?: Record<string, (params?: any[]) => any>;
   } = {}
@@ -155,6 +156,7 @@ export function createMockInjectedProvider(
     chainId = 1,
     isMetaMask = true,
     isTrust = false,
+    isTrustWallet = false,
     isRabby = false,
     customHandlers = {},
   } = options;
@@ -166,6 +168,7 @@ export function createMockInjectedProvider(
   return {
     isMetaMask,
     isTrust,
+    isTrustWallet,
     isRabby,
     request: vi.fn(async ({ method, params }: { method: string; params?: any[] }) => {
       if (customHandlers[method]) return customHandlers[method](params);

@@ -524,8 +524,6 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           portfolio.clearAssetsByType('stellar');
         }
       }
-
-      listenerInitialized = false;
     },
 
     disconnectAll: async () => {
@@ -545,7 +543,6 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       });
 
       usePortfolioStore.getState().clearAssets();
-      listenerInitialized = false;
     },
 
     restoreSessions: async () => {

@@ -44,22 +44,39 @@ export async function connectChainWallet(
     let peerRedirect: { native?: string; universal?: string } | undefined;
 
     const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
-    const isExtension = isExtensionInstalled(ctx, walletId);
+    let isExtension = isExtensionInstalled(ctx, walletId);
 
     console.info(
       `[WalletConnect:${networkTag}] Connecting EVM wallet: ${walletId} (Method: ${isExtension ? 'Injected Extension' : 'WalletConnect QR'})`
     );
 
-    // Use the extension if it's installed; otherwise fall through to WalletConnect QR.
     if (isExtension) {
-      const result = await connectExtension(ctx, walletId);
-      provider = result.provider;
-      evmAddress = result.evmAddress;
-      evmChainId = result.evmChainId;
-      const meta = getSessionMetadata(walletId);
-      peerName = meta.peerName;
-      peerIcon = meta.peerIcon;
-      peerRedirect = meta.peerRedirect;
+      try {
+        const result = await connectExtension(ctx, walletId);
+        provider = result.provider;
+        evmAddress = result.evmAddress;
+        evmChainId = result.evmChainId;
+        const meta = getSessionMetadata(walletId);
+        peerName = meta.peerName;
+        peerIcon = meta.peerIcon;
+        peerRedirect = meta.peerRedirect;
+      } catch (extError: any) {
+        if (
+          extError?.message?.includes('not found') ||
+          extError?.message?.includes('not installed')
+        ) {
+          isExtension = false;
+          const result = await connectWalletConnectSingle(ctx, walletId);
+          provider = result.provider;
+          evmAddress = result.evmAddress;
+          evmChainId = result.evmChainId;
+          peerName = result.peerName;
+          peerIcon = result.peerIcon;
+          peerRedirect = result.peerRedirect;
+        } else {
+          throw extError;
+        }
+      }
     } else {
       const result = await connectWalletConnectSingle(ctx, walletId);
       provider = result.provider;
@@ -169,36 +186,10 @@ export async function connectWalletConnectSingle(
   };
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      console.warn('[WalletConnect:EVM] Connection timed out');
-      modal.closeModal();
-      reject(new Error('Connection timeout'));
-    }, CONNECTION_TIMEOUT_MS);
-
-    // Guard flag: once connect() resolves, modal-close must NOT reject
     let sessionResolved = false;
     let modalOpened = false;
 
-    const unsubscribe = modal.subscribeModal(state => {
-      if (state.open) {
-        modalOpened = true;
-        console.info('[WalletConnect:EVM] QR modal opened — waiting for wallet approval...');
-      } else if (modalOpened && !state.open) {
-        if (!sessionResolved) {
-          console.info(
-            '[WalletConnect:EVM] Modal closed before session resolved — treating as user cancel'
-          );
-          clearTimeout(timeout);
-          unsubscribe();
-          provider.abortPairing?.();
-          reject(new Error('User closed the modal'));
-        } else {
-          console.debug('[WalletConnect:EVM] Modal closed after session resolved — ignoring');
-        }
-      }
-    });
-
-    provider.on('display_uri', (uri: string) => {
+    const onDisplayUri = (uri: string) => {
       console.info('[WalletConnect:EVM] WC URI generated — opening modal/deeplink');
       ctx.openMobileDeepLink(walletId, uri);
       if (!isMobileDevice() || walletId === 'walletconnect') {
@@ -213,16 +204,55 @@ export async function connectWalletConnectSingle(
           console.error(err);
         });
       }
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      unsubscribe();
+      try {
+        if (typeof provider.removeListener === 'function') {
+          provider.removeListener('display_uri', onDisplayUri);
+        } else if (typeof provider.off === 'function') {
+          provider.off('display_uri', onDisplayUri);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      console.warn('[WalletConnect:EVM] Connection timed out');
+      cleanup();
+      modal.closeModal();
+      reject(new Error('Connection timeout'));
+    }, CONNECTION_TIMEOUT_MS);
+
+    const unsubscribe = modal.subscribeModal(state => {
+      if (state.open) {
+        modalOpened = true;
+        console.info('[WalletConnect:EVM] QR modal opened — waiting for wallet approval...');
+      } else if (modalOpened && !state.open) {
+        if (!sessionResolved) {
+          console.info(
+            '[WalletConnect:EVM] Modal closed before session resolved — treating as user cancel'
+          );
+          cleanup();
+          provider.abortPairing?.();
+          reject(new Error('User closed the modal'));
+        } else {
+          console.debug('[WalletConnect:EVM] Modal closed after session resolved — ignoring');
+        }
+      }
     });
+
+    provider.on('display_uri', onDisplayUri);
 
     provider
       .connect({ namespaces: namespaces as any })
       .then((session: any) => {
-        // Mark resolved FIRST — before closing modal — to prevent false rejection
         sessionResolved = true;
         console.info('[WalletConnect:EVM] ✓ provider.connect() resolved — session established');
-        clearTimeout(timeout);
-        unsubscribe();
+        cleanup();
         modal.closeModal();
 
         const namespacesRes = session.namespaces;
@@ -254,8 +284,7 @@ export async function connectWalletConnectSingle(
       })
       .catch((error: any) => {
         console.error('[WalletConnect:EVM] ✕ provider.connect() failed:', error?.message ?? error);
-        clearTimeout(timeout);
-        unsubscribe();
+        cleanup();
         modal.closeModal();
         reject(error);
       });
