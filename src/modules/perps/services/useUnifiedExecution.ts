@@ -28,12 +28,15 @@ export interface UnifiedOrderParams {
     | 'STOP_MARKET'
     | 'TAKE_PROFIT'
     | 'TAKE_PROFIT_MARKET'
+    | 'TRAILING_STOP_MARKET'
     | 'POST_ONLY';
   price: string | number;
   size: string | number;
   reduceOnly?: boolean;
   timeInForce?: 'GTC' | 'IOC' | 'FOK' | 'GTX' | 'ALO' | 'FrontendMarket';
   stopPrice?: string | number;
+  callbackRate?: string | number;
+  activationPrice?: string | number;
   currentPrice?: number;
 }
 
@@ -72,6 +75,7 @@ export function useUnifiedExecution() {
           const isMarket = params.type === 'MARKET';
           const isStopMarket =
             params.type === 'STOP_MARKET' || params.type === 'TAKE_PROFIT_MARKET';
+          const isTrailingStop = params.type === 'TRAILING_STOP_MARKET';
           const isPostOnly =
             params.type === 'POST_ONLY' ||
             params.timeInForce === 'ALO' ||
@@ -83,20 +87,30 @@ export function useUnifiedExecution() {
             side: params.side,
             type: asterType as any,
             quantity: String(params.size),
-            price: !isMarket && !isStopMarket ? cleanPrice : undefined,
+            price: !isMarket && !isStopMarket && !isTrailingStop ? cleanPrice : undefined,
             reduceOnly: params.reduceOnly ? true : undefined,
             timeInForce:
-              !isMarket && !isStopMarket
+              !isMarket && !isStopMarket && !isTrailingStop
                 ? isPostOnly
                   ? 'GTX'
-                  : (params.timeInForce as any)
+                  : (params.timeInForce as any) || 'GTC'
                 : undefined,
-            stopPrice: params.stopPrice && !isMarket ? String(params.stopPrice) : undefined,
+            stopPrice:
+              params.stopPrice && !isMarket && !isTrailingStop
+                ? String(params.stopPrice)
+                : undefined,
+            callbackRate: isTrailingStop ? String(params.callbackRate || '1.0') : undefined,
+            activationPrice:
+              isTrailingStop && params.activationPrice ? String(params.activationPrice) : undefined,
           });
 
           return asterRes;
         } else {
           // Hyperliquid execution
+          if (params.type === 'TRAILING_STOP_MARKET') {
+            throw new Error('Trailing Stop orders are currently supported on Aster DEX.');
+          }
+
           if (!hyperliquidSigner) {
             throw new Error(
               'Hyperliquid agent wallet is not initialized. Please connect your wallet.'

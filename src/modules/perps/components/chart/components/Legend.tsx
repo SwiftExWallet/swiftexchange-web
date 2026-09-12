@@ -3,6 +3,8 @@ import { memo } from 'react';
 
 import { indicatorRegistry } from 'lightweight-charts-indicators';
 
+import { usePositionStore } from '../../../core/stores/positionStore';
+import { useTickerStore } from '../../../core/stores/tickerStore';
 import type { ActiveIndicator, LegendData, ThemeColors } from '../types';
 import { findAt, formatNum } from '../utils/candles';
 
@@ -46,9 +48,35 @@ export const Legend = memo(function Legend({
   onRemove,
   leftOffset,
 }: LegendProps) {
+  // Active Position for Buying & Liquidation Price display
+  const positions = usePositionStore(state => state.positions);
+  const assetCtx = useTickerStore(
+    state =>
+      state.assetCtxByMarket[market] ||
+      state.assetCtxByMarket[market.replace('-', '')] ||
+      state.assetCtxByMarket[market.replace('USDT', '-USDT')]
+  );
+
   if (!legend) return null;
   const changeColor = legend.change >= 0 ? colors.upColor : colors.downColor;
   const tfLabel = tfMap[timeframe] || timeframe;
+
+  const activePosition = Object.values(positions).find(p => {
+    if (!p.symbol || !market) return false;
+    const cleanSym = p.symbol.replace(/[-_/]/g, '').toUpperCase();
+    const cleanMkt = market.replace(/[-_/]/g, '').toUpperCase();
+    return cleanSym === cleanMkt || p.symbol.toUpperCase() === market.split('-')[0].toUpperCase();
+  });
+
+  const entryPx = activePosition ? parseFloat(activePosition.entryPrice) : 0;
+  const liqPx = activePosition ? parseFloat(activePosition.liquidationPrice) : 0;
+  const posSize = activePosition ? parseFloat(activePosition.size) : 0;
+  const isLong = posSize > 0;
+  const absSize = Math.abs(posSize);
+  const markPx = parseFloat(assetCtx?.markPx || activePosition?.markPrice || '0') || entryPx;
+  const pnl = isLong ? (markPx - entryPx) * absSize : (entryPx - markPx) * absSize;
+  const pnlPrefix = pnl >= 0 ? '+$' : '-$';
+  const pnlFormatted = `${pnlPrefix}${Math.abs(pnl).toFixed(2)}`;
 
   return (
     <div
@@ -56,9 +84,13 @@ export const Legend = memo(function Legend({
       style={{ left: leftOffset }}
     >
       <div className="flex flex-wrap items-center gap-x-1.5 sm:gap-x-2 pointer-events-none leading-normal text-[10.5px] text-gray-300 font-medium">
-        <span className="text-[11px] font-bold text-primary mr-0.5 shrink-0">{market}</span>
+        <span className="text-[11px] font-bold text-primary mr-0.5 shrink-0">
+          {market.replace('-', '')}
+        </span>
         <span className="text-[10px] text-gray-500 shrink-0 select-none opacity-50">•</span>
         <span className="text-[10.5px] font-semibold text-primary shrink-0">{tfLabel}</span>
+        <span className="text-[10px] text-gray-500 shrink-0 select-none opacity-50">•</span>
+        <span className="text-[10.5px] font-medium text-gray-400 shrink-0">Aster</span>
         <span className="text-[10px] text-gray-500 shrink-0 select-none opacity-50">•</span>
 
         <div className="flex flex-wrap items-center gap-x-1.5 font-mono text-[10px]">
@@ -85,6 +117,40 @@ export const Legend = memo(function Legend({
           </span>
         </div>
       </div>
+
+      {legend.volume !== undefined && legend.volume > 0 && (
+        <div className="text-[10px] font-mono text-gray-400 leading-tight">
+          <span className="text-gray-500 mr-1 select-none">Vol:</span>
+          <span>
+            {legend.volume >= 1e6
+              ? `${(legend.volume / 1e6).toFixed(2)}M`
+              : legend.volume >= 1e3
+                ? `${(legend.volume / 1e3).toFixed(2)}K`
+                : legend.volume.toFixed(2)}
+          </span>
+        </div>
+      )}
+
+      {/* Clear Buying & Liquidation Price badge when a position is active */}
+      {entryPx > 0 && posSize !== 0 && (
+        <div className="flex flex-wrap items-center gap-x-2 text-[10.5px] mt-0.5 px-2 py-0.5 rounded bg-secondary/90 border border-color backdrop-blur-sm pointer-events-auto">
+          <span className={`font-semibold ${isLong ? 'text-success' : 'text-danger'}`}>
+            {isLong ? 'Buy / Long' : 'Sell / Short'} Entry: ${entryPx.toLocaleString()}
+          </span>
+          <span className="text-secondary opacity-40">•</span>
+          {liqPx > 0 && (
+            <>
+              <span className="text-amber-400 font-medium">
+                Liq Price: ${liqPx.toLocaleString()}
+              </span>
+              <span className="text-secondary opacity-40">•</span>
+            </>
+          )}
+          <span className={`font-medium ${pnl >= 0 ? 'text-success' : 'text-danger'}`}>
+            PnL: {pnlFormatted}
+          </span>
+        </div>
+      )}
 
       {activeIndicators.length > 0 && (
         <button

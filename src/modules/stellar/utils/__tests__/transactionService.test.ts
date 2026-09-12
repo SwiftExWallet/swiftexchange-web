@@ -112,7 +112,7 @@ describe('transactionService', () => {
 
       expect(mockProvider.signTransaction).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ network: 'testnet' })
+        expect.objectContaining({ network: 'TESTNET' })
       );
       expect(global.fetch).toHaveBeenCalledWith(
         'https://horizon-testnet.stellar.org/transactions',

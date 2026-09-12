@@ -1,5 +1,5 @@
-import { ChevronDown, Plus } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import { Check, ChevronDown, Plus } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import InfoBanner from '../../../../components/common/InfoBanner';
 import { useExchangeManager } from '../../core/ExchangeManager';
@@ -10,6 +10,7 @@ import {
   type WorkingType,
   useOrderEntryStore,
 } from '../../core/stores/orderEntryStore';
+import { useOrderbookStore } from '../../core/stores/orderbookStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
 import { validateOrder } from '../../utils/orderValidation';
@@ -47,6 +48,18 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const multiAssetsMargin = useAccountStore(state => state.multiAssetsMargin);
   const [isAssetModeModalOpen, setIsAssetModeModalOpen] = useState(false);
   const [isTifOpen, setIsTifOpen] = useState(false);
+  const [isChaseDropdownOpen, setIsChaseDropdownOpen] = useState(false);
+  const chaseDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (chaseDropdownRef.current && !chaseDropdownRef.current.contains(event.target as Node)) {
+        setIsChaseDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const selectedSymbol = useMarketStore(state => state.selectedSymbol);
   const markets = useMarketStore(state => state.markets);
@@ -132,8 +145,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       stopPrice: store.stopPrice,
       activationPrice: store.activationPrice,
       callbackRate: store.callbackRate,
-      chaseOffset: store.chaseOffset,
+      chaseOffset: store.chasePriceMode === 'GAP' ? store.chaseOffset : '0',
+      chasePriceMode: store.chasePriceMode,
       maxChaseOffset: store.maxChaseOffset,
+      maxChaseDifferenceEnabled: store.maxChaseDifferenceEnabled,
       scaledPriceLower: store.scaledPriceLower,
       scaledPriceUpper: store.scaledPriceUpper,
       scaledOrderCount: store.scaledOrderCount,
@@ -169,6 +184,22 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       return `≈${orderCost.toFixed(2)} ${quoteAsset}`;
     }
   }, [store.size, store.sizeAsset, currentPrice, orderCost, baseDecimals, baseAsset, quoteAsset]);
+
+  const book = useOrderbookStore(
+    state => state.books[selectedSymbol] || state.books[selectedSymbol.replace('-', '')]
+  );
+  const bestBid =
+    book?.bids?.[0]?.price || (currentPrice > 0 ? currentPrice.toFixed(priceDecimals) : '--');
+  const bestAsk =
+    book?.asks?.[0]?.price || (currentPrice > 0 ? currentPrice.toFixed(priceDecimals) : '--');
+
+  const gapNum = parseFloat(store.chaseOffset) || 0;
+  const numBestBid = parseFloat(bestBid);
+  const numBestAsk = parseFloat(bestAsk);
+  const yourBid =
+    !isNaN(numBestBid) && numBestBid > 0 ? (numBestBid - gapNum).toFixed(priceDecimals) : bestBid;
+  const yourAsk =
+    !isNaN(numBestAsk) && numBestAsk > 0 ? (numBestAsk + gapNum).toFixed(priceDecimals) : bestAsk;
 
   const handleCurrencyToggle = (curr: string) => {
     const newAsset = curr === baseAsset ? 'base' : 'quote';
@@ -308,6 +339,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           />
         )}
 
+        {store.orderType === 'POST_ONLY' && (
+          <div className="text-[11px] text-secondary bg-brand/5 border border-brand/15 rounded-md p-2 flex items-center justify-between">
+            <span>Post Only (Maker Only)</span>
+            <span className="text-brand font-mono text-[10px] font-semibold">TIF: GTX</span>
+          </div>
+        )}
+
         {store.orderType === 'TRAILING_STOP_MARKET' && (
           <>
             <OrderInput
@@ -316,7 +354,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               onChange={store.setActivationPrice}
               onFocus={() => store.setActiveInput('activationPrice')}
               currency={quoteAsset}
-              placeholder="Latest price if empty"
+              placeholder="Market price if empty"
             />
             <OrderInput
               label="Callback %"
@@ -326,26 +364,125 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               placeholder="0.1 to 5"
               error={validation.errorField === 'callbackRate'}
             />
+            <div className="flex gap-1.5 pt-0.5">
+              {['0.5', '1.0', '2.0', '3.0', '5.0'].map(rate => (
+                <button
+                  key={rate}
+                  type="button"
+                  onClick={() => store.setCallbackRate(rate)}
+                  className={`flex-1 py-1 text-[10px] rounded border transition-colors ${
+                    store.callbackRate === rate
+                      ? 'bg-brand/15 border-brand text-brand font-semibold'
+                      : 'bg-tertiary border-color text-secondary hover:text-primary'
+                  }`}
+                >
+                  {rate}%
+                </button>
+              ))}
+            </div>
+            <div className="text-[10.5px] text-secondary bg-tertiary/60 border border-color rounded-md p-1.5 leading-snug">
+              Tracks peak market price and triggers execution when price reverses by{' '}
+              <strong className="text-primary">{store.callbackRate || '1.0'}%</strong>.
+            </div>
           </>
         )}
 
         {store.orderType === 'CHASE' && (
-          <>
-            <OrderInput
-              label="Chase Offset"
-              value={store.chaseOffset}
-              onChange={store.setChaseOffset}
-              currency={quoteAsset}
-              placeholder="0"
-            />
-            <OrderInput
-              label="Max Offset"
-              value={store.maxChaseOffset}
-              onChange={store.setMaxChaseOffset}
-              currency={quoteAsset}
-              placeholder="10"
-            />
-          </>
+          <div className="space-y-2">
+            <div className="bg-tertiary border border-color rounded-lg p-2.5 space-y-2.5">
+              <div className="flex justify-between items-center text-[12px]">
+                <span className="text-secondary font-medium">Chase price</span>
+                <div className="relative" ref={chaseDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsChaseDropdownOpen(!isChaseDropdownOpen)}
+                    className="flex items-center gap-1.5 text-primary font-medium text-[11px] bg-secondary hover:bg-hover px-2.5 py-1 rounded border border-color shadow-xs transition-colors cursor-pointer"
+                  >
+                    <span>
+                      {store.chasePriceMode === 'GAP' ? 'Gap from best bid/ask' : 'Best bid/ask'}
+                    </span>
+                    <ChevronDown size={11} className="text-secondary" />
+                  </button>
+
+                  {isChaseDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-[165px] bg-secondary border border-color rounded-md shadow-2xl overflow-hidden z-50 py-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          store.setChasePriceMode('BBO');
+                          store.setChaseOffset('0');
+                          setIsChaseDropdownOpen(false);
+                        }}
+                        className={`flex items-center justify-between w-full px-3 py-2 text-[11px] text-left hover:bg-hover transition-colors ${
+                          store.chasePriceMode === 'BBO'
+                            ? 'text-brand font-semibold'
+                            : 'text-primary'
+                        }`}
+                      >
+                        <span>Best bid/ask</span>
+                        {store.chasePriceMode === 'BBO' && (
+                          <Check size={12} className="text-brand" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          store.setChasePriceMode('GAP');
+                          if (!store.chaseOffset || store.chaseOffset === '0') {
+                            store.setChaseOffset(
+                              market?.tickSize ? String(market.tickSize) : '0.5'
+                            );
+                          }
+                          setIsChaseDropdownOpen(false);
+                        }}
+                        className={`flex items-center justify-between w-full px-3 py-2 text-[11px] text-left hover:bg-hover transition-colors ${
+                          store.chasePriceMode === 'GAP'
+                            ? 'text-brand font-semibold'
+                            : 'text-primary'
+                        }`}
+                      >
+                        <span>Gap from best bid/ask</span>
+                        {store.chasePriceMode === 'GAP' && (
+                          <Check size={12} className="text-brand" />
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {store.chasePriceMode === 'GAP' && (
+                <OrderInput
+                  label="Gap value"
+                  value={store.chaseOffset}
+                  onChange={store.setChaseOffset}
+                  currency={quoteAsset}
+                  placeholder="0.00"
+                />
+              )}
+
+              {/* Seamless, dark price display without any harsh horizontal line */}
+              <div className="flex items-center justify-between text-[11px] font-mono pt-0.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted text-[10.5px]">
+                    {store.chasePriceMode === 'GAP' ? 'Your bid' : 'Best bid'}
+                  </span>
+                  <span className="text-success font-semibold">
+                    {store.chasePriceMode === 'GAP' ? yourBid : bestBid}
+                  </span>
+                </div>
+                <span className="text-muted/30">/</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted text-[10.5px]">
+                    {store.chasePriceMode === 'GAP' ? 'Your ask' : 'Best ask'}
+                  </span>
+                  <span className="text-danger font-semibold">
+                    {store.chasePriceMode === 'GAP' ? yourAsk : bestAsk}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {store.orderType === 'SCALED' && (
@@ -379,7 +516,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                   onClick={() => store.setScaledDistribution(dist as any)}
                   className={`flex-1 py-1 text-center rounded transition-colors ${
                     store.scaledDistribution === dist
-                      ? 'bg-secondary text-primary shadow-sm'
+                      ? 'bg-secondary text-primary shadow-sm font-medium'
                       : 'text-secondary hover:text-primary'
                   }`}
                 >
@@ -389,18 +526,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             </div>
 
             {store.scaledPriceLower && store.scaledPriceUpper && store.scaledOrderCount && (
-              <div className="text-[11px] text-secondary bg-brand/5 p-2 rounded-md border border-brand/10 leading-relaxed text-center">
-                Places <strong className="text-brand">{store.scaledOrderCount}</strong> limit orders
-                from <strong className="text-primary">{store.scaledPriceLower}</strong> to{' '}
-                <strong className="text-primary">{store.scaledPriceUpper}</strong> with a{' '}
-                <strong className="text-primary">
-                  {store.scaledDistribution === 'FLAT'
-                    ? 'Flat'
-                    : store.scaledDistribution === 'ASCENDING'
-                      ? 'Scale Up'
-                      : 'Scale Down'}
-                </strong>{' '}
-                size distribution.
+              <div className="text-[11px] text-secondary bg-brand/5 p-2 rounded-md border border-brand/15 leading-relaxed text-center">
+                Splits size into <strong className="text-brand">{store.scaledOrderCount}</strong>{' '}
+                limit orders between{' '}
+                <strong className="text-primary">{store.scaledPriceLower}</strong> and{' '}
+                <strong className="text-primary">{store.scaledPriceUpper}</strong>.
+                <div className="text-[10px] text-muted mt-1">
+                  Each order must be at least $5.00 USDT notional.
+                </div>
               </div>
             )}
           </>
@@ -488,6 +621,34 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       </div>
 
       <div className="space-y-1.5 text-[12px] text-secondary">
+        {store.orderType === 'CHASE' && (
+          <div className="space-y-1.5 pb-0.5">
+            <label className="flex items-center gap-2 cursor-pointer group select-none">
+              <input
+                type="checkbox"
+                checked={store.maxChaseDifferenceEnabled}
+                onChange={e => store.setMaxChaseDifferenceEnabled(e.target.checked)}
+                className="rounded border-color bg-tertiary text-brand focus:ring-0 cursor-pointer"
+              />
+              <span className="group-hover:text-primary transition-colors text-[12px]">
+                Max chase difference
+              </span>
+            </label>
+
+            {store.maxChaseDifferenceEnabled && (
+              <div className="pl-4">
+                <OrderInput
+                  label="Max difference"
+                  value={store.maxChaseOffset}
+                  onChange={store.setMaxChaseOffset}
+                  currency={quoteAsset}
+                  placeholder="0.00"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <label className="flex items-center gap-2 cursor-pointer group select-none">
             <input
@@ -570,7 +731,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             </span>
           </label>
 
-          {isPriceOrder && (
+          {isPriceOrder && store.orderType !== 'POST_ONLY' && (
             <div className="relative">
               <button
                 type="button"
@@ -653,24 +814,24 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           </div>
         </div>
 
-        {store.marginType === 'isolated' && (
-          <div className="flex justify-between items-center pt-0.5">
-            <div className="flex items-center gap-1.5">
-              <span>Liq.Price</span>
-              <span className="text-success font-medium">
-                {estimatedIsolatedLiqPrice.long ? estimatedIsolatedLiqPrice.long.toFixed(2) : '--'}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span>Liq.Price</span>
-              <span className="text-danger font-medium">
-                {estimatedIsolatedLiqPrice.short
-                  ? estimatedIsolatedLiqPrice.short.toFixed(2)
-                  : '--'}
-              </span>
-            </div>
+        <div className="flex justify-between items-center pt-0.5">
+          <div className="flex items-center gap-1.5">
+            <span>Liq.Price (Long)</span>
+            <span className="text-success font-medium">
+              {estimatedIsolatedLiqPrice.long && estimatedIsolatedLiqPrice.long > 0
+                ? `$${estimatedIsolatedLiqPrice.long.toFixed(2)}`
+                : '--'}
+            </span>
           </div>
-        )}
+          <div className="flex items-center gap-1.5">
+            <span>Liq.Price (Short)</span>
+            <span className="text-danger font-medium">
+              {estimatedIsolatedLiqPrice.short && estimatedIsolatedLiqPrice.short > 0
+                ? `$${estimatedIsolatedLiqPrice.short.toFixed(2)}`
+                : '--'}
+            </span>
+          </div>
+        </div>
       </div>
       <InfoBanner
         variant="warning"

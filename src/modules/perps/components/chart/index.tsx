@@ -13,7 +13,8 @@ import { useThemeStore } from '../../../../store/themeStore';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useCandles } from '../../hooks/useCandles';
 import { ChartHeader } from './components/ChartHeader';
-import { DrawingStyleBar, DrawingToolbar, ScaleModeToggle } from './components/DrawingToolbar';
+import { ChartScaleControls, type ScaleMode } from './components/ChartScaleControls';
+import { DrawingStyleBar, DrawingToolbar } from './components/DrawingToolbar';
 import { IndicatorSettingsModal } from './components/IndicatorSettingsModal';
 import { Legend } from './components/Legend';
 import { HistoryLoadingOverlay, MarketTransitionOverlay } from './components/LoadingOverlay';
@@ -23,6 +24,7 @@ import { useChartDrawings } from './hooks/useChartDrawings';
 import { useChartIndicators } from './hooks/useChartIndicators';
 import { useChartInstance } from './hooks/useChartInstance';
 import { useChartSettings } from './hooks/useChartSettings';
+import { useChartTradeLines } from './hooks/useChartTradeLines';
 import { useIsMobile } from './hooks/useIsMobile';
 import type { LegendData } from './types';
 import { normalizeCandles } from './utils/candles';
@@ -65,7 +67,9 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
   const [activeDrawTool, setActiveDrawTool] = useState<string | null>(null);
   const [legend, setLegend] = useState<LegendData | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [showDrawingToolbar, setShowDrawingToolbar] = useState(true);
+  const [showDrawingToolbar, setShowDrawingToolbar] = useState(false);
+  const [scaleMode, setScaleMode] = useState<ScaleMode>('normal');
+  const [priceSource, setPriceSource] = useState<'last' | 'mark'>('last');
   const [showIndicatorPills, setShowIndicatorPills] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
@@ -113,6 +117,11 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
     selectedMarket,
     timeframe
   );
+
+  useChartTradeLines({
+    series: seriesRef.current,
+    market: selectedMarket,
+  });
 
   useEffect(() => {
     if (!isLoading && !hasInitiallyLoaded) {
@@ -646,7 +655,19 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
   const handleToggleCrosshair = useCallback(() => setShowCrosshair(v => !v), [setShowCrosshair]);
   const handleToggleFullscreen = useCallback(() => setIsFullscreen(prev => !prev), []);
   const handleToggleIndicatorPills = useCallback(() => setShowIndicatorPills(v => !v), []);
-  const handleToggleLogScale = useCallback(() => setIsLogScale(v => !v), [setIsLogScale]);
+  const handleScaleModeChange = useCallback(
+    (mode: ScaleMode) => {
+      setScaleMode(mode);
+      const chart = chartRef.current;
+      if (!chart) return;
+      let lwcMode = PriceScaleMode.Normal;
+      if (mode === 'logarithmic') lwcMode = PriceScaleMode.Logarithmic;
+      else if (mode === 'percentage') lwcMode = PriceScaleMode.Percentage;
+      chart.priceScale('right').applyOptions({ mode: lwcMode });
+      setIsLogScale(mode === 'logarithmic');
+    },
+    [chartRef, setIsLogScale]
+  );
 
   const handleRemoveIndicator = useCallback(
     (instanceId: string) => {
@@ -703,6 +724,8 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
         isMobile={isMobile}
         activeChartTab={activeChartTab}
         onChartTabChange={onChartTabChange}
+        priceSource={priceSource}
+        onPriceSourceChange={setPriceSource}
       />
 
       <div
@@ -744,7 +767,11 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
           onWidthChange={handleDrawingWidthChange}
           onDeleteSelected={deleteSelectedDrawing}
         />
-        <ScaleModeToggle isLog={isLogScale} onToggle={handleToggleLogScale} />
+        <ChartScaleControls
+          scaleMode={scaleMode}
+          onScaleModeChange={handleScaleModeChange}
+          isMobile={isMobile}
+        />
 
         {editingInstanceId && (
           <IndicatorSettingsModal

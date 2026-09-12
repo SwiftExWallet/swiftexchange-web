@@ -192,7 +192,12 @@ export async function execute1InchFusionSwap(
   // Sign or broadcast
   let submitPayload: any;
 
-  if (fusionOrder.transaction) {
+  // An on-chain transaction is ONLY executed when selling native gas token where deposit into escrow is required.
+  const isNativeDepositTx = Boolean(
+    isSourceNative && fusionOrder.transaction && !fusionOrder.typedData
+  );
+
+  if (isNativeDepositTx) {
     const ethersProvider = new ethers.BrowserProvider(provider);
     const signer = await ethersProvider.getSigner(senderAddress);
 
@@ -214,7 +219,34 @@ export async function execute1InchFusionSwap(
     };
   } else {
     if (!typedData) throw new Error('No typed data received from build order');
-    if (!extension) throw new Error('No extension data received from build order');
+
+    // Ensure wallet is on the correct chain and typedData.domain.chainId matches the active wallet chain
+    // to satisfy EIP-712 domain validation (-32602 "active chainId is different than the one provided")
+    try {
+      const activeRaw = await provider.request({ method: 'eth_chainId' });
+      const activeChainId = parseRawChainId(activeRaw);
+      const targetChainId = Number(chainId);
+
+      if (activeChainId !== targetChainId) {
+        await switchOrAddChain(provider, chainId);
+        await new Promise(r => setTimeout(r, 400));
+      }
+
+      const finalActiveRaw = await provider.request({ method: 'eth_chainId' });
+      const finalActiveChainId = parseRawChainId(finalActiveRaw) || targetChainId;
+
+      if (typedData.domain && typedData.domain.chainId !== undefined) {
+        const domainChainId = Number(typedData.domain.chainId);
+        if (domainChainId !== finalActiveChainId) {
+          console.warn(
+            `[FusionExecutor] Aligning typedData.domain.chainId (${domainChainId}) to active wallet chain (${finalActiveChainId}) for testnet compliance`
+          );
+          typedData.domain.chainId = finalActiveChainId;
+        }
+      }
+    } catch (chainAlignErr) {
+      console.warn('[FusionExecutor] Chain alignment warning:', chainAlignErr);
+    }
 
     if (onProgress) onProgress('signing');
     onBeforeWalletSign?.();
@@ -246,37 +278,49 @@ export async function execute1InchFusionSwap(
 
     if (!signature) throw new Error('Signature cancelled or empty — please try again');
 
-    const orderMessage = typedData.message;
+    const orderMessage = typedData.message || (fusionOrder as any).order || {};
     const orderFields = {
-      maker: orderMessage.maker,
-      makerAsset: orderMessage.makerAsset,
-      takerAsset: orderMessage.takerAsset,
-      makerTraits: orderMessage.makerTraits,
-      salt: orderMessage.salt,
-      makingAmount: orderMessage.makingAmount,
-      takingAmount: orderMessage.takingAmount,
+      maker: orderMessage.maker || senderAddress,
+      makerAsset: orderMessage.makerAsset || normalizedTokenIn,
+      takerAsset: orderMessage.takerAsset || normalizedTokenOut,
+      makerTraits: String(orderMessage.makerTraits || '0'),
+      salt: String(orderMessage.salt || '0'),
+      makingAmount: String(orderMessage.makingAmount || amountBN.toString()),
+      takingAmount: String(orderMessage.takingAmount || '0'),
       receiver: orderMessage.receiver || senderAddress,
     };
+
+    const resolvedQuoteId =
+      quote.quoteId || (quote as any)?.data?.quoteId || (fusionOrder as any).quoteId || '';
 
     if (isCrossChain) {
       const destChainInfo = getChainById(toChainId);
       const destRawSymbol =
         (destChainInfo?.symbol || destChainInfo?.nativeCurrency.symbol)?.toUpperCase() || 'ETH';
+      const destChainSymbol =
+        destRawSymbol === 'BNB' || destRawSymbol === 'BINANCE'
+          ? 'BSC'
+          : destRawSymbol === 'POLYGON'
+            ? 'POL'
+            : destRawSymbol === 'OPTIMISM' || destRawSymbol === 'OP'
+              ? 'OPT'
+              : destRawSymbol;
+
       submitPayload = {
         chain: chainSymbol,
-        toChain: destRawSymbol === 'BNB' ? 'BSC' : destRawSymbol,
+        toChain: destChainSymbol,
         order: orderFields,
         signature,
-        extension,
-        quoteId: quote.quoteId,
+        extension: extension || '0x',
+        quoteId: resolvedQuoteId,
         orderHash,
       };
     } else {
       submitPayload = {
         chain: chainSymbol,
         order: orderFields,
-        quoteId: quote.quoteId,
-        extension,
+        quoteId: resolvedQuoteId,
+        extension: extension || '0x',
         signature,
         permit: '',
         orderHash,
@@ -288,7 +332,7 @@ export async function execute1InchFusionSwap(
   const MAX_RETRIES = 1;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      await deps.submit1InchFusionOrder(submitPayload, isCrossChain, isSourceNative);
+      await deps.submit1InchFusionOrder(submitPayload, isCrossChain, isNativeDepositTx);
 
       break;
     } catch (err: any) {

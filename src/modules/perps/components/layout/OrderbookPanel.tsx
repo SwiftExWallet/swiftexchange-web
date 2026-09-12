@@ -1,4 +1,12 @@
-import { ArrowDown, Check, ChevronDown, LayoutList, PanelBottom, PanelTop } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  LayoutList,
+  PanelBottom,
+  PanelTop,
+} from 'lucide-react';
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useMarketStore } from '../../core/stores/marketStore';
@@ -26,21 +34,41 @@ const OrderbookRow = memo(function OrderbookRow({
   formatPrice,
   formatVal,
 }: OrderbookRowProps) {
+  const prevSizeRef = useRef(displaySize);
+  const [flash, setFlash] = useState<'ob-flash-green' | 'ob-flash-red' | null>(null);
+
+  useEffect(() => {
+    if (prevSizeRef.current !== displaySize) {
+      setFlash(isAsk ? 'ob-flash-red' : 'ob-flash-green');
+      prevSizeRef.current = displaySize;
+      const timer = setTimeout(() => setFlash(null), 350);
+      return () => clearTimeout(timer);
+    }
+  }, [displaySize, isAsk]);
+
   return (
     <div
-      className="ob-row-enter flex justify-between items-center px-2 py-0.5 my-[1px] hover:bg-hover cursor-pointer relative leading-none shrink-0 group select-none transition-colors duration-100"
+      className={`flex justify-between items-center px-2 py-0.5 my-[0.5px] hover:bg-hover/80 cursor-pointer relative leading-none shrink-0 group select-none transition-colors duration-100 ${
+        flash || ''
+      }`}
       onClick={() => useOrderEntryStore.getState().applyOrderbookPrice(price.toString())}
     >
       <div
-        className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar transition-all duration-150 ${isAsk ? 'ob-depth-bar--ask-soft' : 'ob-depth-bar--bid-soft'}`}
+        className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar ${
+          isAsk ? 'ob-depth-bar--ask-soft' : 'ob-depth-bar--bid-soft'
+        }`}
         style={{ width: `calc((var(--cum-total) / var(--max-cum)) * 100%)` }}
       />
       <div
-        className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar transition-all duration-150 ${isAsk ? 'ob-depth-bar--ask-strong' : 'ob-depth-bar--bid-strong'}`}
+        className={`absolute inset-y-0 right-0 pointer-events-none ob-depth-bar ${
+          isAsk ? 'ob-depth-bar--ask-strong' : 'ob-depth-bar--bid-strong'
+        }`}
         style={{ width: `calc((var(--row-size) / var(--max-size)) * 100%)` }}
       />
       <span
-        className={`font-mono-tabular text-[11px] font-medium z-10 ${isAsk ? 'text-danger' : 'text-success'}`}
+        className={`font-mono-tabular text-[11px] font-medium z-10 ${
+          isAsk ? 'text-danger' : 'text-success'
+        }`}
       >
         {formatPrice(price)}
       </span>
@@ -75,6 +103,34 @@ function formatVal(val: number, isUsdt: boolean): string {
   if (val >= 1)
     return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
   return val.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 5 });
+}
+
+/** Aggregate orderbook levels by tick precision */
+function aggregateLevels(
+  levels: { price: string; size: string }[],
+  precision: number,
+  isAsk: boolean
+): { price: string; size: string }[] {
+  if (!levels || levels.length === 0 || !precision || precision <= 0) return levels;
+  const grouped = new Map<number, number>();
+  for (const lvl of levels) {
+    const px = parseFloat(lvl.price);
+    const sz = parseFloat(lvl.size);
+    if (isNaN(px) || isNaN(sz) || px <= 0) continue;
+    const bucket = isAsk
+      ? Math.ceil(px / precision) * precision
+      : Math.floor(px / precision) * precision;
+    const key = Number(bucket.toPrecision(10));
+    grouped.set(key, (grouped.get(key) || 0) + sz);
+  }
+  const result: { price: string; size: string }[] = [];
+  for (const [px, sz] of grouped.entries()) {
+    result.push({ price: px.toString(), size: sz.toString() });
+  }
+  result.sort((a, b) =>
+    isAsk ? parseFloat(a.price) - parseFloat(b.price) : parseFloat(b.price) - parseFloat(a.price)
+  );
+  return result;
 }
 
 function buildCumulative(levels: { price: string; size: string }[]) {
@@ -129,14 +185,17 @@ export const OrderbookPanel: React.FC = () => {
 
   const rowsPerSide = viewMode === 'both' ? 14 : 35;
 
-  const rawAsks = useMemo(
-    () => (orderbook.asks || []).slice(0, viewMode === 'bids' ? 0 : rowsPerSide),
-    [orderbook.asks, viewMode, rowsPerSide]
-  );
-  const rawBids = useMemo(
-    () => (orderbook.bids || []).slice(0, viewMode === 'asks' ? 0 : rowsPerSide),
-    [orderbook.bids, viewMode, rowsPerSide]
-  );
+  const rawAsks = useMemo(() => {
+    const sliced = (orderbook.asks || []).slice(0, viewMode === 'bids' ? 0 : rowsPerSide * 2);
+    const aggregated = aggregateLevels(sliced, selectedPrecision, true);
+    return aggregated.slice(0, viewMode === 'bids' ? 0 : rowsPerSide);
+  }, [orderbook.asks, viewMode, rowsPerSide, selectedPrecision]);
+
+  const rawBids = useMemo(() => {
+    const sliced = (orderbook.bids || []).slice(0, viewMode === 'asks' ? 0 : rowsPerSide * 2);
+    const aggregated = aggregateLevels(sliced, selectedPrecision, false);
+    return aggregated.slice(0, viewMode === 'asks' ? 0 : rowsPerSide);
+  }, [orderbook.bids, viewMode, rowsPerSide, selectedPrecision]);
 
   const askRows = useMemo(() => buildCumulative(rawAsks).reverse(), [rawAsks]);
   const bidRows = useMemo(() => buildCumulative(rawBids), [rawBids]);
@@ -158,17 +217,36 @@ export const OrderbookPanel: React.FC = () => {
     ...bidRows.map(r => (isUsdtUnit ? r.quoteSize : r.size)),
     1
   );
+
   const lowestAsk = orderbook.asks?.[0] ? parseFloat(orderbook.asks[0].price) : 0;
   const highestBid = orderbook.bids?.[0] ? parseFloat(orderbook.bids[0].price) : 0;
   const spread = lowestAsk > 0 && highestBid > 0 ? lowestAsk - highestBid : 0;
   const spreadPct = lowestAsk > 0 ? (spread / lowestAsk) * 100 : 0;
 
+  // Live Last Price & Direction from latest trade
+  const latestTrade = trades[0];
+  const prevTrade = trades[1];
+  const lastPrice = latestTrade ? parseFloat(latestTrade.price) : lowestAsk || highestBid;
+  const isPriceUp =
+    latestTrade && prevTrade
+      ? parseFloat(latestTrade.price) >= parseFloat(prevTrade.price)
+      : latestTrade
+        ? latestTrade.side === 'buy'
+        : true;
+
+  // Bid/Ask Imbalance calculation
+  const totalBidVol = bidRows.length > 0 ? bidRows[bidRows.length - 1].cumTotalQuote : 0;
+  const totalAskVol = askRows.length > 0 ? askRows[0].cumTotalQuote : 0;
+  const totalVol = totalBidVol + totalAskVol;
+  const bidPercent = totalVol > 0 ? Math.round((totalBidVol / totalVol) * 100) : 50;
+  const askPercent = 100 - bidPercent;
+
   const TabBtn = ({ id, label }: { id: 'Book' | 'Trades'; label: string }) => (
     <button
       onClick={() => setActiveTab(id)}
-      className={`flex-1 py-2 text-center text-[12px] font-medium transition-colors ${
+      className={`flex-1 py-1.5 text-center text-[11px] font-medium transition-colors cursor-pointer ${
         activeTab === id
-          ? 'text-primary border-b-2 border-brand'
+          ? 'text-primary border-b-2 border-brand font-semibold'
           : 'text-secondary hover:text-primary'
       }`}
     >
@@ -190,8 +268,8 @@ export const OrderbookPanel: React.FC = () => {
     <button
       onClick={() => setViewMode(mode)}
       title={title}
-      className={`flex items-center justify-center w-[22px] h-[22px] rounded transition-colors ${
-        viewMode === mode ? activeColor : 'text-muted hover:text-primary hover:bg-hover'
+      className={`flex items-center justify-center w-[20px] h-[20px] rounded transition-colors cursor-pointer ${
+        viewMode === mode ? activeColor : 'text-secondary hover:text-primary hover:bg-hover/60'
       }`}
     >
       {icon}
@@ -199,9 +277,9 @@ export const OrderbookPanel: React.FC = () => {
   );
 
   return (
-    <div className="w-full h-full min-h-0 bg-secondary border border-color rounded-lg overflow-hidden flex flex-col">
+    <div className="w-full h-full min-h-0 bg-secondary border border-color rounded-lg overflow-hidden flex flex-col select-none">
       {/* Tab Header */}
-      <div className="flex border-b border-color shrink-0 h-[36px]">
+      <div className="flex border-b border-color shrink-0 h-[32px]">
         <TabBtn id="Book" label="Order Book" />
         <TabBtn id="Trades" label="Trades" />
       </div>
@@ -209,25 +287,25 @@ export const OrderbookPanel: React.FC = () => {
       {activeTab === 'Book' ? (
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           {/* Controls Row (Order Book Only) */}
-          <div className="flex items-center justify-between px-2.5 py-1 border-b border-color shrink-0 h-[30px]">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between px-2 py-0.5 border-b border-color shrink-0 h-[28px]">
+            <div className="flex items-center gap-0.5">
               <ViewBtn
                 mode="both"
                 title="Both"
-                activeColor="text-brand bg-brand/10"
-                icon={<LayoutList size={12} strokeWidth={2} />}
+                activeColor="text-brand bg-brand/15"
+                icon={<LayoutList size={11} strokeWidth={2} />}
               />
               <ViewBtn
                 mode="bids"
                 title="Bids only"
-                activeColor="text-success bg-success/10"
-                icon={<PanelBottom size={12} strokeWidth={2} />}
+                activeColor="text-success bg-success/15"
+                icon={<PanelBottom size={11} strokeWidth={2} />}
               />
               <ViewBtn
                 mode="asks"
                 title="Asks only"
-                activeColor="text-danger bg-danger/10"
-                icon={<PanelTop size={12} strokeWidth={2} />}
+                activeColor="text-danger bg-danger/15"
+                icon={<PanelTop size={11} strokeWidth={2} />}
               />
             </div>
 
@@ -241,14 +319,14 @@ export const OrderbookPanel: React.FC = () => {
                     setIsPrecisionOpen(!isPrecisionOpen);
                     setIsUnitOpen(false);
                   }}
-                  className="flex items-center gap-0.5 text-[11px] text-secondary hover:text-primary transition-colors cursor-pointer"
+                  className="flex items-center gap-0.5 text-[11px] text-secondary hover:text-primary transition-colors cursor-pointer px-1 py-0.5 rounded hover:bg-hover/60"
                 >
                   <span>{selectedPrecision}</span>
-                  <ChevronDown size={10} strokeWidth={2} />
+                  <ChevronDown size={10} strokeWidth={2} className="opacity-70" />
                 </button>
 
                 {isPrecisionOpen && (
-                  <div className="absolute right-0 top-full mt-1 bg-secondary border border-color rounded shadow-xl py-1 z-50 min-w-[70px]">
+                  <div className="absolute right-0 top-full mt-1 bg-secondary border border-color rounded-md shadow-lg py-1 z-50 min-w-[70px]">
                     {precisionOptions.map(p => (
                       <button
                         key={p}
@@ -256,8 +334,8 @@ export const OrderbookPanel: React.FC = () => {
                           setSelectedPrecision(p);
                           setIsPrecisionOpen(false);
                         }}
-                        className={`w-full text-left px-2.5 py-1 text-[11px] flex items-center justify-between hover:bg-hover transition-colors ${
-                          selectedPrecision === p ? 'text-brand font-medium' : 'text-primary'
+                        className={`w-full text-left px-2 py-1 text-[11px] flex items-center justify-between hover:bg-hover transition-colors cursor-pointer ${
+                          selectedPrecision === p ? 'text-brand font-semibold' : 'text-primary'
                         }`}
                       >
                         <span>{p}</span>
@@ -276,21 +354,21 @@ export const OrderbookPanel: React.FC = () => {
                     setIsUnitOpen(!isUnitOpen);
                     setIsPrecisionOpen(false);
                   }}
-                  className="flex items-center gap-0.5 text-[11px] text-secondary hover:text-primary transition-colors cursor-pointer"
+                  className="flex items-center gap-0.5 text-[11px] text-secondary hover:text-primary transition-colors cursor-pointer px-1 py-0.5 rounded hover:bg-hover/60"
                 >
                   <span className="font-medium">{unit === 'USDT' ? quote : base}</span>
-                  <ChevronDown size={10} strokeWidth={2} />
+                  <ChevronDown size={10} strokeWidth={2} className="opacity-70" />
                 </button>
 
                 {isUnitOpen && (
-                  <div className="absolute right-0 top-full mt-1 bg-secondary border border-color rounded shadow-xl py-1 z-50 min-w-[80px]">
+                  <div className="absolute right-0 top-full mt-1 bg-secondary border border-color rounded-md shadow-lg py-1 z-50 min-w-[80px]">
                     <button
                       onClick={() => {
                         setUnit('BASE');
                         setIsUnitOpen(false);
                       }}
-                      className={`w-full text-left px-2.5 py-1 text-[11px] flex items-center justify-between hover:bg-hover transition-colors ${
-                        unit === 'BASE' ? 'text-brand font-medium' : 'text-primary'
+                      className={`w-full text-left px-2 py-1 text-[11px] flex items-center justify-between hover:bg-hover transition-colors cursor-pointer ${
+                        unit === 'BASE' ? 'text-brand font-semibold' : 'text-primary'
                       }`}
                     >
                       <span>{base}</span>
@@ -301,8 +379,8 @@ export const OrderbookPanel: React.FC = () => {
                         setUnit('USDT');
                         setIsUnitOpen(false);
                       }}
-                      className={`w-full text-left px-2.5 py-1 text-[11px] flex items-center justify-between hover:bg-hover transition-colors ${
-                        unit === 'USDT' ? 'text-brand font-medium' : 'text-primary'
+                      className={`w-full text-left px-2 py-1 text-[11px] flex items-center justify-between hover:bg-hover transition-colors cursor-pointer ${
+                        unit === 'USDT' ? 'text-brand font-semibold' : 'text-primary'
                       }`}
                     >
                       <span>{quote}</span>
@@ -314,8 +392,22 @@ export const OrderbookPanel: React.FC = () => {
             </div>
           </div>
 
+          {/* Bid/Ask Imbalance Ratio Indicator */}
+          <div className="flex h-[2px] w-full shrink-0">
+            <div
+              className="bg-danger/60 transition-all duration-300"
+              style={{ width: `${askPercent}%` }}
+              title={`Asks: ${askPercent}%`}
+            />
+            <div
+              className="bg-success/60 transition-all duration-300"
+              style={{ width: `${bidPercent}%` }}
+              title={`Bids: ${bidPercent}%`}
+            />
+          </div>
+
           {/* Column Headers */}
-          <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-muted font-medium shrink-0 h-[22px]">
+          <div className="flex items-center justify-between px-2 py-1 text-[10px] text-secondary/70 font-medium shrink-0 h-[20px]">
             <span>Price({quote})</span>
             <div className="flex">
               <span className="w-[68px] text-right">Size({unit === 'USDT' ? quote : base})</span>
@@ -363,27 +455,37 @@ export const OrderbookPanel: React.FC = () => {
               </div>
             )}
 
-            {/* Spread Row */}
-            <div className="flex items-center justify-between px-2.5 py-0.5 border-y border-color shrink-0 h-[26px]">
+            {/* Dynamic Mid-Market Price & Spread Row */}
+            <div className="flex items-center justify-between px-2 py-0.5 border-y border-color shrink-0 h-[26px] bg-tertiary/20">
               <div
-                className="flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                className="flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={() =>
-                  lowestAsk > 0 &&
-                  useOrderEntryStore.getState().applyOrderbookPrice(lowestAsk.toString())
+                  lastPrice > 0 &&
+                  useOrderEntryStore.getState().applyOrderbookPrice(lastPrice.toString())
                 }
                 title="Click to fill price"
               >
-                <span className="font-mono-tabular text-[12px] font-bold text-danger">
-                  {lowestAsk > 0 ? formatPrice(lowestAsk) : '—'}
+                <span
+                  className={`font-mono-tabular text-[12px] font-bold ${
+                    isPriceUp ? 'text-success' : 'text-danger'
+                  }`}
+                >
+                  {lastPrice > 0 ? formatPrice(lastPrice) : '—'}
                 </span>
-                {spread > 0 && (
-                  <ArrowDown size={10} strokeWidth={2.5} className="text-danger opacity-70" />
+                {isPriceUp ? (
+                  <ArrowUp size={11} strokeWidth={2.5} className="text-success" />
+                ) : (
+                  <ArrowDown size={11} strokeWidth={2.5} className="text-danger" />
                 )}
               </div>
-              <div className="flex items-center gap-1.5 text-[10px]">
-                <span className="text-muted">Spread</span>
+
+              <div className="flex items-center gap-1 text-[10px]">
+                <span className="text-secondary/70">Spread</span>
                 <span className="font-mono-tabular text-primary font-medium">
-                  {spreadPct.toFixed(3)}%
+                  {spread > 0 ? formatPrice(spread) : '—'}
+                </span>
+                <span className="font-mono-tabular text-secondary/60">
+                  ({spreadPct.toFixed(2)}%)
                 </span>
               </div>
             </div>
@@ -429,8 +531,8 @@ export const OrderbookPanel: React.FC = () => {
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          {/* Trades Column Headers (No filter bar, direct headers matching Aster DEX) */}
-          <div className="flex items-center justify-between px-2.5 py-1 text-[10px] text-muted font-medium border-b border-color shrink-0 h-[26px]">
+          {/* Trades Column Headers */}
+          <div className="flex items-center justify-between px-2 py-1 text-[10px] text-secondary/70 font-medium border-b border-color shrink-0 h-[24px]">
             <span>Price({quote})</span>
             <div className="flex">
               <span className="w-[75px] text-right">Size(USDT)</span>
@@ -454,13 +556,15 @@ export const OrderbookPanel: React.FC = () => {
                   return (
                     <div
                       key={trade.id}
-                      className="trade-row-enter flex justify-between items-center px-2.5 py-[3px] hover:bg-hover cursor-pointer leading-none"
+                      className="trade-row-enter flex justify-between items-center px-2 py-[2.5px] hover:bg-hover cursor-pointer leading-none"
                       onClick={() =>
                         useOrderEntryStore.getState().applyOrderbookPrice(px.toString())
                       }
                     >
                       <span
-                        className={`font-mono-tabular text-[11px] font-medium ${isBuy ? 'text-success' : 'text-danger'}`}
+                        className={`font-mono-tabular text-[11px] font-medium ${
+                          isBuy ? 'text-success' : 'text-danger'
+                        }`}
                       >
                         {formatPrice(px)}
                       </span>

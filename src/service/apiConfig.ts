@@ -3,7 +3,8 @@ import { getAccessToken } from '../modules/walletconnect/services/Siweauthservic
 export const IS_DEV = import.meta.env.DEV;
 export const IS_PROD = import.meta.env.PROD;
 
-function getValidDeviceToken(): string | null {
+export function getValidDeviceToken(): string | null {
+  if (typeof window === 'undefined') return null;
   const storedTimestamp = localStorage.getItem('device_token_timestamp');
   if (storedTimestamp) {
     const elapsed = Date.now() - parseInt(storedTimestamp, 10);
@@ -15,6 +16,33 @@ function getValidDeviceToken(): string | null {
     }
   }
   return localStorage.getItem('device_token');
+}
+
+type DeviceTokenListener = (token: string) => void;
+const tokenListeners = new Set<DeviceTokenListener>();
+
+export function onDeviceTokenChange(listener: DeviceTokenListener): () => void {
+  tokenListeners.add(listener);
+  return () => tokenListeners.delete(listener);
+}
+
+export function setDeviceToken(token: string): void {
+  if (typeof window === 'undefined' || !token) return;
+  localStorage.setItem('device_token', token);
+  localStorage.setItem('device_token_timestamp', Date.now().toString());
+  tokenListeners.forEach(listener => {
+    try {
+      listener(token);
+    } catch (e) {
+      console.error('[apiConfig] Error in token listener:', e);
+    }
+  });
+}
+
+export function clearDeviceToken(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('device_token');
+  localStorage.removeItem('device_token_timestamp');
 }
 
 export function getCurrentNetwork(): 'mainnet' | 'testnet' {
@@ -46,6 +74,9 @@ export const API_CONFIG = {
   // Backward compatibility alias for serverUrl (VITE_BASE_PROXY_URL removed, unified with serverUrl)
   get proxyUrl(): string {
     return getServerUrl();
+  },
+  get deviceToken(): string | null {
+    return getValidDeviceToken();
   },
   get deviceAuth(): string {
     return getValidDeviceToken() || getAccessToken() || import.meta.env.VITE_API_DEVICE_AUTH || '';

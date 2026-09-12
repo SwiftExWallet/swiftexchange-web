@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Eraser, MousePointer2, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MousePointer2, PenTool, Trash2, X } from 'lucide-react';
 import { memo } from 'react';
 
 import { DRAWING_COLORS, DRAWING_WIDTHS, TOOL_CATEGORIES } from '../constants/toolCategories';
@@ -30,13 +30,15 @@ export const DrawingToolbar = memo(function DrawingToolbar({
 }: DrawingToolbarProps) {
   if (!show) {
     return (
-      <div
-        onClick={onShow}
-        className="absolute left-0 top-0 bottom-0 w-2.5 hover:w-5 z-35 transition-all duration-200 cursor-pointer flex items-center group pointer-events-auto bg-transparent hover:bg-hover/10"
-        title="Show Drawing Tools"
-      >
-        <button className="absolute left-0 top-[120px] opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-secondary border-y border-r border-color rounded-r-md py-2.5 px-0.5 text-gray-400 hover:text-primary shadow-md flex items-center justify-center">
-          <ChevronRight className="w-3.5 h-6 text-gray-400" />
+      <div className="absolute left-2.5 bottom-2 z-20 pointer-events-auto select-none">
+        <button
+          onClick={onShow}
+          className="flex items-center gap-1.5 px-2 py-1 bg-secondary/85 hover:bg-secondary border border-color/70 hover:border-brand/40 backdrop-blur-md rounded-md text-[11px] font-medium text-gray-400 hover:text-primary transition-all shadow-md cursor-pointer group"
+          title="Show Drawing Tools"
+        >
+          <PenTool className="w-3.5 h-3.5 text-brand group-hover:rotate-12 transition-transform" />
+          <span className="text-[10px] font-semibold tracking-tight text-primary">Draw</span>
+          <ChevronRight className="w-3 h-3 text-secondary group-hover:text-primary transition-colors" />
         </button>
       </div>
     );
@@ -104,32 +106,6 @@ export const DrawingToolbar = memo(function DrawingToolbar({
         );
       })}
 
-      <div className="w-6 h-px bg-color my-1 shrink-0" />
-
-      <button
-        onClick={() => {
-          onClear();
-          onSelectCategory(null);
-        }}
-        className="p-2 rounded-lg transition-colors flex items-center justify-center min-w-[32px] min-h-[32px] text-gray-400 hover:bg-hover hover:text-red-400"
-        title="Clear Drawings"
-      >
-        <Eraser className="w-4 h-4" />
-      </button>
-
-      <div className="mt-auto pt-2 border-t border-color w-full flex justify-center shrink-0">
-        <button
-          onClick={() => {
-            onHide();
-            onSelectCategory(null);
-          }}
-          className="p-2 rounded-lg text-gray-400 hover:bg-hover hover:text-primary transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center"
-          title="Collapse Toolbar"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-      </div>
-
       {activeCatObj && (
         <>
           <div
@@ -193,6 +169,25 @@ export const DrawingToolbar = memo(function DrawingToolbar({
           </div>
         </>
       )}
+
+      {/* Bottom utility controls: Clear all drawings & Collapse toolbar */}
+      <div className="mt-auto w-full flex flex-col items-center gap-1 pb-1 pt-1.5 border-t border-color/40 shrink-0">
+        <button
+          onClick={onClear}
+          className="p-2 rounded-lg transition-colors flex items-center justify-center text-gray-400 hover:bg-hover hover:text-red-400 cursor-pointer min-w-[32px] min-h-[32px]"
+          title="Clear All Drawings"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={onHide}
+          className="p-2 rounded-lg transition-colors flex items-center justify-center text-gray-400 hover:bg-hover hover:text-primary cursor-pointer min-w-[32px] min-h-[32px]"
+          title="Collapse Drawing Tools"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+      </div>
     </div>
   );
 });

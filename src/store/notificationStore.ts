@@ -15,6 +15,8 @@ export interface AppNotification {
   read: boolean;
   dontSave?: boolean;
   status?: 'success' | 'error' | 'warning' | 'info';
+  txHash?: string;
+  explorerUrl?: string;
 }
 
 export type ToastNotification = AppNotification;
@@ -167,7 +169,16 @@ export const useNotificationStore = create<NotificationState>()(
 
       showToast: notif => {
         const state = get();
-        if (!state.enabledTypes[notif.type]) return;
+        if (notif.type && state.enabledTypes && state.enabledTypes[notif.type] === false) return;
+
+        // Prevent duplicate toast spam within 2.0s (e.g. from both REST submit and WebSocket event)
+        const isDuplicate = state.activeToasts.some(
+          t =>
+            t.title === notif.title &&
+            String(t.message) === String(notif.message) &&
+            Date.now() - t.timestamp < 2000
+        );
+        if (isDuplicate) return;
 
         const newNotif = {
           ...notif,
@@ -209,9 +220,43 @@ export const useNotificationStore = create<NotificationState>()(
     {
       name: 'notification-storage',
       partialize: state => ({
-        notifications: state.notifications,
+        notifications: state.notifications.map(n => ({
+          ...n,
+          message:
+            typeof n.message === 'string'
+              ? n.message
+              : typeof (n.message as any)?.props?.children === 'string'
+                ? (n.message as any).props.children
+                : typeof n.message === 'object' && n.message !== null
+                  ? 'Notification update'
+                  : String(n.message || ''),
+        })),
         enabledTypes: state.enabledTypes,
       }),
+      onRehydrateStorage: () => state => {
+        if (state && Array.isArray(state.notifications)) {
+          state.notifications = state.notifications.map(n => {
+            if (
+              typeof n.message === 'object' &&
+              n.message !== null &&
+              !('$$typeof' in (n.message as any))
+            ) {
+              const child = (n.message as any)?.props?.children;
+              const text =
+                typeof child === 'string'
+                  ? child
+                  : Array.isArray(child)
+                    ? child
+                        .map((c: any) => (typeof c === 'string' ? c : c?.props?.children || ''))
+                        .filter(Boolean)
+                        .join(' ')
+                    : 'Notification update';
+              return { ...n, message: text || 'Notification update' };
+            }
+            return n;
+          });
+        }
+      },
     }
   )
 );

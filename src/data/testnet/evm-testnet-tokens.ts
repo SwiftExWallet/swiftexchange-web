@@ -1,20 +1,3 @@
-/**
- * EVM Testnet Token Registry
- * ============================================================
- * Centralized source of truth for all EVM testnet chain tokens.
- *
- * NOTE: Every token address here MUST be an authentic, deployed
- * contract on the respective testnet blockchain.
- * The backend quoter/swap API verifies ERC-20 contract bytecode
- * and metadata via RPC before providing quotes.
- *
- * Verified sources:
- *   - Circle Official Faucets (faucet.circle.com)
- *   - Aave V3 Testnet Deployments (Sepolia, Amoy, Fuji)
- *   - Chainlink Official Testnet Faucets
- *   - Uniswap V3 Sepolia / PancakeSwap Testnet
- */
-
 const LOGO = {
   ETH: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png',
   BNB: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/binance/info/logo.png',

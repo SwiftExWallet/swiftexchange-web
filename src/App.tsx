@@ -11,6 +11,8 @@ import {
   useWalletStore,
 } from './modules/walletconnect/store/walletConnectStore';
 import router from './routes';
+import { getValidDeviceToken, setDeviceToken } from './service/apiConfig';
+import { ensureWalletLinkedToDevice } from './service/apiService';
 import { registerDevice } from './service/deviceService';
 import { useGeolocationStore } from './store/geolocationStore';
 
@@ -57,18 +59,9 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    const storedTimestamp = localStorage.getItem('device_token_timestamp');
-    if (storedTimestamp) {
-      const elapsed = Date.now() - parseInt(storedTimestamp, 10);
-      const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-      if (elapsed > ONE_WEEK_MS) {
-        localStorage.removeItem('device_token');
-        localStorage.removeItem('device_token_timestamp');
-      }
-    }
-
-    const storedToken = localStorage.getItem('device_token');
+    const storedToken = getValidDeviceToken();
     if (storedToken) {
+      ensureWalletLinkedToDevice(undefined, storedToken).catch(() => {});
       return;
     }
     if (!isValidDevicePayload(devicePayload)) {
@@ -79,8 +72,8 @@ const App = () => {
       .then(res => {
         const token = res.token || res.data?.token || res.deviceToken;
         if (token) {
-          localStorage.setItem('device_token', token);
-          localStorage.setItem('device_token_timestamp', Date.now().toString());
+          setDeviceToken(token);
+          ensureWalletLinkedToDevice(undefined, token).catch(() => {});
         }
       })
       .catch(() => {});

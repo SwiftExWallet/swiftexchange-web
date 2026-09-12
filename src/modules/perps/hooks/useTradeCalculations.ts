@@ -6,6 +6,7 @@ import { useAccountStore } from '../core/stores/accountStore';
 import { useLeverageStore } from '../core/stores/leverageStore';
 import { usePositionStore } from '../core/stores/positionStore';
 import { useTickerStore } from '../core/stores/tickerStore';
+import { calculateLiquidationPrice } from '../utils/liquidationCalculator';
 
 export function useTradeCalculations(
   symbol: string,
@@ -117,30 +118,71 @@ export function useTradeCalculations(
   const crossMarginRatio =
     crossAccountEquity > 0 ? (totalMaintenanceMargin / crossAccountEquity) * 100 : 0;
 
-  // --- ISOLATED MARGIN CALCULATIONS (Estimate for the new order) ---
-  // Isolated Liq Price = Entry Price - (Entry Price / Leverage) + MMR * Entry Price (For LONG)
-  // Actually, MMR depends on notional.
   const estimatedIsolatedLiqPrice = useMemo(() => {
-    if (currentPrice.lte(0) || parsedSize.lte(0) || marginType !== 'isolated')
+    if (currentPrice.lte(0) || parsedSize.isNaN() || parsedSize.lte(0)) {
       return { long: null, short: null };
+    }
 
-    const symNoDash = symbol.replace('-', '');
-    const brackets = bracketsBySymbol[symNoDash];
+    if (marginType === 'cross' && walletBalance > 0) {
+      const baseQty = sizeAsset === 'quote' ? parsedSize.div(currentPrice) : parsedSize;
+      const longLiq = calculateLiquidationPrice({
+        position: {
+          symbol,
+          size: baseQty.toString(),
+          entryPrice: currentPrice.toString(),
+          markPrice: currentPrice.toString(),
+          liquidationPrice: '0',
+          unrealizedPnl: '0',
+          leverage,
+          marginType: 'cross',
+          isolatedMargin: '0',
+        },
+        allPositions: Object.values(positions),
+        balances,
+        isMultiAsset: multiAssetsMargin,
+        bracketsBySymbol,
+      });
+
+      const shortLiq = calculateLiquidationPrice({
+        position: {
+          symbol,
+          size: baseQty.negated().toString(),
+          entryPrice: currentPrice.toString(),
+          markPrice: currentPrice.toString(),
+          liquidationPrice: '0',
+          unrealizedPnl: '0',
+          leverage,
+          marginType: 'cross',
+          isolatedMargin: '0',
+        },
+        allPositions: Object.values(positions),
+        balances,
+        isMultiAsset: multiAssetsMargin,
+        bracketsBySymbol,
+      });
+
+      if (longLiq !== null || shortLiq !== null) {
+        return {
+          long: longLiq !== null && longLiq > 0 ? longLiq : null,
+          short: shortLiq !== null && shortLiq > 0 ? shortLiq : null,
+        };
+      }
+    }
+
+    const symNoDash = symbol.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const brackets = bracketsBySymbol[symNoDash] || bracketsBySymbol[symbol];
     const notional = sizeAsset === 'quote' ? parsedSize : parsedSize.times(currentPrice);
 
-    let mmr = 0.005; // Fallback 0.5%
-    if (brackets && brackets.length > 0) {
+    let mmr = 0.005;
+    if (brackets && brackets.length > 0 && notional.gt(0)) {
       const bracket =
         brackets.find(b => notional.lte(b.notionalCap)) || brackets[brackets.length - 1];
-      mmr = bracket.maintMarginRatio;
+      if (bracket) mmr = bracket.maintMarginRatio;
     }
 
     const mmrBn = new BigNumber(mmr);
-    const levBn = new BigNumber(leverage);
+    const levBn = new BigNumber(Math.max(1, leverage));
 
-    // Standard derivative exchange isolated liquidation formula:
-    // Long: Entry * (1 - 1/Lev) / (1 - MMR)
-    // Short: Entry * (1 + 1/Lev) / (1 + MMR)
     const longDenom = new BigNumber(1).minus(mmrBn);
     const longNumerator = currentPrice.times(new BigNumber(1).minus(new BigNumber(1).div(levBn)));
     const longLiq = longDenom.gt(0) ? longNumerator.div(longDenom) : new BigNumber(0);
@@ -150,10 +192,22 @@ export function useTradeCalculations(
     const shortLiq = shortDenom.gt(0) ? shortNumerator.div(shortDenom) : new BigNumber(0);
 
     return {
-      long: longLiq.gt(0) ? longLiq.toNumber() : 0,
-      short: shortLiq.gt(0) ? shortLiq.toNumber() : 0,
+      long: longLiq.gt(0) ? longLiq.toNumber() : null,
+      short: shortLiq.gt(0) ? shortLiq.toNumber() : null,
     };
-  }, [symbol, currentPrice, parsedSize, marginType, leverage, bracketsBySymbol]);
+  }, [
+    symbol,
+    currentPrice,
+    parsedSize,
+    leverage,
+    marginType,
+    walletBalance,
+    sizeAsset,
+    positions,
+    balances,
+    multiAssetsMargin,
+    bracketsBySymbol,
+  ]);
 
   return {
     walletBalance,

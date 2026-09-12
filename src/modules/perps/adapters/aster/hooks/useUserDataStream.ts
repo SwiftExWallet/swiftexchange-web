@@ -7,6 +7,7 @@ import { useNotificationStore } from '../../../../../store/notificationStore';
 import type { Order } from '../../../core/models';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useHistoryStore } from '../../../core/stores/historyStore';
+import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { getAsterWsUrl } from '../constants';
@@ -55,8 +56,19 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
         if (new BigNumber(p.pa || '0').isZero()) {
           usePositionStore.getState().removePosition(symbol);
         } else {
-          // get existing position to preserve missing fields like leverage if Aster doesn't send them
-          const existing = usePositionStore.getState().positions[symbol];
+          const existing =
+            usePositionStore.getState().positions[symbol] ||
+            usePositionStore.getState().positions[symbol.replace('-', '')] ||
+            usePositionStore.getState().positions[symbol.replace('USDT', '-USDT')];
+
+          const storedLev =
+            (existing?.leverage && existing.leverage > 0 ? existing.leverage : null) ||
+            useOrderEntryStore.getState().leverageBySymbol[symbol] ||
+            useOrderEntryStore.getState().leverageBySymbol[symbol.replace('-', '')] ||
+            useOrderEntryStore.getState().leverageBySymbol[symbol.replace('USDT', '-USDT')] ||
+            useOrderEntryStore.getState().leverage ||
+            0;
+
           usePositionStore.getState().updatePosition({
             symbol,
             size: p.pa,
@@ -64,13 +76,14 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
             markPrice: p.mp || existing?.markPrice || '0',
             liquidationPrice: existing?.liquidationPrice || '0',
             unrealizedPnl: p.up || '0',
-            leverage: existing?.leverage || 0,
+            leverage: storedLev,
             marginType: p.mt
               ? (p.mt as string).toLowerCase() === 'isolated'
                 ? 'isolated'
                 : 'cross'
               : existing?.marginType || 'cross',
             isolatedMargin: p.iw ?? '0',
+            initialMargin: (existing as any)?.initialMargin,
           });
         }
       });
@@ -110,13 +123,10 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
       let message = `${actionText} ${o.q} ${symbol} at ${o.p === '0' ? 'Market' : o.p}`;
       let type: 'success' | 'error' | 'info' = 'info';
 
-      if (o.X === 'NEW') {
-        title = 'Order Placed';
-        type = 'info';
-      } else if (o.X === 'FILLED' || o.X === 'PARTIALLY_FILLED') {
+      if (o.X === 'FILLED' || o.X === 'PARTIALLY_FILLED') {
         title = `Order ${o.X === 'FILLED' ? 'Filled' : 'Partially Filled'}`;
         type = 'success';
-        message = `Executed ${o.z} ${symbol} at ${o.ap}`;
+        message = `Executed ${o.z} ${symbol} at $${o.ap}`;
       } else if (o.X === 'CANCELED') {
         title = 'Order Canceled';
         type = 'info';

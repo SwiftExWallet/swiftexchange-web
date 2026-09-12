@@ -168,6 +168,7 @@ export const signAndSubmitTransaction = async (
       await notifyWalletSignRequest();
 
       let result: any;
+      let methodCalled = 'stellar_signAndSubmitXDR';
       try {
         result = await provider.client.request({
           topic,
@@ -185,6 +186,7 @@ export const signAndSubmitTransaction = async (
           submitErr?.code === -32601;
 
         if (isUnsupported) {
+          methodCalled = 'stellar_signXDR';
           result = await provider.client.request({
             topic,
             chainId,
@@ -207,6 +209,12 @@ export const signAndSubmitTransaction = async (
         return { success: true, hash: result.hash || computedHash };
       }
 
+      if (methodCalled === 'stellar_signAndSubmitXDR' && typeof result === 'string') {
+        if (sourceAddress)
+          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        return { success: true, hash: result };
+      }
+
       const signedXdr =
         result?.signedXDR || result?.signedTxXdr || (typeof result === 'string' ? result : null);
       if (signedXdr) {
@@ -222,6 +230,7 @@ export const signAndSubmitTransaction = async (
     if (typeof provider?.request === 'function') {
       await notifyWalletSignRequest();
       let result: any;
+      let methodCalled = 'stellar_signAndSubmitXDR';
       try {
         result = await provider.request({
           method: 'stellar_signAndSubmitXDR',
@@ -239,6 +248,7 @@ export const signAndSubmitTransaction = async (
           reqErr?.code === -32601;
 
         if (isUnsupported) {
+          methodCalled = 'stellar_signXDR';
           result = await provider.request({
             method: 'stellar_signXDR',
             params: {
@@ -259,6 +269,12 @@ export const signAndSubmitTransaction = async (
         if (sourceAddress)
           StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
         return { success: true, hash: result.hash || computedHash };
+      }
+
+      if (methodCalled === 'stellar_signAndSubmitXDR' && typeof result === 'string') {
+        if (sourceAddress)
+          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        return { success: true, hash: result };
       }
 
       const signedXdr =

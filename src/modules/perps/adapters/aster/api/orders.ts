@@ -45,12 +45,9 @@ export async function placeOrder(
     p.price = params.price;
   }
 
-  // TimeInForce is ONLY for LIMIT, STOP, TAKE_PROFIT (NEVER for MARKET or TRAILING_STOP_MARKET)
-  if (
-    (orderType === 'LIMIT' || orderType === 'STOP' || orderType === 'TAKE_PROFIT') &&
-    params.timeInForce
-  ) {
-    p.timeInForce = params.timeInForce;
+  // TimeInForce is REQUIRED for LIMIT, STOP, TAKE_PROFIT (NEVER for MARKET or TRAILING_STOP_MARKET)
+  if (orderType === 'LIMIT' || orderType === 'STOP' || orderType === 'TAKE_PROFIT') {
+    p.timeInForce = params.timeInForce || 'GTC';
   }
 
   // StopPrice for STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET
@@ -66,17 +63,15 @@ export async function placeOrder(
     p.stopPrice = params.stopPrice;
   }
 
-  // Trailing stop specific parameters
+  // Trailing stop specific parameters (POST /fapi/v3/order)
   if (orderType === 'TRAILING_STOP_MARKET') {
-    if (params.callbackRate !== undefined && params.callbackRate !== '') {
-      p.callbackRate = params.callbackRate;
-    }
+    p.callbackRate = params.callbackRate ? String(params.callbackRate) : '1.0';
     if (
       params.activationPrice !== undefined &&
       params.activationPrice !== '' &&
       params.activationPrice !== '0'
     ) {
-      p.activationPrice = params.activationPrice;
+      p.activationPrice = String(params.activationPrice);
     }
   }
 
@@ -111,9 +106,7 @@ export async function placeOrder(
     p.newClientOrderId = params.newClientOrderId;
   }
 
-  if (params.newOrderRespType !== undefined) {
-    p.newOrderRespType = params.newOrderRespType;
-  }
+  p.newOrderRespType = params.newOrderRespType || 'RESULT';
 
   return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.ORDER, p);
 }
@@ -131,11 +124,17 @@ export async function placeChaseOrder(
   };
 
   if (params.positionSide !== undefined) p.positionSide = params.positionSide;
-  if (params.reduceOnly !== undefined) p.reduceOnly = String(params.reduceOnly);
-  if (params.chaseOffset !== undefined) p.chaseOffset = params.chaseOffset;
-  if (params.chaseOffsetType !== undefined) p.chaseOffsetType = params.chaseOffsetType;
-  if (params.maxChaseOffset !== undefined) p.maxChaseOffset = params.maxChaseOffset;
-  if (params.maxChaseOffsetType !== undefined) p.maxChaseOffsetType = params.maxChaseOffsetType;
+  if (params.reduceOnly === true || String(params.reduceOnly).toLowerCase() === 'true') {
+    p.reduceOnly = 'true';
+  }
+  if (params.chaseOffset !== undefined) {
+    p.chaseOffset = String(params.chaseOffset);
+    p.chaseOffsetType = params.chaseOffsetType || 'ABSOLUTE';
+  }
+  if (params.maxChaseOffset !== undefined && parseFloat(String(params.maxChaseOffset)) > 0) {
+    p.maxChaseOffset = String(params.maxChaseOffset);
+    p.maxChaseOffsetType = params.maxChaseOffsetType || 'ABSOLUTE';
+  }
   if (params.timeInForce !== undefined) p.timeInForce = params.timeInForce;
   if (params.clientStrategyId !== undefined) p.clientStrategyId = params.clientStrategyId;
 

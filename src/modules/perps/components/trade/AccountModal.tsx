@@ -890,7 +890,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </a>
               ) : (
                 <a
-                  href="https://www.asterdex-testnet.com"
+                  href="https://www.asterdex-testnet.com/en/faucet"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-between p-3 bg-tertiary hover:bg-hover border border-color hover:border-amber-500/40 rounded-xl transition-all group"

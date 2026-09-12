@@ -35,9 +35,9 @@ vi.mock('../../services/Siweauthservice', () => ({
     refreshToken: 'mock-stellar-refresh',
   }),
   getCurrentTokenInfo: vi.fn().mockReturnValue(null),
-  getAccessToken: vi.fn().mockReturnValue(null),
   clearAccessToken: vi.fn(),
   isAuthenticated: vi.fn().mockReturnValue(false),
+  onJwtSessionSet: vi.fn().mockReturnValue(() => {}),
 }));
 
 describe('walletConnectStore', () => {

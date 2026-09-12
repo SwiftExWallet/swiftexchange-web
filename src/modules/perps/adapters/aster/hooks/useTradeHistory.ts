@@ -59,8 +59,19 @@ export const useTradeHistory = (
 
     const fetchHistory = async () => {
       try {
+        console.log('[Aster Trade History] Fetching trades with params:', {
+          userAddr,
+          symbol: symbol || undefined,
+          limit: PAGE_LIMIT,
+        });
         const data = await getUserTrades(signer, userAddr, symbol || undefined, {
           limit: PAGE_LIMIT,
+        });
+        console.log('[Aster Trade History] Raw response received from Aster API:', {
+          totalCount: Array.isArray(data) ? data.length : 0,
+          sampleRecord: Array.isArray(data) && data.length > 0 ? data[0] : null,
+          fields: Array.isArray(data) && data.length > 0 ? Object.keys(data[0]) : [],
+          data,
         });
         if (isMounted) {
           const sorted = sortDesc(Array.isArray(data) ? data : []);
@@ -70,7 +81,7 @@ export const useTradeHistory = (
           globalTradeCache[cacheKey] = { data: sorted, timestamp: Date.now(), hasMore: more };
         }
       } catch (err) {
-        console.error('Failed to load trade history:', err);
+        console.error('[Aster Trade History] Failed to load trade history:', err);
       } finally {
         if (isMounted) setIsLoading(false);
       }

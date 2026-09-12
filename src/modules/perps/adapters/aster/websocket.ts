@@ -1,4 +1,5 @@
 import { PerpEvent, perpEventBus } from '../../core/events';
+import { usePositionStore } from '../../core/stores/positionStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { tradeStore } from '../../core/stores/tradeStore';
 import { OrderbookEngine } from './OrderbookEngine';
@@ -274,6 +275,31 @@ export class AsterWebSocket {
       const store = useTickerStore.getState();
       const existing = store.getAssetCtx(uiSymbol) || AsterMapper.mapTicker({});
       store.setAssetCtx(uiSymbol, { ...existing, ...markData });
+
+      // Live update open position for this symbol
+      if (markData.markPx) {
+        const posState = usePositionStore.getState();
+        const pos =
+          posState.positions[uiSymbol] ||
+          posState.positions[uiSymbol.replace('-', '')] ||
+          posState.positions[(payload.s as string) || ''];
+        if (pos && parseFloat(pos.size || '0') !== 0) {
+          const markVal = parseFloat(markData.markPx);
+          const entryVal = parseFloat(pos.entryPrice || '0');
+          const sizeVal = parseFloat(pos.size || '0');
+          if (markVal > 0 && entryVal > 0) {
+            const isLong = sizeVal > 0;
+            const livePnl = isLong
+              ? (markVal - entryVal) * Math.abs(sizeVal)
+              : (entryVal - markVal) * Math.abs(sizeVal);
+            posState.updatePosition({
+              ...pos,
+              markPrice: markData.markPx,
+              unrealizedPnl: livePnl.toFixed(4),
+            });
+          }
+        }
+      }
       return;
     }
 
@@ -296,6 +322,32 @@ export class AsterWebSocket {
         contexts[uiSymbol] = { ...contexts[uiSymbol], ...AsterMapper.mapTicker(item) };
       } else if (item.e === 'markPriceUpdate') {
         contexts[uiSymbol] = { ...contexts[uiSymbol], ...AsterMapper.mapMarkPrice(item) };
+
+        // Live update position store on mark price tick
+        const markPxStr = item.p as string;
+        if (markPxStr) {
+          const posState = usePositionStore.getState();
+          const pos =
+            posState.positions[uiSymbol] ||
+            posState.positions[rawSymbol] ||
+            posState.positions[uiSymbol.replace('-', '')];
+          if (pos && parseFloat(pos.size || '0') !== 0) {
+            const markVal = parseFloat(markPxStr);
+            const entryVal = parseFloat(pos.entryPrice || '0');
+            const sizeVal = parseFloat(pos.size || '0');
+            if (markVal > 0 && entryVal > 0) {
+              const isLong = sizeVal > 0;
+              const livePnl = isLong
+                ? (markVal - entryVal) * Math.abs(sizeVal)
+                : (entryVal - markVal) * Math.abs(sizeVal);
+              posState.updatePosition({
+                ...pos,
+                markPrice: markPxStr,
+                unrealizedPnl: livePnl.toFixed(4),
+              });
+            }
+          }
+        }
       }
     }
 

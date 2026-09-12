@@ -902,14 +902,20 @@
 
 /* Scrollbar hide utility */
 .scrollbar-hide,
-.hide-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+.hide-scrollbar,
+.scrollbar-none,
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
 }
 
 .scrollbar-hide::-webkit-scrollbar,
-.hide-scrollbar::-webkit-scrollbar {
-  display: none;
+.hide-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 @keyframes slideUpModal {
@@ -1038,6 +1044,32 @@
   animation: size-flash-down 0.45s ease-out forwards;
 }
 
+@keyframes ob-flash-green {
+  0% {
+    background-color: rgba(34, 197, 94, 0.2);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes ob-flash-red {
+  0% {
+    background-color: rgba(239, 68, 68, 0.2);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.ob-flash-green {
+  animation: ob-flash-green 0.35s ease-out forwards;
+}
+
+.ob-flash-red {
+  animation: ob-flash-red 0.35s ease-out forwards;
+}
+
 .ob-depth-bar {
   position: absolute;
   inset-block: 0;
@@ -1045,31 +1077,31 @@
   pointer-events: none;
   transform-origin: right center;
   will-change: width;
-  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .ob-depth-bar--ask-soft {
-  background-color: rgba(239, 68, 68, 0.07);
+  background: linear-gradient(to left, rgba(239, 68, 68, 0.14), rgba(239, 68, 68, 0.02));
 }
 
 .ob-depth-bar--ask-strong {
-  background-color: rgba(239, 68, 68, 0.22);
+  background: linear-gradient(to left, rgba(239, 68, 68, 0.22), rgba(239, 68, 68, 0.04));
 }
 
 .ob-depth-bar--bid-soft {
-  background-color: rgba(34, 197, 94, 0.07);
+  background: linear-gradient(to left, rgba(34, 197, 94, 0.14), rgba(34, 197, 94, 0.02));
 }
 
 .ob-depth-bar--bid-strong {
-  background-color: rgba(34, 197, 94, 0.22);
+  background: linear-gradient(to left, rgba(34, 197, 94, 0.22), rgba(34, 197, 94, 0.04));
 }
 
 .ob-depth-bar--ask {
-  background-color: rgba(239, 68, 68, 0.12);
+  background: linear-gradient(to left, rgba(239, 68, 68, 0.15), transparent);
 }
 
 .ob-depth-bar--bid {
-  background-color: rgba(34, 197, 94, 0.12);
+  background: linear-gradient(to left, rgba(34, 197, 94, 0.15), transparent);
 }
 
 .ob-scroll::-webkit-scrollbar {

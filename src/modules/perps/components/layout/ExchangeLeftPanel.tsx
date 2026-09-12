@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
@@ -45,6 +46,9 @@ export const ExchangeChartPanel: React.FC<ExchangeChartPanelProps> = ({ hideTopB
 
 export const ExchangePositionsPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState('Positions');
+  const [historyTimeRange, setHistoryTimeRange] = useState<'1d' | '1w' | '1m' | '3m' | 'all'>('1w');
+  const [hideOtherSymbols, setHideOtherSymbols] = useState(false);
+  const [hideCanceled, setHideCanceled] = useState(false);
 
   const positions = usePositionStore(state => state.positions);
   const orders = useOrderStore(state => state.orders);
@@ -60,14 +64,34 @@ export const ExchangePositionsPanel: React.FC = () => {
       case 'Positions':
         return <PositionsTab signer={asterSigner} userAddr={userAddr!} />;
       case 'Open Orders':
-        return <OpenOrdersTab signer={asterSigner} userAddr={userAddr!} />;
+        return (
+          <OpenOrdersTab
+            signer={asterSigner}
+            userAddr={userAddr!}
+            hideOtherSymbols={hideOtherSymbols}
+            currentSymbol={selectedSymbol}
+          />
+        );
       case 'Order History':
         return (
-          <OrderHistoryTab signer={asterSigner} userAddr={userAddr!} asterSymbol={asterSymbol} />
+          <OrderHistoryTab
+            signer={asterSigner}
+            userAddr={userAddr!}
+            asterSymbol={asterSymbol}
+            timeRange={historyTimeRange}
+            hideOtherSymbols={hideOtherSymbols}
+            hideCanceled={hideCanceled}
+          />
         );
       case 'Trade History':
         return (
-          <TradeHistoryTab signer={asterSigner} userAddr={userAddr!} asterSymbol={asterSymbol} />
+          <TradeHistoryTab
+            signer={asterSigner}
+            userAddr={userAddr!}
+            asterSymbol={asterSymbol}
+            timeRange={historyTimeRange}
+            hideOtherSymbols={hideOtherSymbols}
+          />
         );
       case 'Transaction History':
         return <TransactionHistoryTab signer={asterSigner} userAddr={userAddr!} />;
@@ -113,8 +137,8 @@ export const ExchangePositionsPanel: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full relative min-w-0 ">
-      <div className="flex items-center px-3 h-9 border-b border-color text-[11px] text-secondary shrink-0 overflow-x-auto bg-secondary">
-        <div className="flex items-center gap-5 h-full whitespace-nowrap">
+      <div className="flex items-center justify-between px-3 h-9 border-b border-color text-[11px] text-secondary shrink-0 bg-secondary gap-3">
+        <div className="flex items-center gap-5 h-full whitespace-nowrap overflow-x-auto scrollbar-none">
           {tabs.map(tab => (
             <button
               key={tab}
@@ -139,6 +163,53 @@ export const ExchangePositionsPanel: React.FC = () => {
             </button>
           ))}
         </div>
+        {(activeTab === 'Open Orders' ||
+          activeTab === 'Order History' ||
+          activeTab === 'Trade History') && (
+          <div className="flex items-center gap-3 shrink-0 text-sm">
+            {(activeTab === 'Order History' || activeTab === 'Trade History') && (
+              <div className="relative inline-flex items-center">
+                <select
+                  value={historyTimeRange}
+                  onChange={e => setHistoryTimeRange(e.target.value as any)}
+                  className="bg-tertiary text-secondary hover:text-primary border border-color rounded px-2 py-0.5 text-[11px] outline-none cursor-pointer pr-5 appearance-none transition-colors"
+                >
+                  <option value="1d">1 day</option>
+                  <option value="1w">1 week</option>
+                  <option value="1m">1 month</option>
+                  <option value="3m">3 months</option>
+                  <option value="all">All</option>
+                </select>
+                <ChevronDown
+                  size={11}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
+                />
+              </div>
+            )}
+
+            <label className="flex text-sm items-center gap-1.5 text-secondary hover:text-primary cursor-pointer transition-colors select-none">
+              <input
+                type="checkbox"
+                checked={hideOtherSymbols}
+                onChange={e => setHideOtherSymbols(e.target.checked)}
+                className="rounded border-color bg-tertiary text-brand focus:ring-0 cursor-pointer w-3 h-3 text-sm"
+              />
+              <span className="text-sm">Hide other symbols</span>
+            </label>
+
+            {activeTab === 'Order History' && (
+              <label className="flex items-center gap-1.5 text-secondary hover:text-primary cursor-pointer transition-colors select-none">
+                <input
+                  type="checkbox"
+                  checked={hideCanceled}
+                  onChange={e => setHideCanceled(e.target.checked)}
+                  className="rounded border-color bg-tertiary text-brand focus:ring-0 cursor-pointer w-3 h-3 text-sm"
+                />
+                <span>Hide canceled</span>
+              </label>
+            )}
+          </div>
+        )}
       </div>
       <div className="flex-1 overflow-hidden relative bg-secondary">{renderTabContent()}</div>
     </div>

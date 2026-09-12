@@ -1,7 +1,9 @@
+import { Loader2, Receipt } from 'lucide-react';
 import React, { useCallback, useRef } from 'react';
 
 import { useTransactionHistory } from '../../../adapters/aster/hooks/useTransactionHistory';
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import { TabEmptyState } from './TabEmptyState';
 
 interface Props {
   signer: any;
@@ -62,11 +64,30 @@ export const TransactionHistoryTab: React.FC<Props> = ({ signer, userAddr }) => 
     }
   }, [loadMore, isLoadingMore, hasMore]);
 
+  if (isLoading && income.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 px-4 text-center w-full">
+        <Loader2 size={18} className="animate-spin text-muted mb-2" />
+        <span className="text-xs font-medium text-secondary">Loading transactions...</span>
+      </div>
+    );
+  }
+
+  if (income.length === 0) {
+    return (
+      <TabEmptyState
+        icon={Receipt}
+        title="No transaction history"
+        description="Your transaction records will appear here."
+      />
+    );
+  }
+
   return (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
-      className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-thin"
+      className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none"
     >
       <table className="w-full text-[11px] text-left whitespace-nowrap">
         <thead className="text-secondary border-b border-color sticky top-0 bg-secondary z-10">
@@ -78,40 +99,26 @@ export const TransactionHistoryTab: React.FC<Props> = ({ signer, userAddr }) => 
           </tr>
         </thead>
         <tbody>
-          {isLoading && income.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="px-4 py-8 text-center text-muted">
-                Loading transactions...
-              </td>
-            </tr>
-          ) : income.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="px-4 py-8 text-center text-muted">
-                No transaction history
-              </td>
-            </tr>
-          ) : (
-            income.map((inc, index) => {
-              const incVal = parseFloat(inc.income || '0');
-              return (
-                <tr
-                  key={`${inc.tranId || ''}-${inc.time || ''}-${index}`}
-                  className="border-b border-color hover:bg-hover transition-colors"
+          {income.map((inc, index) => {
+            const incVal = parseFloat(inc.income || '0');
+            return (
+              <tr
+                key={`${inc.tranId || ''}-${inc.time || ''}-${index}`}
+                className="border-b border-color hover:bg-hover transition-colors"
+              >
+                <td className="px-2.5 py-1.5 text-secondary">{formatDate(inc.time)}</td>
+                <td className="px-2.5 py-1.5 text-primary font-medium">
+                  {formatIncomeType(inc.incomeType)}
+                </td>
+                <td
+                  className={`px-2.5 py-1.5 font-mono-tabular ${incVal > 0 ? 'text-success' : incVal < 0 ? 'text-danger' : 'text-primary'}`}
                 >
-                  <td className="px-2.5 py-1.5 text-secondary">{formatDate(inc.time)}</td>
-                  <td className="px-2.5 py-1.5 text-primary font-medium">
-                    {formatIncomeType(inc.incomeType)}
-                  </td>
-                  <td
-                    className={`px-2.5 py-1.5 font-mono-tabular ${incVal > 0 ? 'text-success' : incVal < 0 ? 'text-danger' : 'text-primary'}`}
-                  >
-                    {inc.income} {inc.asset}
-                  </td>
-                  <td className="px-2.5 py-1.5 text-primary font-medium">{inc.symbol || '-'}</td>
-                </tr>
-              );
-            })
-          )}
+                  {inc.income} {inc.asset}
+                </td>
+                <td className="px-2.5 py-1.5 text-primary font-medium">{inc.symbol || '-'}</td>
+              </tr>
+            );
+          })}
           {isLoadingMore && (
             <tr>
               <td colSpan={4} className="px-4 py-1.5 text-center text-muted text-[10px]">

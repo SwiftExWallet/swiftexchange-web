@@ -20,6 +20,7 @@ export interface HyperliquidOrderRequest {
     | 'STOP_MARKET'
     | 'TAKE_PROFIT'
     | 'TAKE_PROFIT_MARKET'
+    | 'TRAILING_STOP_MARKET'
     | 'POST_ONLY';
   price: string | number;
   size: string | number;

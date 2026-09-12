@@ -1,3 +1,4 @@
+import { onJwtSessionSet } from '../modules/walletconnect/services/Siweauthservice';
 import { useWalletStore } from '../modules/walletconnect/store/walletConnectStore';
 import type { ApiResponse } from '../types/evm/apiResponse.type';
 import {
@@ -12,7 +13,172 @@ import {
   setPnlInflight,
   writeLocalCache,
 } from './apiCache';
-import { API_CONFIG } from './apiConfig';
+import { API_CONFIG, getValidDeviceToken, onDeviceTokenChange } from './apiConfig';
+
+export interface RegisterWalletPayload {
+  addresses: {
+    multi: string;
+    [key: string]: string;
+  };
+  isPrimary?: boolean;
+}
+
+export interface RegisterWalletResponse {
+  success?: boolean;
+  message?: string;
+  data?: any;
+  [key: string]: any;
+}
+
+const linkedWalletsCache = new Set<string>();
+const inflightWalletLinks = new Map<string, Promise<boolean>>();
+
+function getLinkCacheKey(token: string, address: string): string {
+  return `_sx_wallet_linked_${token.slice(-16)}_${address.toLowerCase()}`;
+}
+
+export function isWalletLinkedToDevice(walletAddress?: string, deviceToken?: string): boolean {
+  if (typeof window === 'undefined') return false;
+  // Only check against the real device_token, not the SIWE JWT
+  const token = deviceToken || getValidDeviceToken();
+  const address = walletAddress || getConnectedWalletAddress();
+  if (!token || !address) return false;
+  const key = getLinkCacheKey(token, address);
+  return linkedWalletsCache.has(key) || sessionStorage.getItem(key) === 'true';
+}
+
+export async function registerWalletToDevice(
+  walletAddress?: string,
+  deviceToken?: string
+): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  // IMPORTANT: Only use the real device_token (x-auth-device-token header).
+  // Do NOT fall back to the SIWE JWT — the backend /wallet route rejects it with 401.
+  const token = deviceToken || getValidDeviceToken();
+  const address = walletAddress || getConnectedWalletAddress();
+
+  if (!token || !address) {
+    return false;
+  }
+
+  const key = getLinkCacheKey(token, address);
+  if (linkedWalletsCache.has(key) || sessionStorage.getItem(key) === 'true') {
+    return true;
+  }
+
+  if (inflightWalletLinks.has(key)) {
+    return inflightWalletLinks.get(key)!;
+  }
+
+  const linkPromise = (async () => {
+    try {
+      const url = `${API_CONFIG.serverUrl}/wallet`;
+      const payload: RegisterWalletPayload = {
+        addresses: {
+          multi: address,
+        },
+        isPrimary: true,
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-device-token': token,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok || res.status === 409) {
+        linkedWalletsCache.add(key);
+        try {
+          sessionStorage.setItem(key, 'true');
+        } catch {
+          /* ignore storage quota */
+        }
+        return true;
+      }
+
+      console.warn(
+        `[apiService] Wallet registration returned status ${res.status}: ${res.statusText}`
+      );
+      return false;
+    } catch (err) {
+      console.warn('[apiService] Failed to register wallet to device token:', err);
+      return false;
+    } finally {
+      inflightWalletLinks.delete(key);
+    }
+  })();
+
+  inflightWalletLinks.set(key, linkPromise);
+  return linkPromise;
+}
+
+export async function ensureWalletLinkedToDevice(
+  walletAddress?: string,
+  deviceToken?: string
+): Promise<boolean> {
+  if (isWalletLinkedToDevice(walletAddress, deviceToken)) {
+    return true;
+  }
+  return registerWalletToDevice(walletAddress, deviceToken);
+}
+
+// Auto-link triggers when token or wallet address updates
+if (typeof window !== 'undefined') {
+  // Trigger 1: New device token received → link current wallet
+  onDeviceTokenChange(token => {
+    const address = getConnectedWalletAddress();
+    if (address && token) {
+      ensureWalletLinkedToDevice(address, token).catch(() => {});
+    }
+  });
+
+  // Trigger 2: JWT (accessToken) received → link its wallet address to device token
+  // Wallet address comes from the JWT payload; device_token read directly from localStorage.
+  // NOTE: we must use getValidDeviceToken() here — NOT API_CONFIG.deviceAuth which falls
+  // back to the SIWE JWT and would cause a 401 on the /wallet endpoint.
+  onJwtSessionSet((_accessToken, walletAddress) => {
+    if (!walletAddress) return;
+    const deviceToken = getValidDeviceToken();
+    if (!deviceToken) {
+      console.warn(
+        '[apiService] JWT received but no device_token in localStorage — skipping wallet link'
+      );
+      return;
+    }
+    console.log(
+      '[apiService] JWT received — linking wallet to device:',
+      walletAddress.slice(0, 10) + '...'
+    );
+    ensureWalletLinkedToDevice(walletAddress, deviceToken).catch(err => {
+      console.warn('[apiService] Failed to link wallet after JWT received:', err);
+    });
+  });
+
+  // Trigger 3: Wallet address changes in store → ensure link with current device token
+  try {
+    useWalletStore.subscribe(
+      state => {
+        const evmAddr = state.connectedWallets.evm?.address;
+        const stellarAddr = state.connectedWallets.stellar?.address;
+        return evmAddr || stellarAddr || '';
+      },
+      newAddress => {
+        if (newAddress) {
+          const token = API_CONFIG.deviceAuth;
+          if (token) {
+            ensureWalletLinkedToDevice(newAddress, token).catch(() => {});
+          }
+        }
+      }
+    );
+  } catch {
+    /* ignore store subscription errors during initialization */
+  }
+}
 
 async function fetchWithRetry(
   url: string,
@@ -100,6 +266,14 @@ export async function fetchApiResponseFromProxy<T>(
   keepalive: boolean = false,
   signal?: AbortSignal
 ): Promise<ApiResponse<T>> {
+  if (!endpoint.startsWith('/wallet') && !endpoint.startsWith('/device')) {
+    const token = API_CONFIG.deviceAuth;
+    const walletAddress = getConnectedWalletAddress();
+    if (token && walletAddress && !isWalletLinkedToDevice(walletAddress, token)) {
+      await ensureWalletLinkedToDevice(walletAddress, token);
+    }
+  }
+
   const res = await fetchWithRetry(
     `${API_CONFIG.serverUrl}${endpoint}`,
     {
@@ -121,6 +295,14 @@ export async function fetchApiResponseFromServer<T>(
   body?: unknown,
   retries?: number
 ): Promise<ApiResponse<T>> {
+  if (!endpoint.startsWith('/wallet') && !endpoint.startsWith('/device')) {
+    const token = API_CONFIG.deviceAuth;
+    const walletAddress = getConnectedWalletAddress();
+    if (token && walletAddress && !isWalletLinkedToDevice(walletAddress, token)) {
+      await ensureWalletLinkedToDevice(walletAddress, token);
+    }
+  }
+
   const res = await fetchWithRetry(
     `${API_CONFIG.serverUrl}${endpoint}`,
     { method, headers: makeHeaders(), body: body ? JSON.stringify(body) : undefined },

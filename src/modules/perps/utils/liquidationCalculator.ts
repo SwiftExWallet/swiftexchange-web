@@ -71,6 +71,12 @@ export function calculateLiquidationPrice({
 
   if (size.isZero() || entryPrice.lte(0)) return null;
 
+  // If the exchange already computed official liquidation price, use it directly
+  const officialLiq = new BigNumber(position.liquidationPrice || '0');
+  if (officialLiq.gt(0)) {
+    return officialLiq.toNumber();
+  }
+
   const isLong = size.gt(0);
   const absSize = size.abs();
   const notional = absSize.times(entryPrice);

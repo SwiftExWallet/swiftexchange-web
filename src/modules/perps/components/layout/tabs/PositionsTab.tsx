@@ -1,9 +1,12 @@
-import React, { memo, useMemo, useState } from 'react';
+import { Layers } from 'lucide-react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 
 import { ConfirmationModal } from '../../../../../components/common/ConfirmationModal';
+import { fetchAsterSnapshot } from '../../../adapters/aster/hooks/useAsterDataSync';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
+import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
 import { useUnifiedExecution } from '../../../services/useUnifiedExecution';
@@ -12,6 +15,7 @@ import {
   formatPricePrecision,
 } from '../../../utils/liquidationCalculator';
 import { PositionTpSlModal } from '../../trade/PositionTpSlModal';
+import { TabEmptyState } from './TabEmptyState';
 
 interface Props {
   signer?: any;
@@ -34,7 +38,12 @@ const PositionRow = memo(
     const [reverseModalOpen, setReverseModalOpen] = useState(false);
     const [tpSlModalOpen, setTpSlModalOpen] = useState(false);
 
-    const assetCtx = useTickerStore(state => state.assetCtxByMarket[position.symbol]);
+    const assetCtx = useTickerStore(
+      state =>
+        state.assetCtxByMarket[position.symbol] ||
+        state.assetCtxByMarket[position.symbol.replace('-', '')] ||
+        state.assetCtxByMarket[position.symbol.replace('USDT', '-USDT')]
+    );
     const {
       isReady,
       loading: isProcessing,
@@ -70,29 +79,51 @@ const PositionRow = memo(
     const sizeVal = parseFloat(position.size || '0');
     const absSize = Math.abs(sizeVal);
     const markVal = parseFloat(markPrice) || entryVal;
-    const leverage = position.leverage > 0 ? position.leverage : 20;
+    const storedLeverage =
+      useOrderEntryStore.getState().leverageBySymbol[position.symbol] ||
+      useOrderEntryStore.getState().leverageBySymbol[position.symbol.replace('-', '')] ||
+      useOrderEntryStore.getState().leverageBySymbol[position.symbol.replace('USDT', '-USDT')] ||
+      useOrderEntryStore.getState().leverage;
+
+    const leverage =
+      position.leverage && position.leverage > 0
+        ? position.leverage
+        : storedLeverage && storedLeverage > 0
+          ? storedLeverage
+          : 20;
 
     const notional = absSize * entryVal;
     const marginCalc =
       position.marginType === 'isolated' && parseFloat(position.isolatedMargin || '0') > 0
         ? parseFloat(position.isolatedMargin)
-        : notional / leverage;
+        : position.initialMargin && parseFloat(position.initialMargin) > 0
+          ? parseFloat(position.initialMargin)
+          : notional / leverage;
 
-    const pnlVal = isLong ? (markVal - entryVal) * absSize : (entryVal - markVal) * absSize;
+    const pnlVal =
+      markVal > 0 && entryVal > 0
+        ? isLong
+          ? (markVal - entryVal) * absSize
+          : (entryVal - markVal) * absSize
+        : position.unrealizedPnl != null && position.unrealizedPnl !== ''
+          ? parseFloat(position.unrealizedPnl)
+          : 0;
     const marginDenom = marginCalc === 0 ? 1 : marginCalc;
     const roe = (pnlVal / marginDenom) * 100;
 
     const breakEven = isLong ? entryVal * 1.0008 : entryVal * 0.9992;
 
+    const officialLiq = parseFloat(position.liquidationPrice || '0');
     const liqPrice = useMemo(() => {
+      if (officialLiq > 0) return officialLiq;
       return calculateLiquidationPrice({
-        position,
+        position: { ...position, leverage },
         allPositions,
         balances,
         isMultiAsset,
         bracketsBySymbol,
       });
-    }, [position, allPositions, balances, isMultiAsset, bracketsBySymbol]);
+    }, [officialLiq, position, leverage, allPositions, balances, isMultiAsset, bracketsBySymbol]);
 
     const tickSize = market?.tickSize;
     const baseSymbol = position.symbol.replace('-USDT', '').replace('USDT', '');
@@ -327,14 +358,30 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
 
   const positionList = useMemo(() => Object.values(positions), [positions]);
 
+  useEffect(() => {
+    if (signer && userAddr) {
+      fetchAsterSnapshot(signer, userAddr).catch(() => {});
+    }
+  }, [signer, userAddr]);
+
   const handleConfirmCloseAll = async () => {
     if (!isReady) return;
     await closeAllPositions(positionList);
     setCloseAllModalOpen(false);
   };
 
+  if (positionList.length === 0) {
+    return (
+      <TabEmptyState
+        icon={Layers}
+        title="No open positions"
+        description="You currently have no open positions."
+      />
+    );
+  }
+
   return (
-    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-thin">
+    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none">
       <table className="w-full text-[11px] text-left whitespace-nowrap">
         <thead className="text-secondary border-b border-color sticky top-0 bg-secondary z-10">
           <tr>
@@ -368,26 +415,18 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
           </tr>
         </thead>
         <tbody>
-          {positionList.length === 0 ? (
-            <tr>
-              <td colSpan={11} className="px-4 py-8 text-center text-muted">
-                No positions found
-              </td>
-            </tr>
-          ) : (
-            positionList.map(p => (
-              <PositionRow
-                key={p.symbol}
-                position={p}
-                allPositions={positionList}
-                balances={balances}
-                isMultiAsset={isMultiAsset}
-                bracketsBySymbol={bracketsBySymbol}
-                signer={signer}
-                userAddr={userAddr}
-              />
-            ))
-          )}
+          {positionList.map(p => (
+            <PositionRow
+              key={p.symbol}
+              position={p}
+              allPositions={positionList}
+              balances={balances}
+              isMultiAsset={isMultiAsset}
+              bracketsBySymbol={bracketsBySymbol}
+              signer={signer}
+              userAddr={userAddr}
+            />
+          ))}
         </tbody>
       </table>
 

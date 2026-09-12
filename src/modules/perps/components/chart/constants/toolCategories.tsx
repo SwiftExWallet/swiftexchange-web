@@ -355,6 +355,7 @@ export const TIMEFRAMES: { value: import('../types').CandleResolution; label: st
   { value: '1HOUR', label: '1H' },
   { value: '4HOURS', label: '4H' },
   { value: '1DAY', label: '1D' },
+  { value: '1WEEK', label: '1W' },
 ];
 
 export const MAX_INDICATORS = 4;

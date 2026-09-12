@@ -111,16 +111,35 @@ export async function submit1InchFusionOrder(
   isCrossChain?: boolean,
   isNative?: boolean
 ): Promise<any> {
+  const isNativeOrder = Boolean(isNative || request?.txHash);
+
   let endpoint: string;
-  if (isNative) {
+  let payload: any;
+
+  if (isNativeOrder) {
     endpoint = `/swap/1inch/submitFusionPlusNativeOrder`;
+    payload = {
+      orderHash: request.orderHash,
+      txHash: request.txHash,
+      srcChain: request.srcChain || request.chain,
+    };
   } else if (isCrossChain) {
     endpoint = `/swap/1inch/submitFusionPlusOrder`;
+    payload = {
+      chain: request.chain,
+      toChain: request.toChain,
+      order: request.order,
+      signature: request.signature,
+      extension: request.extension,
+      quoteId: request.quoteId,
+      orderHash: request.orderHash,
+    };
   } else {
     endpoint = `/swap/1inch/submitOrder`;
+    payload = request;
   }
 
-  const res = await fetchApiResponseFromProxy<any>(endpoint, 'POST', request);
+  const res = await fetchApiResponseFromProxy<any>(endpoint, 'POST', payload);
   const data = res.data?.data || res.data;
 
   if (!data) throw new Error('Failed to submit 1inch Fusion order');

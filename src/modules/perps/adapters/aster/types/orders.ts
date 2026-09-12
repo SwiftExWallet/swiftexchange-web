@@ -82,6 +82,7 @@ export interface AsterOrderResponse {
   priceProtect: boolean;
   reduceOnly: boolean;
   time?: number;
+  newChainData?: { hash?: string };
 }
 
 export interface CancelOrderParams {

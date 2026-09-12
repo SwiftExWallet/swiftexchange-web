@@ -7,9 +7,7 @@ import { getAllOrders } from '../api/orders';
 import type { AsterOrderResponse } from '../types/orders';
 
 const PAGE_LIMIT = 50;
-const CACHE_TTL = 30000; // 30 seconds
-
-// Module-level global cache that persists across tab switches
+const CACHE_TTL = 30000;
 const globalOrderCache: Record<
   string,
   { data: AsterOrderResponse[]; timestamp: number; hasMore: boolean }
@@ -63,9 +61,20 @@ export const useOrderHistory = (
 
     const fetchHistory = async () => {
       try {
+        console.log('[Aster Order History] Fetching orders with params:', {
+          userAddr,
+          symbol: symbol || undefined,
+          limit: PAGE_LIMIT,
+        });
         const data = await getAllOrders(signer, userAddr, {
           symbol: symbol || undefined,
           limit: PAGE_LIMIT,
+        });
+        console.log('[Aster Order History] Raw response received from Aster API:', {
+          totalCount: Array.isArray(data) ? data.length : 0,
+          sampleRecord: Array.isArray(data) && data.length > 0 ? data[0] : null,
+          fields: Array.isArray(data) && data.length > 0 ? Object.keys(data[0]) : [],
+          data,
         });
         if (isMounted) {
           const sorted = sortDesc(Array.isArray(data) ? data : []);
@@ -75,7 +84,7 @@ export const useOrderHistory = (
           globalOrderCache[cacheKey] = { data: sorted, timestamp: Date.now(), hasMore: more };
         }
       } catch (err) {
-        console.error('Failed to load order history:', err);
+        console.error('[Aster Order History] Failed to load order history:', err);
       } finally {
         if (isMounted) setIsLoading(false);
       }

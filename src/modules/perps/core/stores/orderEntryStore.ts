@@ -38,6 +38,8 @@ interface OrderEntryStoreState {
 
   chaseOffset: string;
   maxChaseOffset: string;
+  maxChaseDifferenceEnabled: boolean;
+  chasePriceMode: 'BBO' | 'GAP';
 
   scaledPriceLower: string;
   scaledPriceUpper: string;
@@ -79,6 +81,8 @@ interface OrderEntryStoreState {
 
   setChaseOffset: (offset: string) => void;
   setMaxChaseOffset: (offset: string) => void;
+  setMaxChaseDifferenceEnabled: (enabled: boolean) => void;
+  setChasePriceMode: (mode: 'BBO' | 'GAP') => void;
 
   setScaledPriceLower: (price: string) => void;
   setScaledPriceUpper: (price: string) => void;
@@ -124,8 +128,10 @@ const initialState = {
   callbackRate: '',
   workingType: 'CONTRACT_PRICE' as WorkingType,
 
-  chaseOffset: '',
+  chaseOffset: '0',
   maxChaseOffset: '',
+  maxChaseDifferenceEnabled: false,
+  chasePriceMode: 'BBO' as const,
 
   scaledPriceLower: '',
   scaledPriceUpper: '',
@@ -156,7 +162,25 @@ export const useOrderEntryStore = create<OrderEntryStoreState>()(
       ...initialState,
 
       setSide: side => set({ side }),
-      setOrderType: orderType => set({ orderType }),
+      setOrderType: orderType =>
+        set(state => ({
+          orderType,
+          ...(orderType === 'TRAILING_STOP_MARKET' && !state.callbackRate
+            ? { callbackRate: '1.0' }
+            : {}),
+          ...(orderType === 'CHASE'
+            ? {
+                chaseOffset: state.chaseOffset || '0',
+                maxChaseOffset: state.maxChaseOffset || '10',
+              }
+            : {}),
+          ...(orderType === 'SCALED'
+            ? {
+                scaledOrderCount: state.scaledOrderCount || '5',
+                scaledDistribution: state.scaledDistribution || 'FLAT',
+              }
+            : {}),
+        })),
       setSizeAsset: sizeAsset => set({ sizeAsset }),
       setSize: size => set({ size }),
       setPrice: price => set({ price }),
@@ -199,6 +223,8 @@ export const useOrderEntryStore = create<OrderEntryStoreState>()(
 
       setChaseOffset: chaseOffset => set({ chaseOffset }),
       setMaxChaseOffset: maxChaseOffset => set({ maxChaseOffset }),
+      setMaxChaseDifferenceEnabled: maxChaseDifferenceEnabled => set({ maxChaseDifferenceEnabled }),
+      setChasePriceMode: chasePriceMode => set({ chasePriceMode }),
 
       setScaledPriceLower: scaledPriceLower => set({ scaledPriceLower }),
       setScaledPriceUpper: scaledPriceUpper => set({ scaledPriceUpper }),

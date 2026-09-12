@@ -1,7 +1,33 @@
-import { Search, Settings, X } from 'lucide-react';
+import { ExternalLink, Search, Settings, X } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { type NotificationType, useNotificationStore } from '@/store/notificationStore';
+
+function renderSafeMessage(message: any): React.ReactNode {
+  if (typeof message === 'string' || typeof message === 'number') {
+    return message;
+  }
+  if (React.isValidElement(message)) {
+    return message;
+  }
+  if (message && typeof message === 'object') {
+    if (message.props && message.props.children) {
+      if (typeof message.props.children === 'string') {
+        return message.props.children;
+      }
+      if (Array.isArray(message.props.children)) {
+        return message.props.children
+          .map((c: any) => (typeof c === 'string' ? c : c?.props?.children || ''))
+          .filter(Boolean)
+          .join(' ');
+      }
+    }
+    if (typeof message.text === 'string') return message.text;
+    if (typeof message.message === 'string') return message.message;
+    return String(message.title || '');
+  }
+  return null;
+}
 
 interface NotificationPanelProps {
   isOpen: boolean;
@@ -155,7 +181,23 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
                       )}
                     </div>
                   </div>
-                  <div className="break-words text-[13px] text-secondary pr-6">{notif.message}</div>
+                  <div className="break-words text-[13px] text-secondary pr-6">
+                    {renderSafeMessage(notif.message)}
+                  </div>
+                  {notif.explorerUrl && (
+                    <div className="mt-1.5 pr-6">
+                      <a
+                        href={notif.explorerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline font-mono"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <span>View on Aster Explorer</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    </div>
+                  )}
                   <button
                     onClick={e => {
                       e.stopPropagation();

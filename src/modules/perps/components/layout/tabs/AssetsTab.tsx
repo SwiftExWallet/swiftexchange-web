@@ -1,4 +1,4 @@
-import { ArrowRightLeft, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowRightLeft, CheckCircle2, Loader2, RefreshCw, Wallet } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { useNotificationStore } from '../../../../../store/notificationStore';
@@ -9,6 +9,7 @@ import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { getCoinIconUrl } from '../../../services/coinIconService';
 import { Modal } from '../../ui/Modal';
+import { TabEmptyState } from './TabEmptyState';
 
 export const AssetsTab: React.FC = () => {
   const currentExchange = useExchangeManager(s => s.currentExchange);
@@ -88,8 +89,20 @@ export const AssetsTab: React.FC = () => {
 
   const targetBalance = assetToRebalance ? balances[assetToRebalance] : null;
 
+  const balanceList = Object.values(balances);
+
+  if (balanceList.length === 0) {
+    return (
+      <TabEmptyState
+        icon={Wallet}
+        title="No assets found"
+        description="Your margin asset balances will appear here."
+      />
+    );
+  }
+
   return (
-    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-thin">
+    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none">
       <table className="w-full text-[11px] text-left whitespace-nowrap">
         <thead className="text-secondary border-b border-color sticky top-0 bg-secondary z-10">
           <tr>
@@ -101,7 +114,7 @@ export const AssetsTab: React.FC = () => {
           </tr>
         </thead>
         <tbody>
-          {Object.values(balances).map(b => {
+          {balanceList.map(b => {
             const total = parseFloat(b.total || '0');
             const isNegative = total < 0;
             const iconUrl = logos[b.asset] || getCoinIconUrl(b.asset) || undefined;
@@ -179,13 +192,6 @@ export const AssetsTab: React.FC = () => {
               </tr>
             );
           })}
-          {Object.keys(balances).length === 0 && (
-            <tr>
-              <td colSpan={5} className="px-4 py-8 text-center text-muted">
-                No balances found
-              </td>
-            </tr>
-          )}
         </tbody>
       </table>
 

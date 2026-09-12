@@ -385,11 +385,17 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           `[WalletRequest:${networkTag}] ➔ Dispatching '${method}' on ${chainIdentifier} (${activeSession?.walletId || 'wallet'})`
         );
 
-        if (ctx.isSignRequestInFlight.get(signingType)) {
-          console.debug(
-            `[WalletRequest:${networkTag}] Re-entrant / parallel signing request '${method}' — delegating directly without duplicate lock`
-          );
+        if (this.__parentCalling) {
+          this.__parentCalling = false;
           return originalRequest.apply(this, args);
+        }
+
+        if (ctx.isSignRequestInFlight.get(signingType)) {
+          const error = new Error(
+            'A signing request is already in progress. Please wait or check your wallet.'
+          ) as any;
+          error.code = -32002;
+          throw error;
         }
         ctx.isSignRequestInFlight.set(signingType, true);
 
@@ -426,6 +432,10 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
             setTimeout(() => reject(new Error('SIGNATURE_TIMEOUT')), 120_000)
           );
 
+          if (provider?.client) {
+            provider.client.__parentCalling = true;
+          }
+
           const result = await Promise.race([originalRequest.apply(this, args), timeoutPromise]);
           console.info(
             `[WalletRequest:${networkTag}] ✓ '${method}' confirmed on ${chainIdentifier}`
@@ -449,6 +459,9 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           newErr.code = error?.code || -32603;
           throw newErr;
         } finally {
+          if (provider?.client) {
+            provider.client.__parentCalling = false;
+          }
           ctx.isSignRequestInFlight.set(signingType, false);
         }
       }

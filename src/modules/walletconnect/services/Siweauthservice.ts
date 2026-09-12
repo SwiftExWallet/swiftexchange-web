@@ -152,6 +152,29 @@ export function getCurrentTokenInfo(): AuthTokens | null {
   return currentToken;
 }
 
+// ============================================================================
+// JWT session change listeners
+// External code (e.g. apiService) can register here without circular imports.
+// ============================================================================
+
+type JwtSessionListener = (accessToken: string, walletAddress: string) => void;
+const jwtSessionListeners = new Set<JwtSessionListener>();
+
+export function onJwtSessionSet(listener: JwtSessionListener): () => void {
+  jwtSessionListeners.add(listener);
+  return () => jwtSessionListeners.delete(listener);
+}
+
+function fireJwtSessionListeners(accessToken: string, walletAddress: string): void {
+  jwtSessionListeners.forEach(listener => {
+    try {
+      listener(accessToken, walletAddress);
+    } catch (e) {
+      console.error('[auth] Error in JWT session listener:', e);
+    }
+  });
+}
+
 export function setAccessToken(tokens: AuthTokens, address?: string): void {
   currentToken = tokens;
   const userAddr = address || tokens.address || '';
@@ -164,6 +187,8 @@ export function setAccessToken(tokens: AuthTokens, address?: string): void {
       issuedAt: Date.now(),
       chainId: tokens.chainId,
     });
+    // Notify listeners (e.g. wallet-device linking) that a JWT was just set
+    fireJwtSessionListeners(tokens.accessToken, userAddr);
   }
 }
 
@@ -216,11 +241,10 @@ export async function verifySiwe(
   if (API_URL) {
     try {
       console.log('[auth] Verifying signature on backend:', `${API_URL}/signing/verify`);
+      // Backend only accepts { payload, signature } — extra fields cause 400
       const payloadBody = {
         payload: message,
         signature: signature,
-        address: options?.address,
-        chainId: options?.chainId,
       };
       console.log('[auth] Verify request body:', payloadBody);
 
@@ -294,6 +318,11 @@ export async function verifySiwe(
           message,
           signature,
         });
+        // Fire listeners immediately after verify succeeds so wallet-device linking triggers
+        // without waiting for a separate setAccessToken() call.
+        if (accessToken) {
+          fireJwtSessionListeners(accessToken, options.address);
+        }
       }
 
       return { accessToken, expiresIn, refreshToken };

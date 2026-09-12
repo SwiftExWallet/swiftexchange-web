@@ -1,7 +1,8 @@
-import { HelpCircle, Sparkles } from 'lucide-react';
+import { ExternalLink, HelpCircle, Sparkles } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { useNotificationStore } from '../../../../store/notificationStore';
+import { parseAsterError } from '../../adapters/aster/api/errors';
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
 import { useAsterDataSync } from '../../adapters/aster/hooks/useAsterDataSync';
 import { useOrders } from '../../adapters/aster/hooks/useOrders';
@@ -25,7 +26,12 @@ const useLiveTotalPnl = (positions: Record<string, any>) => {
 
   return Object.values(positions).reduce((acc, p) => {
     const isLong = parseFloat(p.size) > 0;
-    const markPrice = assetCtxByMarket[p.symbol]?.markPx || p.markPrice || '0';
+    const markPrice =
+      assetCtxByMarket[p.symbol]?.markPx ||
+      assetCtxByMarket[p.symbol.replace('-', '')]?.markPx ||
+      assetCtxByMarket[p.symbol.replace('USDT', '-USDT')]?.markPx ||
+      p.markPrice ||
+      '0';
     const entryVal = parseFloat(p.entryPrice);
     const markVal = parseFloat(markPrice);
     const absSize = Math.abs(parseFloat(p.size));
@@ -62,6 +68,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
   const asterAgent = useAsterAgent();
   const hyperliquidAgent = useHyperliquidAgent();
   const currentExchange = useExchangeManager(s => s.currentExchange);
+  const currentNetwork = useExchangeManager(s => s.currentNetwork);
   const activeAgent = currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
   const { userAddr } = activeAgent;
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
@@ -121,7 +128,10 @@ export const ExchangeOrderFormPanel: React.FC = () => {
       if (payload.sizeAsset === 'quote') {
         let conversionPrice = 1;
         if (
-          (payload.type === 'LIMIT' || payload.type === 'STOP' || payload.type === 'TAKE_PROFIT') &&
+          (payload.type === 'LIMIT' ||
+            payload.type === 'POST_ONLY' ||
+            payload.type === 'STOP' ||
+            payload.type === 'TAKE_PROFIT') &&
           payload.price
         ) {
           conversionPrice = parseFloat(payload.price);
@@ -139,6 +149,8 @@ export const ExchangeOrderFormPanel: React.FC = () => {
       const formattedPrice = formatPrecision(payload.price, currentMarket?.tickSize);
       const formattedStopPrice = formatPrecision(payload.stopPrice, currentMarket?.tickSize);
       const formattedActivation = formatPrecision(payload.activationPrice, currentMarket?.tickSize);
+
+      let res: any = null;
 
       if (payload.type === 'SCALED') {
         const pLower = parseFloat(payload.scaledPriceLower || '0');
@@ -180,14 +192,28 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         if (scaledOrders.length === 0)
           throw new Error('Calculated sizes are too small for market step size');
 
-        await placeBatch(scaledOrders);
+        const minNotional = currentMarket?.minNotional || 5.0;
+        for (const o of scaledOrders) {
+          const splitNotional = parseFloat(o.price) * parseFloat(o.quantity);
+          if (splitNotional < minNotional) {
+            throw new Error(
+              `Each split order must have at least $${minNotional.toFixed(2)} USDT notional (current split is $${splitNotional.toFixed(2)} USDT). Please increase total size or reduce order count.`
+            );
+          }
+        }
+
+        res = await placeBatch(scaledOrders);
       } else if (payload.type === 'CHASE') {
         const formattedChaseOffset =
           formatPrecision(payload.chaseOffset || '0', currentMarket?.tickSize) || '0';
         const formattedMaxChaseOffset =
-          formatPrecision(payload.maxChaseOffset || '10', currentMarket?.tickSize) || '10';
+          payload.maxChaseDifferenceEnabled &&
+          payload.maxChaseOffset &&
+          parseFloat(payload.maxChaseOffset) > 0
+            ? formatPrecision(payload.maxChaseOffset, currentMarket?.tickSize)
+            : undefined;
 
-        await placeChase({
+        res = await placeChase({
           symbol: payload.symbol.replace('-', ''),
           side: payload.side,
           quantity: formattedQty || payload.size,
@@ -198,15 +224,20 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         });
       } else {
         const isMarket = payload.type === 'MARKET';
-        await executeOrder({
+        const isTrailingStop = payload.type === 'TRAILING_STOP_MARKET';
+        const isPostOnly = payload.type === 'POST_ONLY';
+
+        res = await executeOrder({
           symbol: payload.symbol,
           side: payload.side,
           type: payload.type,
-          price: !isMarket ? formattedPrice || '0' : '0',
+          price: !isMarket && !isTrailingStop ? formattedPrice || '0' : '0',
           size: formattedQty || payload.size,
           reduceOnly: payload.isReduceOnly,
-          timeInForce: !isMarket ? (payload.isPostOnly ? 'GTX' : tif) : undefined,
-          stopPrice: !isMarket ? formattedStopPrice || formattedActivation : undefined,
+          timeInForce: !isMarket && !isTrailingStop ? (isPostOnly ? 'GTX' : tif) : undefined,
+          stopPrice: !isMarket && !isTrailingStop ? formattedStopPrice : undefined,
+          callbackRate: isTrailingStop ? payload.callbackRate || '1.0' : undefined,
+          activationPrice: isTrailingStop ? formattedActivation : undefined,
           currentPrice: currentMarketPrice,
         });
 
@@ -263,30 +294,37 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         }
       }
 
+      const txHash =
+        res?.newChainData?.hash || (Array.isArray(res) && res[0]?.newChainData?.hash) || undefined;
+      const explorerBase =
+        currentNetwork === 'testnet'
+          ? 'https://www.asterdex-testnet.com/en/explorer/tx/'
+          : 'https://www.asterdex.com/en/explorer/tx/';
+
+      const typeLabel =
+        payload.type === 'TRAILING_STOP_MARKET'
+          ? 'Trailing Stop'
+          : payload.type === 'POST_ONLY'
+            ? 'Post Only (Maker)'
+            : payload.type === 'CHASE'
+              ? 'Chase'
+              : payload.type === 'SCALED'
+                ? `Scaled (${payload.scaledOrderCount} orders)`
+                : payload.type;
+
       useNotificationStore.getState().showToast({
         type: 'DYDX',
         title: 'Order Placed',
         status: 'success',
-        message: `${payload.side} ${payload.type} ${formattedQty || payload.size} ${
-          payload.symbol.split('-')[0]
-        } placed successfully.`,
+        message: `${payload.side} ${typeLabel} ${formattedQty || payload.size} ${payload.symbol.split('-')[0]} placed successfully.`,
+        txHash: txHash || undefined,
+        explorerUrl: txHash ? `${explorerBase}${txHash}` : undefined,
       });
     } catch (err: any) {
       console.error('Failed to place order:', err);
-      let errorMsg = err?.userMessage || err?.message || 'Failed to place order';
-
-      // Fallback JSON parse just in case
-      try {
-        if (typeof errorMsg === 'string' && errorMsg.includes('{')) {
-          const jsonMatch = errorMsg.match(/\{.*\}/);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            if (parsed.msg) errorMsg = parsed.msg;
-          }
-        }
-      } catch {
-        /* ignore */
-      }
+      const parsedErr = parseAsterError(err);
+      const errorMsg =
+        parsedErr.userMessage || err?.userMessage || err?.message || 'Failed to place order';
 
       useNotificationStore.getState().showToast({
         type: 'DYDX',
@@ -384,14 +422,16 @@ export const ExchangeAccountPanel: React.FC = () => {
       <div className="space-y-2.5">
         {/* Action Buttons */}
         {currentNetwork === 'testnet' && isAster ? (
-          <button
-            type="button"
-            onClick={() => handleOpenAccount('faucet')}
+          <a
+            href="https://www.asterdex-testnet.com/en/faucet"
+            target="_blank"
+            rel="noopener noreferrer"
             className="w-full bg-gradient-to-r from-amber-500/20 to-brand/20 hover:from-amber-500/30 hover:to-brand/30 text-amber-300 border border-amber-500/40 py-2 rounded-md text-[12px] font-semibold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm"
           >
             <Sparkles size={14} className="text-amber-400" />
-            Claim Aster Faucet
-          </button>
+            <span>Claim Aster Faucet</span>
+            <ExternalLink size={12} className="opacity-70" />
+          </a>
         ) : (
           <div className="flex gap-1.5">
             <button

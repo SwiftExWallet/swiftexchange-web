@@ -20,6 +20,176 @@ import {
 import { getOpenOrders } from '../api/orders';
 import { useUserDataStream } from './useUserDataStream';
 
+export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
+  useAccountStore.getState().setIsLoading(true);
+  try {
+    const [
+      accountInfo,
+      positionRisk,
+      openOrdersResponse,
+      _leverageBracketResponse,
+      multiAssetResponse,
+    ] = await Promise.all([
+      getAccountInfo(signer, userAddr),
+      getPositionRisk(signer, userAddr),
+      getOpenOrders(signer, userAddr),
+      getLeverageBracket(signer, userAddr),
+      getMultiAssetsMargin(signer, userAddr),
+    ]);
+
+    const tickerCtxs = useTickerStore.getState().assetCtxByMarket;
+    const mappedBalances = (accountInfo.assets || []).map((a: any) => {
+      const walletBal = new BigNumber(a.walletBalance || '0');
+      const availBal = new BigNumber(a.availableBalance || a.crossWalletBalance || '0');
+
+      let usdVal = walletBal;
+      if (a.asset === 'USDT' || a.asset === 'USDC' || a.asset === 'USD') {
+        usdVal = walletBal;
+      } else {
+        const markPx =
+          tickerCtxs[`${a.asset}-USDT`]?.markPx ||
+          tickerCtxs[`${a.asset}USDT`]?.markPx ||
+          tickerCtxs[`${a.asset}-USDC`]?.markPx ||
+          tickerCtxs[`${a.asset}USDC`]?.markPx;
+        if (markPx && parseFloat(markPx) > 0) {
+          usdVal = walletBal.times(markPx);
+        } else if (a.asset === 'ASTER') {
+          usdVal = walletBal.times('0.7483');
+        }
+      }
+
+      return {
+        asset: a.asset,
+        total: a.walletBalance,
+        available: a.availableBalance || a.crossWalletBalance || '0',
+        locked: walletBal.minus(availBal).toString(),
+        marginBalance: a.marginBalance || a.crossWalletBalance || a.walletBalance || '0',
+        unrealizedPnl: a.unrealizedProfit || '0',
+        usdValue: usdVal.toFixed(2),
+        discountRate: a.asset === 'ASTER' ? '5%' : undefined,
+      };
+    });
+
+    const mappedPositions = (positionRisk || [])
+      .map(p => {
+        const symbol = p.symbol.replace('USDT', '-USDT');
+        const lev =
+          Number(p.leverage) ||
+          useOrderEntryStore.getState().leverageBySymbol[symbol] ||
+          useOrderEntryStore.getState().leverageBySymbol[p.symbol] ||
+          useOrderEntryStore.getState().leverage ||
+          0;
+        return {
+          symbol,
+          size: p.positionAmt,
+          entryPrice: p.entryPrice,
+          markPrice: p.markPrice,
+          liquidationPrice: p.liquidationPrice,
+          unrealizedPnl: p.unRealizedProfit,
+          leverage: lev,
+          marginType:
+            p.marginType?.toLowerCase() === 'isolated' ? ('isolated' as const) : ('cross' as const),
+          isolatedMargin: p.isolatedMargin || '0',
+          initialMargin: (p as any).initialMargin || (p as any).positionInitialMargin || '0',
+        };
+      })
+      .filter(p => !new BigNumber(p.size || '0').isZero());
+
+    if (Array.isArray(positionRisk)) {
+      positionRisk.forEach(p => {
+        const sym = p.symbol.replace('USDT', '-USDT');
+        const lev = Number(p.leverage);
+        const mt =
+          p.marginType?.toLowerCase() === 'isolated' ? ('isolated' as const) : ('cross' as const);
+        if (lev && lev > 0) {
+          useOrderEntryStore.getState().setSymbolSettings(sym, lev, mt);
+        }
+      });
+      const curSym = useMarketStore.getState().selectedSymbol;
+      if (curSym) {
+        useOrderEntryStore.getState().syncForSymbol(curSym);
+      }
+    }
+
+    const mappedOrders = (openOrdersResponse || []).map(o => {
+      const symbol = o.symbol.replace('USDT', '-USDT');
+      const lev =
+        useOrderEntryStore.getState().leverageBySymbol[symbol] ||
+        useOrderEntryStore.getState().leverageBySymbol[o.symbol] ||
+        useOrderEntryStore.getState().leverage ||
+        20;
+      const mt =
+        useOrderEntryStore.getState().marginTypeBySymbol[symbol] ||
+        useOrderEntryStore.getState().marginTypeBySymbol[o.symbol] ||
+        useOrderEntryStore.getState().marginType ||
+        'cross';
+
+      return {
+        id: String(o.orderId),
+        symbol,
+        type: (o.type || 'LIMIT').toLowerCase() as any,
+        rawType: o.type,
+        origType: o.origType,
+        side: (o.side || 'BUY').toLowerCase() as any,
+        price: o.price,
+        size: o.origQty,
+        filledSize: o.executedQty,
+        cumQuote: o.cumQuote,
+        avgPrice: o.avgPrice,
+        status: (o.status || 'NEW').toLowerCase() as any,
+        reduceOnly: o.reduceOnly || false,
+        timestamp: o.time || o.updateTime || Date.now(),
+        stopPrice: o.stopPrice,
+        workingType: o.workingType,
+        callbackRate: (o as any).callbackRate,
+        activationPrice: (o as any).activationPrice,
+        leverage: lev,
+        marginType: mt,
+        hash: o.newChainData?.hash,
+        timeInForce: o.timeInForce,
+      };
+    });
+
+    useAccountStore.getState().setBalances(mappedBalances, {
+      totalWalletBalance: accountInfo.totalWalletBalance,
+      totalMarginBalance: accountInfo.totalMarginBalance,
+      availableBalance: accountInfo.availableBalance,
+      totalUnrealizedProfit: accountInfo.totalUnrealizedProfit,
+    });
+
+    if (multiAssetResponse && typeof multiAssetResponse.multiAssetsMargin !== 'undefined') {
+      useAccountStore.getState().setMultiAssetsMargin(multiAssetResponse.multiAssetsMargin);
+    }
+
+    if (Array.isArray(_leverageBracketResponse) && _leverageBracketResponse.length > 0) {
+      const bracketsMap: Record<string, any[]> = {};
+      _leverageBracketResponse.forEach((lb: any) => {
+        if (lb.symbol && Array.isArray(lb.brackets)) {
+          bracketsMap[lb.symbol] = lb.brackets.map((rb: any) => ({
+            bracket: rb.bracket,
+            initialLeverage: rb.initialLeverage,
+            notionalCap: rb.notionalCap,
+            notionalFloor: rb.notionalFloor,
+            maintMarginRatio: rb.maintMarginRatio,
+            cum: rb.cum,
+          }));
+        }
+      });
+      useLeverageStore.getState().setAllBrackets(bracketsMap);
+    }
+
+    usePositionStore.getState().setPositions(mappedPositions);
+    useOrderStore.getState().setOrders(mappedOrders);
+
+    return { mappedPositions, mappedBalances, mappedOrders };
+  } catch (err) {
+    console.error('[aster] Failed to fetch REST snapshot:', err);
+    throw err;
+  } finally {
+    useAccountStore.getState().setIsLoading(false);
+  }
+}
+
 export function useAsterDataSync(signer: Signer | null, userAddr: string | null) {
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const [isRestSynced, setIsRestSynced] = useState(false);
@@ -31,7 +201,7 @@ export function useAsterDataSync(signer: Signer | null, userAddr: string | null)
       return;
     }
 
-    if (!signer || !userAddr) {
+    if (!userAddr) {
       setIsRestSynced(false);
       useAccountStore.getState().setBalances([]);
       usePositionStore.getState().setPositions([]);
@@ -39,156 +209,17 @@ export function useAsterDataSync(signer: Signer | null, userAddr: string | null)
       return;
     }
 
-    let isMounted = true;
-
-    async function fetchSnapshot() {
-      useAccountStore.getState().setIsLoading(true);
-      try {
-        const [
-          accountInfo,
-          positionRisk,
-          openOrdersResponse,
-          _leverageBracketResponse,
-          multiAssetResponse,
-        ] = await Promise.all([
-          getAccountInfo(signer!, userAddr!),
-          getPositionRisk(signer!, userAddr!),
-          getOpenOrders(signer!, userAddr!),
-          getLeverageBracket(signer!, userAddr!),
-          getMultiAssetsMargin(signer!, userAddr!),
-        ]);
-
-        if (!isMounted) return;
-
-        const tickerCtxs = useTickerStore.getState().assetCtxByMarket;
-        const mappedBalances = (accountInfo.assets || []).map((a: any) => {
-          const walletBal = new BigNumber(a.walletBalance || '0');
-          const availBal = new BigNumber(a.availableBalance || a.crossWalletBalance || '0');
-
-          let usdVal = walletBal;
-          if (a.asset === 'USDT' || a.asset === 'USDC' || a.asset === 'USD') {
-            usdVal = walletBal;
-          } else {
-            const markPx =
-              tickerCtxs[`${a.asset}-USDT`]?.markPx ||
-              tickerCtxs[`${a.asset}USDT`]?.markPx ||
-              tickerCtxs[`${a.asset}-USDC`]?.markPx ||
-              tickerCtxs[`${a.asset}USDC`]?.markPx;
-            if (markPx && parseFloat(markPx) > 0) {
-              usdVal = walletBal.times(markPx);
-            } else if (a.asset === 'ASTER') {
-              usdVal = walletBal.times('0.7483');
-            }
-          }
-
-          return {
-            asset: a.asset,
-            total: a.walletBalance,
-            available: a.availableBalance || a.crossWalletBalance || '0',
-            locked: walletBal.minus(availBal).toString(),
-            marginBalance: a.marginBalance || a.crossWalletBalance || a.walletBalance || '0',
-            unrealizedPnl: a.unrealizedProfit || '0',
-            usdValue: usdVal.toFixed(2),
-            discountRate: a.asset === 'ASTER' ? '5%' : undefined,
-          };
-        });
-
-        const mappedPositions = (positionRisk || [])
-          .map(p => {
-            const symbol = p.symbol.replace('USDT', '-USDT');
-            return {
-              symbol,
-              size: p.positionAmt,
-              entryPrice: p.entryPrice,
-              markPrice: p.markPrice,
-              liquidationPrice: p.liquidationPrice,
-              unrealizedPnl: p.unRealizedProfit,
-              leverage: new BigNumber(p.leverage || '0').toNumber(),
-              marginType:
-                p.marginType?.toLowerCase() === 'isolated'
-                  ? ('isolated' as const)
-                  : ('cross' as const),
-              isolatedMargin: p.isolatedMargin || '0',
-            };
-          })
-          .filter(p => !new BigNumber(p.size || '0').isZero());
-
-        if (Array.isArray(positionRisk)) {
-          positionRisk.forEach(p => {
-            const sym = p.symbol.replace('USDT', '-USDT');
-            const lev = Number(p.leverage);
-            const mt =
-              p.marginType?.toLowerCase() === 'isolated'
-                ? ('isolated' as const)
-                : ('cross' as const);
-            if (lev && lev > 0) {
-              useOrderEntryStore.getState().setSymbolSettings(sym, lev, mt);
-            }
-          });
-          const curSym = useMarketStore.getState().selectedSymbol;
-          if (curSym) {
-            useOrderEntryStore.getState().syncForSymbol(curSym);
-          }
-        }
-
-        const mappedOrders = (openOrdersResponse || []).map(o => {
-          const symbol = o.symbol.replace('USDT', '-USDT');
-          return {
-            id: String(o.orderId),
-            symbol,
-            type: (o.type || 'LIMIT').toLowerCase() as any,
-            side: (o.side || 'BUY').toLowerCase() as any,
-            price: o.price,
-            size: o.origQty,
-            filledSize: o.executedQty,
-            status: (o.status || 'NEW').toLowerCase() as any,
-            reduceOnly: o.reduceOnly || false,
-            timestamp: o.updateTime || Date.now(),
-          };
-        });
-
-        useAccountStore.getState().setBalances(mappedBalances, {
-          totalWalletBalance: accountInfo.totalWalletBalance,
-          totalMarginBalance: accountInfo.totalMarginBalance,
-          availableBalance: accountInfo.availableBalance,
-          totalUnrealizedProfit: accountInfo.totalUnrealizedProfit,
-        });
-
-        if (multiAssetResponse && typeof multiAssetResponse.multiAssetsMargin !== 'undefined') {
-          useAccountStore.getState().setMultiAssetsMargin(multiAssetResponse.multiAssetsMargin);
-        }
-
-        if (Array.isArray(_leverageBracketResponse) && _leverageBracketResponse.length > 0) {
-          const bracketsMap: Record<string, any[]> = {};
-          _leverageBracketResponse.forEach((lb: any) => {
-            if (lb.symbol && Array.isArray(lb.brackets)) {
-              bracketsMap[lb.symbol] = lb.brackets.map((rb: any) => ({
-                bracket: rb.bracket,
-                initialLeverage: rb.initialLeverage,
-                notionalCap: rb.notionalCap,
-                notionalFloor: rb.notionalFloor,
-                maintMarginRatio: rb.maintMarginRatio,
-                cum: rb.cum,
-              }));
-            }
-          });
-          useLeverageStore.getState().setAllBrackets(bracketsMap);
-        }
-
-        usePositionStore.getState().setPositions(mappedPositions);
-        useOrderStore.getState().setOrders(mappedOrders);
-
-        setIsRestSynced(true);
-      } catch (err) {
-        console.error('[aster] Failed to fetch REST snapshot:', err);
-      } finally {
-        if (isMounted) {
-          useAccountStore.getState().setIsLoading(false);
-        }
-      }
+    if (!signer) {
+      return;
     }
 
-    fetchSnapshot();
+    let isMounted = true;
+
+    fetchAsterSnapshot(signer, userAddr)
+      .then(() => {
+        if (isMounted) setIsRestSynced(true);
+      })
+      .catch(() => {});
 
     return () => {
       isMounted = false;

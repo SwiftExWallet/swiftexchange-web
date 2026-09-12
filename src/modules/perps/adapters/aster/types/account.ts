@@ -127,6 +127,7 @@ export interface AsterUserTrade {
   qty: string;
   quoteQty: string;
   realizedPnl: string;
+  marginAsset?: string;
   side: string;
   positionSide: string;
   symbol: string;
