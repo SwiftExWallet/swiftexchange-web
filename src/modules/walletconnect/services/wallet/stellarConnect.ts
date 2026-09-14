@@ -32,6 +32,7 @@ export async function connectStellar(
       const stellarProviderMap: Record<string, any> = {
         freighter: win.freighterApi ?? win.freighter,
         lobstr: win.lobstr,
+        hotwallet: win.ethereum?.isHotWallet ? win.ethereum : undefined,
       };
 
       const provider = stellarProviderMap[walletId];
@@ -105,7 +106,7 @@ export async function connectStellarWalletConnectSingle(
 
   const namespaces = {
     stellar: {
-      methods: ['stellar_signXDR', 'stellar_signAndSubmitXDR'],
+      methods: ['stellar_signXDR', 'stellar_signAndSubmitXDR', 'stellar_signTransaction'],
       chains: [stellarChain],
       events: ['accountsChanged'],
     },
@@ -119,10 +120,15 @@ export async function connectStellarWalletConnectSingle(
       'a4604022bf9199ca6d762c5663d8a6186a9ca4b607b9dcb29bcb81054d6f1091', // SwiftEx Wallet
       '76a3d548a08cf402f5c7d021f24fd2881d767084b387a5325df88bc3d4b6f21b', // Lobstr
       '997a355c8f682468706a76cff1b004a7115f505fb962dac54b6e9b442dd1c380', // Freighter
-      'aee5083aac025c4c3f1c9afc31ea89dbddca0b1c248195bef469fc4886ae3ab2', //HOt Walet
+      'aee5083aac025c4c3f1c9afc31ea89dbddca0b1c248195bef469fc4886ae3ab2', // HOT Wallet
     ],
   });
   ctx.modals.set('stellar', modal);
+
+  const connectParams =
+    ctx.currentNetwork === 'testnet'
+      ? { optionalNamespaces: namespaces, requiredNamespaces: {} }
+      : { namespaces };
 
   return new Promise((resolve, reject) => {
     let modalOpened = false;
@@ -144,6 +150,7 @@ export async function connectStellarWalletConnectSingle(
     };
 
     const cleanup = () => {
+      ctx.cancelActiveConnection = undefined;
       clearTimeout(timeout);
       unsubscribe();
       try {
@@ -155,6 +162,12 @@ export async function connectStellarWalletConnectSingle(
       } catch {
         // ignore
       }
+    };
+
+    ctx.cancelActiveConnection = (reason = 'Connection cancelled by user') => {
+      cleanup();
+      modal.closeModal();
+      reject(new Error(reason));
     };
 
     const timeout = setTimeout(() => {
@@ -176,7 +189,7 @@ export async function connectStellarWalletConnectSingle(
     provider.on('display_uri', onDisplayUri);
 
     provider
-      .connect({ namespaces })
+      .connect(connectParams as any)
       .then((session: any) => {
         cleanup();
         modal.closeModal();

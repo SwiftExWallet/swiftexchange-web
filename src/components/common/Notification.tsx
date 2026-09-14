@@ -1,3 +1,4 @@
+import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
 import React, { useEffect } from 'react';
 
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
@@ -31,54 +32,58 @@ export const Notification: React.FC<NotificationProps> = ({
     }
   }, [autoClose, autoCloseDuration, onClose]);
 
-  const styles = {
+  const config = {
     success: {
-      icon: '✓',
-      iconColor: 'text-green-500 dark:text-green-400',
-      iconBg: 'bg-green-500/10 border border-green-500/20',
+      icon: <CheckCircle2 size={16} className="text-emerald-400" />,
+      badgeBg: 'bg-emerald-500/10 border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.15)]',
+      borderAccent: 'border-l-emerald-500',
     },
     error: {
-      icon: '✕',
-      iconColor: 'text-red-500 dark:text-red-400',
-      iconBg: 'bg-red-500/10 border border-red-500/20',
+      icon: <XCircle size={16} className="text-rose-400" />,
+      badgeBg: 'bg-rose-500/10 border-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.15)]',
+      borderAccent: 'border-l-rose-500',
     },
     warning: {
-      icon: '⚠',
-      iconColor: 'text-yellow-500 dark:text-yellow-400',
-      iconBg: 'bg-yellow-500/10 border border-yellow-500/20',
+      icon: <AlertTriangle size={16} className="text-amber-400" />,
+      badgeBg: 'bg-amber-500/10 border-amber-500/20 shadow-[0_0_12px_rgba(245,158,11,0.15)]',
+      borderAccent: 'border-l-amber-500',
     },
     info: {
-      icon: 'ℹ',
-      iconColor: 'text-blue-500 dark:text-blue-400',
-      iconBg: 'bg-blue-500/10 border border-blue-500/20',
+      icon: <Info size={16} className="text-cyan-400" />,
+      badgeBg: 'bg-cyan-500/10 border-cyan-500/20 shadow-[0_0_12px_rgba(6,182,212,0.15)]',
+      borderAccent: 'border-l-cyan-500',
     },
   };
 
-  const style = styles[type];
+  const current = config[type] || config.info;
 
   return (
     <div
-      className={`fixed top-4 right-4 z-50 p-4 bg-secondary border border-color rounded-xl text-primary text-sm flex items-start gap-3 shadow-premium max-w-md animate-slideIn ${className}`}
+      className={`fixed top-4 right-4 z-50 p-4 bg-secondary/95 backdrop-blur-md border border-white/10 ${current.borderAccent} border-l-[3px] rounded-2xl text-primary text-sm flex items-start gap-3.5 shadow-2xl max-w-md animate-slideIn transition-all ${className}`}
       role="alert"
     >
       <div
-        className={`flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold ${style.iconBg} ${style.iconColor}`}
+        className={`flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-xl border ${current.badgeBg}`}
       >
-        {style.icon}
+        {current.icon}
       </div>
 
-      <div className="flex-1 min-w-0">
-        {title && <div className="font-semibold text-primary mb-1">{title}</div>}
-        <div className="break-words text-secondary">{message}</div>
+      <div className="flex-1 min-w-0 pt-0.5">
+        {title && (
+          <div className="font-bold text-[13px] tracking-tight text-primary mb-0.5">{title}</div>
+        )}
+        <div className="break-words text-[12px] text-muted font-medium leading-relaxed">
+          {message}
+        </div>
       </div>
 
       {onClose && (
         <button
           onClick={onClose}
-          className="flex-shrink-0 ml-2 text-secondary hover:text-primary transition-colors cursor-pointer"
+          className="flex-shrink-0 p-1 text-muted hover:text-primary hover:bg-white/5 rounded-lg transition-all active:scale-90 cursor-pointer"
           aria-label="Close notification"
         >
-          ✕
+          <X size={14} />
         </button>
       )}
     </div>

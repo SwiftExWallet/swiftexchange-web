@@ -4,6 +4,7 @@ import { getChainById } from '../../evm/utils/Chainregistry';
 import type { TokenInfo } from '../types/stellar.types';
 
 const accountCache = new Map<string, { data: StellarSDK.Horizon.AccountResponse; ts: number }>();
+const serverPool = new Map<string, StellarSDK.Horizon.Server>();
 
 export class StellarBaseService {
   protected server: StellarSDK.Horizon.Server;
@@ -11,14 +12,43 @@ export class StellarBaseService {
   protected networkKey: string;
 
   constructor(horizonUrl: string, networkPassphrase: string, networkKey: string) {
-    const serverOptions: any = {};
-    if (horizonUrl.startsWith('http://')) {
-      serverOptions.allowHttp = true;
-    }
-
-    this.server = new StellarSDK.Horizon.Server(horizonUrl, serverOptions);
+    this.server = StellarBaseService.getOrCreateServer(horizonUrl);
     this.networkPassphrase = networkPassphrase;
     this.networkKey = networkKey;
+  }
+
+  static getOrCreateServer(horizonUrl: string): StellarSDK.Horizon.Server {
+    let instance = serverPool.get(horizonUrl);
+    if (!instance) {
+      const serverOptions: any = {};
+      if (horizonUrl.startsWith('http://')) {
+        serverOptions.allowHttp = true;
+      }
+      instance = new StellarSDK.Horizon.Server(horizonUrl, serverOptions);
+      serverPool.set(horizonUrl, instance);
+    }
+    return instance;
+  }
+
+  static clearServerPool() {
+    serverPool.clear();
+  }
+
+  static calculateSpendableBalance(
+    balance: string | number,
+    subentryCount: number = 0,
+    isNative: boolean = false,
+    sellingLiabilities: string | number = 0
+  ): string {
+    const bal = parseFloat(balance?.toString() || '0') || 0;
+    const liabilities = parseFloat(sellingLiabilities?.toString() || '0') || 0;
+    if (isNative) {
+      const reserve = (2 + subentryCount) * 0.5 + 0.01;
+      const spendable = Math.max(0, bal - reserve - liabilities);
+      return spendable.toFixed(7);
+    }
+    const spendable = Math.max(0, bal - liabilities);
+    return spendable.toFixed(7);
   }
 
   static clearAccountCache() {
@@ -180,13 +210,25 @@ export class StellarBaseService {
     if (asset.isNative()) return;
 
     const hasTrustline = sourceAccount.balances.some(
-      b =>
+      (b: any) =>
         (b.asset_type === 'credit_alphanum4' || b.asset_type === 'credit_alphanum12') &&
         b.asset_code === asset.getCode() &&
         b.asset_issuer === asset.getIssuer()
     );
 
     if (!hasTrustline) {
+      const nativeBalRecord = sourceAccount.balances.find((b: any) => b.asset_type === 'native');
+      const totalXlm = parseFloat(nativeBalRecord?.balance || '0');
+      const subentryCount = sourceAccount.subentry_count || 0;
+      const liabilities = parseFloat((nativeBalRecord as any)?.selling_liabilities || '0');
+      const requiredReserve = (2 + subentryCount + 1) * 0.5 + liabilities + 0.01;
+
+      if (totalXlm < requiredReserve) {
+        throw new Error(
+          `Insufficient XLM balance to establish trustline for ${asset.getCode()}. You need at least ${requiredReserve.toFixed(2)} XLM to cover Stellar minimum reserves (current balance: ${totalXlm.toFixed(2)} XLM).`
+        );
+      }
+
       txBuilder.addOperation(
         StellarSDK.Operation.changeTrust({
           asset: asset,

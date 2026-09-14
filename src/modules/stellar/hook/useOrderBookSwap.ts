@@ -4,6 +4,7 @@ import * as StellarSDK from '@stellar/stellar-sdk';
 
 import { getStellarConfig } from '../../walletconnect/config/chains';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
+import { StellarBaseService } from '../service/StellarBaseService';
 import {
   BinanceBridgeService,
   getBinanceSymbol,
@@ -251,6 +252,42 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
     let closeStream: (() => void) | null = null;
     let isMounted = true;
     let pollingInterval: NodeJS.Timeout | null = null;
+    let throttleTimeout: NodeJS.Timeout | null = null;
+    let lastBookUpdate = 0;
+    let pendingBook: any = null;
+
+    const handleThrottledUpdate = (updatedBook: any) => {
+      if (!isMounted) return;
+      pendingBook = updatedBook;
+      const now = Date.now();
+      const THROTTLE_MS = 250;
+
+      const flush = () => {
+        if (pendingBook && isMounted) {
+          setOrderBook(pendingBook);
+          const k = getCacheKey(fromToken, toToken, isBuy);
+          if (k) globalOrderBookCache.set(k, pendingBook);
+          lastBookUpdate = Date.now();
+          pendingBook = null;
+        }
+      };
+
+      if (now - lastBookUpdate >= THROTTLE_MS) {
+        if (throttleTimeout) {
+          clearTimeout(throttleTimeout);
+          throttleTimeout = null;
+        }
+        flush();
+      } else if (!throttleTimeout) {
+        throttleTimeout = setTimeout(
+          () => {
+            throttleTimeout = null;
+            flush();
+          },
+          THROTTLE_MS - (now - lastBookUpdate)
+        );
+      }
+    };
 
     const initOrderBook = async () => {
       const key = getCacheKey(fromToken, toToken, isBuy);
@@ -293,13 +330,7 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
           const stream = BinanceBridgeService.streamOrderBook(
             symbol,
             isFlipped,
-            (updatedBook: any) => {
-              if (isMounted) {
-                setOrderBook(updatedBook);
-                const k = getCacheKey(fromToken, toToken, isBuy);
-                if (k) globalOrderBookCache.set(k, updatedBook);
-              }
-            },
+            handleThrottledUpdate,
             (err: any) => {
               console.error('[useOrderBookSwap] Binance stream error:', err);
             }
@@ -327,13 +358,7 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
           const stream = service.streamOrderBook(
             fromToken.asset,
             toToken.asset,
-            (updatedBook: any) => {
-              if (isMounted) {
-                setOrderBook(updatedBook);
-                const k = getCacheKey(fromToken, toToken, isBuy);
-                if (k) globalOrderBookCache.set(k, updatedBook);
-              }
-            },
+            handleThrottledUpdate,
             (err: any) => {
               console.error('[useOrderBookSwap] Stream error, falling back to polling:', err);
               if (isMounted && !pollingInterval) {
@@ -342,9 +367,7 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
                     .getOrderBook(fromToken.asset!, toToken.asset!, 20)
                     .then(book => {
                       if (isMounted) {
-                        setOrderBook(book);
-                        const k = getCacheKey(fromToken, toToken, isBuy);
-                        if (k) globalOrderBookCache.set(k, book);
+                        handleThrottledUpdate(book);
                       }
                     })
                     .catch(e => console.error('[useOrderBookSwap] Polling error:', e));
@@ -375,6 +398,9 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
 
     return () => {
       isMounted = false;
+      if (throttleTimeout) {
+        clearTimeout(throttleTimeout);
+      }
       if (closeStream) {
         closeStream();
       }
@@ -436,9 +462,14 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
         return;
       }
 
-      const balance = parseFloat(activePayingToken.balance);
-      const reserve = activePayingToken.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
-      const availableBalance = Math.max(0, balance - reserve);
+      const isNative = activePayingToken.code === 'XLM' || activePayingToken.asset?.isNative();
+      const availableBalance = parseFloat(
+        StellarBaseService.calculateSpendableBalance(
+          activePayingToken.balance || '0',
+          subentryCount,
+          isNative
+        )
+      );
       const allocatedPayingAmount = (availableBalance * percentage) / 100;
 
       if (isBuy) {
@@ -481,13 +512,20 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
 
       const payingToken = isBuy ? toToken : fromToken;
       const requiredAmount = isBuy ? parseFloat(quote.total) : parseFloat(quote.amount);
-      const availableBalance = parseFloat(payingToken.balance || '0');
+      const isPayingNative = payingToken.code === 'XLM' || payingToken.asset?.isNative() || false;
+      const spendable = parseFloat(
+        StellarBaseService.calculateSpendableBalance(
+          payingToken.balance || '0',
+          subentryCount,
+          isPayingNative
+        )
+      );
 
-      if (requiredAmount > availableBalance) {
+      if (requiredAmount > spendable) {
         throw new Error(
-          `Insufficient ${payingToken.code} balance. Required: ${requiredAmount.toFixed(
+          `Insufficient ${payingToken.code} spendable balance. Required: ${requiredAmount.toFixed(
             7
-          )}, Available: ${availableBalance.toFixed(7)}`
+          )}, Spendable: ${spendable.toFixed(7)}`
         );
       }
 
@@ -602,6 +640,23 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
     setTransaction(null);
   }, []);
 
+  const payingToken = isBuy ? toToken : fromToken;
+  const isPayingNative = payingToken
+    ? payingToken.code === 'XLM' || payingToken.asset?.isNative() || false
+    : false;
+  const spendableBalance = payingToken
+    ? StellarBaseService.calculateSpendableBalance(
+        payingToken.balance || '0',
+        subentryCount,
+        isPayingNative
+      )
+    : '0';
+
+  const requiredAmount = isBuy ? parseFloat(total || '0') : parseFloat(amount || '0');
+  const isInsufficientBalance = Boolean(
+    payingToken && requiredAmount > 0 && requiredAmount > parseFloat(spendableBalance)
+  );
+
   return {
     isBuy,
     fromToken,
@@ -612,6 +667,8 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
     quote,
     isLoading,
     error,
+    isInsufficientBalance,
+    spendableBalance,
     slippageTolerance,
     availableTokens,
     subentryCount,

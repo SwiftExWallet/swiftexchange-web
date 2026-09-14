@@ -14,14 +14,11 @@ export const RPC_URLS = {
     'https://arbitrum.drpc.org',
     'https://1rpc.io/arb',
     'https://arbitrum-one-mainnet.gateway.tatum.io/',
-    'https://arb-pokt.nodies.app',
   ],
 
   POL: [
     'https://polygon-bor-rpc.publicnode.com',
     'https://polygon.drpc.org',
-    'https://1rpc.io/matic',
-    '"https://polygon-bor-rpc.publicnode.com',
     'https://1rpc.io/matic',
   ],
 
@@ -31,7 +28,6 @@ export const RPC_URLS = {
     'https://optimism.drpc.org',
     'https://1rpc.io/op',
     'https://optimism-mainnet.gateway.tatum.io/',
-    'https://opt-pokt.nodies.app',
   ],
 
   AVAX: [
@@ -40,7 +36,6 @@ export const RPC_URLS = {
     'https://avalanche.drpc.org',
     'https://1rpc.io/avax-c',
     'https://avalanche-mainnet.gateway.tatum.io/',
-    'https://avax-pokt.nodies.app',
   ],
 
   BASE: [
@@ -49,7 +44,6 @@ export const RPC_URLS = {
     'https://base.drpc.org',
     'https://1rpc.io/base',
     'https://base-mainnet.gateway.tatum.io/',
-    'https://base-pokt.nodies.app',
   ],
 
   BNB: [
@@ -59,12 +53,10 @@ export const RPC_URLS = {
     'https://bsc.drpc.org',
     'https://1rpc.io/bnb',
     'https://bsc-mainnet.gateway.tatum.io/',
-    'https://bsc-pokt.nodies.app',
   ],
 
   SEPOLIA: [
     'https://ethereum-sepolia-rpc.publicnode.com',
-    'https://ethereum-sepolia.publicnode.com',
     'https://sepolia.gateway.tenderly.co',
     'https://sepolia.drpc.org',
     'https://1rpc.io/sepolia',
@@ -73,17 +65,15 @@ export const RPC_URLS = {
 
   BSC_TESTNET: [
     'https://bsc-testnet-rpc.publicnode.com',
-    'https://bsc-testnet.publicnode.com',
     'https://data-seed-prebsc-1-s1.binance.org:8545',
     'https://bsc-testnet.drpc.org',
     'https://bsc-testnet.gateway.tatum.io/',
-    'https://bsc-testnet-pokt.nodies.app',
   ],
 
   AMOY: [
     'https://polygon-amoy-bor-rpc.publicnode.com',
     'https://polygon-amoy.drpc.org',
-    'https://amoy.polygon.technology',
+    'https://rpc.ankr.com/polygon_amoy',
   ],
 
   ARB_SEPOLIA: [

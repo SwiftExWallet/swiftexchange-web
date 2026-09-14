@@ -8,6 +8,7 @@ import {
   type StellarTransactionOptions,
 } from '../types/stellarTransaction.types';
 import { StellarSequenceTracker } from '../utils/StellarSequenceTracker';
+import { StellarBaseService } from './StellarBaseService';
 
 export function ensureTrustlineOp(
   txBuilder: StellarSDK.TransactionBuilder,
@@ -24,6 +25,18 @@ export function ensureTrustlineOp(
   );
 
   if (!hasTrustline) {
+    const nativeBalRecord = sourceAccount.balances.find((b: any) => b.asset_type === 'native');
+    const totalXlm = parseFloat(nativeBalRecord?.balance || '0');
+    const subentryCount = sourceAccount.subentry_count || 0;
+    const liabilities = parseFloat((nativeBalRecord as any)?.selling_liabilities || '0');
+    const requiredReserve = (2 + subentryCount + 1) * 0.5 + liabilities + 0.01;
+
+    if (totalXlm < requiredReserve) {
+      throw new Error(
+        `Insufficient XLM balance to establish trustline for ${asset.getCode()}. You need at least ${requiredReserve.toFixed(2)} XLM to cover Stellar minimum reserves (current balance: ${totalXlm.toFixed(2)} XLM).`
+      );
+    }
+
     txBuilder.addOperation(
       StellarSDK.Operation.changeTrust({
         asset: asset,
@@ -38,7 +51,7 @@ export async function getStellarBalance(assetType: string, from: string): Promis
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
 
-  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
   try {
     const account = await server.loadAccount(from);
     let balance = '0';
@@ -74,7 +87,7 @@ export async function getStellarBalance(assetType: string, from: string): Promis
 export async function fetchStellarAccountAssets(address: string): Promise<any[]> {
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
-  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
 
   try {
     const account = await server.loadAccount(address);
@@ -121,7 +134,7 @@ export async function sendCryptoStellarBuild(
         : currentNetwork;
   const config = getStellarConfig(networkToUse);
 
-  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
   const networkPassphrase =
     config.network === 'PUBLIC' ? StellarSDK.Networks.PUBLIC : StellarSDK.Networks.TESTNET;
 
@@ -259,7 +272,7 @@ export async function estimateStellarFees(): Promise<{
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
 
-  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
   try {
     const baseFee = await server.fetchBaseFee();
     const totalFee = baseFee.toString();
@@ -296,7 +309,7 @@ export async function signStellarTransaction(
       return tx.toXDR();
     }
 
-    const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+    const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
     const account = await server.loadAccount(transaction.from);
     const txBuilder = new StellarSDK.TransactionBuilder(account, {
       fee: transaction.fee || StellarSDK.BASE_FEE,
@@ -335,7 +348,7 @@ export async function sendCryptoStellarBroadcast(signedXDR: string): Promise<str
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
 
-  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
   const networkPassphrase =
     config.network === 'PUBLIC' ? StellarSDK.Networks.PUBLIC : StellarSDK.Networks.TESTNET;
 
@@ -370,7 +383,7 @@ export async function checkTrustlineExists(
 ): Promise<boolean> {
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
-  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
 
   try {
     const account = await server.loadAccount(address);
@@ -390,7 +403,7 @@ export async function buildAddTrustlineTransaction(
 ): Promise<string> {
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
-  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
   const networkPassphrase =
     config.network === 'PUBLIC' ? StellarSDK.Networks.PUBLIC : StellarSDK.Networks.TESTNET;
 

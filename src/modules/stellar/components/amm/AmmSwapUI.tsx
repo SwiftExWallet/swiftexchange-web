@@ -22,8 +22,10 @@ import { portfolioUtils } from '../../../walletconnect/utils/portfolioUtils';
 import { SUCCESS_MESSAGES, UI_STRINGS } from '../../constants/ammSwapConstants';
 import { useAmmSwap } from '../../hook/useAmmSwap';
 import { useStickySidebar } from '../../hook/useStickySidebar';
+import { StellarBaseService } from '../../service/StellarBaseService';
 import { useAmmSwapStore } from '../../store/ammSwapStore';
 import { StellarAccountPanel } from '../account/StellarAccountPanel';
+import { StellarShimmerSkeleton } from '../common/StellarShimmerSkeleton';
 import StellarAssetSelectorModal from '../modals/StellarAssetSelectorModal';
 import { SettingsPanel, SwapDetails } from './AmmSwapSubComponents';
 import { XlmReserveButton } from './XlmReserveInfo';
@@ -53,6 +55,8 @@ const AmmSwapUI = () => {
     quote,
     isLoading,
     error,
+    isInsufficientBalance,
+    spendableBalance,
     slippageTolerance,
     availableTokens,
     setFromToken,
@@ -141,10 +145,22 @@ const AmmSwapUI = () => {
         counterIssuer: toToken.issuer,
       });
     }
-  }, [fromToken, toToken, setSelectedChartPair]);
+  }, [fromToken?.code, fromToken?.issuer, toToken?.code, toToken?.issuer, setSelectedChartPair]);
 
   const xlmToken = availableTokens.find(t => t.code === 'XLM');
   const xlmBalance = xlmToken?.balance || '0';
+
+  const spendableXlm = portfolioUtils.formatBalance(
+    StellarBaseService.calculateSpendableBalance(xlmBalance, subentryCount, true)
+  );
+
+  const toTokenSpendable = toToken
+    ? StellarBaseService.calculateSpendableBalance(
+        toToken.balance || '0',
+        subentryCount,
+        toToken.code === 'XLM' || toToken.asset?.isNative() || false
+      )
+    : '0';
 
   const handleSlippageChange = (slippage: number) => {
     setSlippageTolerance(slippage);
@@ -197,7 +213,13 @@ const AmmSwapUI = () => {
     }
   };
 
-  const canSwap = fromAmount && parseFloat(fromAmount) > 0 && !isLoading && quote && stellarWallet;
+  const canSwap =
+    fromAmount &&
+    parseFloat(fromAmount) > 0 &&
+    !isLoading &&
+    quote &&
+    stellarWallet &&
+    !isInsufficientBalance;
 
   const renderSwapForm = () => (
     <div className="mx-auto space-y-6  w-full max-w-lg">
@@ -232,10 +254,7 @@ const AmmSwapUI = () => {
           </label>
           <button
             onClick={() => {
-              const balance = parseFloat(fromToken?.balance || '0');
-              const reserve = fromToken?.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
-              const maxAmount = Math.max(0, balance - reserve);
-              setFromAmount(maxAmount.toFixed(7));
+              setFromAmount(spendableBalance);
             }}
             className="text-[10px] font-black text-brand hover:scale-110 active:scale-95 transition-all px-3 py-1 bg-brand/10 border border-brand/20 rounded-full"
           >
@@ -319,16 +338,7 @@ const AmmSwapUI = () => {
           <div className="flex items-center gap-2 text-muted">
             <span>Spendable Balance:</span>
             <span className="text-primary font-black">
-              {fromToken?.balance
-                ? portfolioUtils.formatBalance(
-                    fromToken.code === 'XLM'
-                      ? Math.max(
-                          0,
-                          parseFloat(fromToken.balance) - (1 + subentryCount * 0.5 + 0.05)
-                        ).toString()
-                      : fromToken.balance
-                  )
-                : '0.0000'}{' '}
+              {fromToken ? portfolioUtils.formatBalance(spendableBalance) : '0.0000'}{' '}
               {fromToken?.code}
             </span>
             <button
@@ -427,17 +437,7 @@ const AmmSwapUI = () => {
           <div className="flex items-center gap-2 text-muted">
             <span>Spendable Balance:</span>
             <span className="text-primary font-black">
-              {toToken?.balance
-                ? portfolioUtils.formatBalance(
-                    toToken.code === 'XLM'
-                      ? Math.max(
-                          0,
-                          parseFloat(toToken.balance) - (1 + subentryCount * 0.5 + 0.05)
-                        ).toString()
-                      : toToken.balance
-                  )
-                : '0.0000'}{' '}
-              {toToken?.code}
+              {toToken ? portfolioUtils.formatBalance(toTokenSpendable) : '0.0000'} {toToken?.code}
             </span>
             <button
               onClick={() => fetchTokens(true)}
@@ -448,6 +448,15 @@ const AmmSwapUI = () => {
           </div>
         </div>
       </div>
+
+      {isInsufficientBalance && !error && (
+        <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl animate-fade-in mt-4">
+          <AlertCircle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+          <p className="text-xs font-bold text-amber-500 uppercase tracking-wider">
+            Insufficient {fromToken?.code} balance (Spendable: {spendableBalance} {fromToken?.code})
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl animate-fade-in mt-4">
@@ -483,8 +492,8 @@ const AmmSwapUI = () => {
           </span>
         ) : !fromAmount ? (
           UI_STRINGS.ENTER_AMOUNT
-        ) : !canSwap ? (
-          'INSUFFICIENT BALANCE'
+        ) : isInsufficientBalance ? (
+          `INSUFFICIENT ${fromToken?.code || ''} BALANCE`
         ) : !toToken?.hasTrustline ? (
           `Add Trustline & Swap`
         ) : (
@@ -500,6 +509,10 @@ const AmmSwapUI = () => {
       )}
     </div>
   );
+
+  if (availableTokens.length === 0 && !fromToken) {
+    return <StellarShimmerSkeleton view="swap" />;
+  }
 
   return (
     <>
@@ -540,12 +553,7 @@ const AmmSwapUI = () => {
               {/* Stellar Account Summary on Mobile */}
               <StellarAccountPanel
                 xlmBalance={xlmBalance}
-                spendableXlm={portfolioUtils.formatBalance(
-                  Math.max(
-                    0,
-                    parseFloat(xlmBalance || '0') - (1 + subentryCount * 0.5 + 0.05)
-                  ).toString()
-                )}
+                spendableXlm={spendableXlm}
                 subentryCount={subentryCount}
               />
 
@@ -619,12 +627,7 @@ const AmmSwapUI = () => {
 
             <StellarAccountPanel
               xlmBalance={xlmBalance}
-              spendableXlm={portfolioUtils.formatBalance(
-                Math.max(
-                  0,
-                  parseFloat(xlmBalance || '0') - (1 + subentryCount * 0.5 + 0.05)
-                ).toString()
-              )}
+              spendableXlm={spendableXlm}
               subentryCount={subentryCount}
             />
           </div>

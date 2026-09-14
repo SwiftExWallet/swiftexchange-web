@@ -11,7 +11,7 @@ import {
   Search,
   Shield,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { WalletType } from '../../walletconnect/constants/Wallet';
 import { useWalletConnect } from '../../walletconnect/hooks/useWalletConnect';
@@ -40,32 +40,34 @@ const AllTransactionsUI = ({ embedded = false }: AllTransactionsUIProps) => {
     end: '',
   });
 
-  const filteredTransactions = transactions.filter(tx => {
-    let matchesType = true;
-    let matchesDate = true;
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(tx => {
+      let matchesType = true;
+      let matchesDate = true;
 
-    if (filterType !== 'ALL') {
-      matchesType = tx.type === filterType;
-    }
-
-    if (dateFilter !== 'ALL') {
-      const txDate = new Date(tx.date).getTime();
-      const now = Date.now();
-      const oneDay = 24 * 60 * 60 * 1000;
-
-      if (dateFilter === '7D') {
-        matchesDate = now - txDate <= 7 * oneDay;
-      } else if (dateFilter === '30D') {
-        matchesDate = now - txDate <= 30 * oneDay;
-      } else if (dateFilter === 'CUSTOM' && customDate.start && customDate.end) {
-        const start = new Date(customDate.start).getTime();
-        const end = new Date(customDate.end).getTime() + oneDay - 1;
-        matchesDate = txDate >= start && txDate <= end;
+      if (filterType !== 'ALL') {
+        matchesType = tx.type === filterType;
       }
-    }
 
-    return matchesType && matchesDate;
-  });
+      if (dateFilter !== 'ALL') {
+        const txDate = new Date(tx.date).getTime();
+        const now = Date.now();
+        const oneDay = 24 * 60 * 60 * 1000;
+
+        if (dateFilter === '7D') {
+          matchesDate = now - txDate <= 7 * oneDay;
+        } else if (dateFilter === '30D') {
+          matchesDate = now - txDate <= 30 * oneDay;
+        } else if (dateFilter === 'CUSTOM' && customDate.start && customDate.end) {
+          const start = new Date(customDate.start).getTime();
+          const end = new Date(customDate.end).getTime() + oneDay - 1;
+          matchesDate = txDate >= start && txDate <= end;
+        }
+      }
+
+      return matchesType && matchesDate;
+    });
+  }, [transactions, filterType, dateFilter, customDate]);
 
   if (!stellarWallet) {
     if (embedded) {

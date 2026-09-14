@@ -131,7 +131,8 @@ export async function execute1InchFusionSwap(
     provider,
     chainId,
     onBeforeWalletSign,
-    useUnlimitedApproval
+    useUnlimitedApproval,
+    currentAllowance
   );
   if (allowance.approvalTxHash && onApprovalTxHash) {
     onApprovalTxHash(allowance.approvalTxHash);

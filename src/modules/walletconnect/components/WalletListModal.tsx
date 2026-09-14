@@ -1,24 +1,15 @@
-import {
-  ArrowLeft,
-  Check,
-  Copy,
-  ExternalLink,
-  ShieldCheck,
-  Sparkles,
-  Wallet,
-  X,
-} from 'lucide-react';
+import { ArrowLeft, Check, ShieldCheck, Sparkles, Wallet, X } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ROUTES } from '../../../constants/routes';
 import router from '../../../routes';
-import { formatWalletDeepLink, openMobileWallet } from '../../../utils/walletConnectUtils';
 import { useAsterAgent } from '../../perps/adapters/aster/hooks/useAsterAgent';
 import { useHyperliquidAgent } from '../../perps/adapters/hyperliquid/hooks/useHyperliquidAgent';
 import { useExchangeManager } from '../../perps/core/ExchangeManager';
 import { EVM_WALLETS, STELLAR_WALLETS, type WalletConfig } from '../constants/Wallet';
-import { useInstalledWallets } from '../hooks/useWalletConnect';
+import { useExtensionDetector } from '../hooks/useWalletConnect';
 import { type WalletType, useWalletStore } from '../store/walletConnectStore';
+import { WalletConnectFallback } from './WalletConnectFallback';
 
 const WALLETCONNECT_ICON =
   'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRWu9CeO85RIMN2ixs9U_6YhnatWBxtCzn6L_e7QRO_CiEV1SB0LGbSXJijfHYt0N46slY&usqp=CAU';
@@ -28,6 +19,7 @@ export const WalletListModal: React.FC = () => {
     connectedWallets,
     isModalOpen,
     closeModal,
+    cancelConnection,
     connectWallet,
     connectUnified,
     disconnect,
@@ -47,7 +39,6 @@ export const WalletListModal: React.FC = () => {
   const [connectingWallet, setConnectingWallet] = useState<string | null>(null);
   const [disconnectingType, setDisconnectingType] = useState<WalletType | null>(null);
   const [viewMode, setViewMode] = useState<'onboarding' | 'wallets'>('wallets');
-  const [copiedUri, setCopiedUri] = useState(false);
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
   );
@@ -75,25 +66,8 @@ export const WalletListModal: React.FC = () => {
     );
   }, [activeConnectingWalletId]);
 
-  const activeDeepLink = useMemo(() => {
-    if (!activeConnectingWalletId || !pairingUri) return null;
-    return formatWalletDeepLink(activeConnectingWalletId, pairingUri);
-  }, [activeConnectingWalletId, pairingUri]);
-
-  const handleCopyUri = useCallback(() => {
-    if (!pairingUri) return;
-    navigator.clipboard.writeText(pairingUri);
-    setCopiedUri(true);
-    setTimeout(() => setCopiedUri(false), 2000);
-  }, [pairingUri]);
-
-  const handleOpenWalletApp = useCallback(() => {
-    if (!activeConnectingWalletId || !pairingUri) return;
-    openMobileWallet(activeConnectingWalletId, pairingUri);
-  }, [activeConnectingWalletId, pairingUri]);
-
-  const evmConnected = !!connectedWallets.evm;
-  const stellarConnected = !!connectedWallets.stellar;
+  const evmConnected = Boolean(connectedWallets.evm?.address);
+  const stellarConnected = Boolean(connectedWallets.stellar?.address);
   const anyConnected = evmConnected || stellarConnected;
   const isSetupDone = evmConnected ? isAuthenticated : stellarConnected;
 
@@ -114,11 +88,18 @@ export const WalletListModal: React.FC = () => {
     if (isModalOpen) {
       document.body.style.overflow = 'hidden';
       setError(null);
-      setViewMode('wallets');
+      setConnectingWallet(null);
+      const hasEvm = Boolean(useWalletStore.getState().connectedWallets.evm?.address);
+      if (hasEvm && !useWalletStore.getState().isAuthenticated) {
+        setViewMode('onboarding');
+      } else {
+        setViewMode('wallets');
+      }
     } else {
       document.body.style.overflow = 'unset';
       setConnectingWallet(null);
       setError(null);
+      setViewMode('wallets');
     }
     return () => {
       document.body.style.overflow = 'unset';
@@ -139,12 +120,12 @@ export const WalletListModal: React.FC = () => {
     };
   }, []);
 
-  const clearConnectTimeout = () => {
+  const clearConnectTimeout = useCallback(() => {
     if (connectTimeoutRef.current) {
       window.clearTimeout(connectTimeoutRef.current);
       connectTimeoutRef.current = null;
     }
-  };
+  }, []);
 
   const startConnectTimeout = () => {
     connectTimeoutRef.current = window.setTimeout(() => {
@@ -167,13 +148,25 @@ export const WalletListModal: React.FC = () => {
       await connectUnified('walletconnect');
       clearConnectTimeout();
       setConnectingWallet(null);
-      setViewMode('onboarding');
+
+      const currentWallets = useWalletStore.getState().connectedWallets;
+      if (useWalletStore.getState().isModalOpen && currentWallets.evm?.address) {
+        setViewMode('onboarding');
+      } else if (currentWallets.stellar?.address) {
+        handleComplete();
+      } else {
+        setViewMode('wallets');
+      }
     } catch (err: any) {
       clearConnectTimeout();
       setConnectingWallet(null);
-      showError(err?.message || 'Connection failed. Please try again.');
+      setViewMode('wallets');
+      const msg = err?.message || '';
+      if (!msg.includes('cancelled') && !msg.includes('User closed')) {
+        showError(msg || 'Connection failed. Please try again.');
+      }
     }
-  }, [connectUnified, connectingWallet, disconnectingType]);
+  }, [connectUnified, connectingWallet, disconnectingType, handleComplete, clearConnectTimeout]);
 
   const handleSwiftExUnifiedConnect = useCallback(async () => {
     if (connectingWallet || disconnectingType) return;
@@ -184,13 +177,25 @@ export const WalletListModal: React.FC = () => {
       await connectUnified('swiftex');
       clearConnectTimeout();
       setConnectingWallet(null);
-      setViewMode('onboarding');
+
+      const currentWallets = useWalletStore.getState().connectedWallets;
+      if (useWalletStore.getState().isModalOpen && currentWallets.evm?.address) {
+        setViewMode('onboarding');
+      } else if (currentWallets.stellar?.address) {
+        handleComplete();
+      } else {
+        setViewMode('wallets');
+      }
     } catch (err: any) {
       clearConnectTimeout();
       setConnectingWallet(null);
-      showError(err?.message || 'Connection failed. Please try again.');
+      setViewMode('wallets');
+      const msg = err?.message || '';
+      if (!msg.includes('cancelled') && !msg.includes('User closed')) {
+        showError(msg || 'Connection failed. Please try again.');
+      }
     }
-  }, [connectUnified, connectingWallet, disconnectingType]);
+  }, [connectUnified, connectingWallet, disconnectingType, handleComplete, clearConnectTimeout]);
 
   const handleWalletClick = useCallback(
     async (wallet: WalletConfig) => {
@@ -203,18 +208,37 @@ export const WalletListModal: React.FC = () => {
         await connectWallet(wallet.type as WalletType, wallet.id);
         clearConnectTimeout();
         setConnectingWallet(null);
-        if (wallet.type === 'evm') {
+
+        const currentWallets = useWalletStore.getState().connectedWallets;
+        const isEvmReady = Boolean(currentWallets.evm?.address);
+        const isStellarReady = Boolean(currentWallets.stellar?.address);
+
+        if (!useWalletStore.getState().isModalOpen) {
+          return;
+        }
+
+        if (wallet.type === 'evm' && isEvmReady) {
           setViewMode('onboarding');
-        } else if (wallet.type === 'stellar') {
+        } else if (wallet.type === 'stellar' && isStellarReady) {
           handleComplete();
+        } else {
+          setViewMode('wallets');
         }
       } catch (err: any) {
         clearConnectTimeout();
         setConnectingWallet(null);
-        showError(err?.message || 'Connection failed. Please try again.');
+        setViewMode('wallets');
+        const msg = err?.message || '';
+        if (
+          !msg.includes('cancelled') &&
+          !msg.includes('User closed') &&
+          !msg.includes('aborted')
+        ) {
+          showError(msg || 'Connection failed. Please try again.');
+        }
       }
     },
-    [connectWallet, connectingWallet, disconnectingType, handleComplete]
+    [connectWallet, connectingWallet, disconnectingType, handleComplete, clearConnectTimeout]
   );
 
   const handleDisconnect = useCallback(
@@ -240,11 +264,11 @@ export const WalletListModal: React.FC = () => {
       activeAgent.deriveState === 'signing'
     )
       return;
-    if (connectingWallet) {
-      clearConnectTimeout();
-      setConnectingWallet(null);
-      setError(null);
-    }
+    clearConnectTimeout();
+    setConnectingWallet(null);
+    setError(null);
+    setViewMode('wallets');
+    cancelConnection();
     closeModal();
     if (activeAgent.isReady) {
       if (window.location.pathname !== ROUTES.TRADING_PERPS) {
@@ -252,18 +276,20 @@ export const WalletListModal: React.FC = () => {
       }
     }
   }, [
-    closeModal,
-    connectingWallet,
-    disconnectingType,
-    connectionStatus,
     activeAgent.deriveState,
     activeAgent.isReady,
+    cancelConnection,
+    clearConnectTimeout,
+    closeModal,
+    connectionStatus.evm?.state,
+    disconnectingType,
   ]);
 
-  const formatAddress = useCallback(
-    (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`,
-    []
-  );
+  const formatAddress = useCallback((addr?: string) => {
+    if (!addr) return '';
+    if (addr.length < 10) return addr;
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  }, []);
 
   const getWalletConfig = useCallback(
     (type: WalletType, id: string): WalletConfig | undefined =>
@@ -353,7 +379,7 @@ export const WalletListModal: React.FC = () => {
     ]
   );
 
-  const installedWallets = useInstalledWallets();
+  const { isInstalled } = useExtensionDetector();
 
   const renderWalletCard = useCallback(
     ({
@@ -524,12 +550,12 @@ export const WalletListModal: React.FC = () => {
       <div className="grid grid-cols-4 gap-2.5">
         {wallets.map(wallet => {
           const key = `${wallet.type}-${wallet.id}`;
-          const isInstalled = installedWallets.includes(wallet.id);
+          const isWalletInstalled = isInstalled(wallet.id);
           return renderWalletCard({
             id: key,
             name: wallet.name,
             icon: wallet.icon,
-            isInstalled,
+            isInstalled: isWalletInstalled,
             isConnecting: connectingWallet === key,
             onClick: () => handleWalletClick(wallet),
             disabled,
@@ -538,14 +564,34 @@ export const WalletListModal: React.FC = () => {
         })}
       </div>
     ),
-    [connectingWallet, handleWalletClick, renderWalletCard, installedWallets]
+    [connectingWallet, handleWalletClick, renderWalletCard, isInstalled]
   );
 
   const renderOnboardingView = () => {
-    const activeWallet = connectedWallets.evm || connectedWallets.stellar;
-    const config = activeWallet
-      ? getWalletConfig(activeWallet.type, activeWallet.walletId)
-      : undefined;
+    const activeWallet = connectedWallets.evm?.address
+      ? connectedWallets.evm
+      : connectedWallets.stellar?.address
+        ? connectedWallets.stellar
+        : null;
+
+    if (!activeWallet || !activeWallet.address) {
+      return (
+        <div className="text-center py-6 space-y-3">
+          <p style={{ color: 'var(--color-text-muted)' }} className="text-xs">
+            No active wallet connection found. Please select a wallet to connect.
+          </p>
+          <button
+            onClick={() => setViewMode('wallets')}
+            style={{ background: 'var(--color-brand-primary)', color: '#fff' }}
+            className="px-4 py-2 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity"
+          >
+            Back to Wallet List
+          </button>
+        </div>
+      );
+    }
+
+    const config = getWalletConfig(activeWallet.type, activeWallet.walletId);
 
     return (
       <div className="space-y-5 pt-1 animate-fade-in">
@@ -968,68 +1014,31 @@ export const WalletListModal: React.FC = () => {
                   : 'Connecting Wallet...'}
               </h4>
 
-              <p style={{ color: 'var(--color-text-muted)' }} className="text-xs mb-5">
-                {isMobile
-                  ? 'Please approve the connection request in your mobile wallet.'
-                  : 'Scan the QR code or approve the connection request in your wallet.'}
-              </p>
-
-              {isMobile && activeConnectingWalletId !== 'walletconnect' && (
-                <div className="w-full space-y-2.5 mb-4">
-                  {activeDeepLink ? (
-                    <a
-                      href={activeDeepLink}
-                      onClick={handleOpenWalletApp}
-                      style={{ background: 'var(--color-brand-primary)', color: '#fff' }}
-                      className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5 shadow-md"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Open in {activeConnectingConfig?.name || 'Wallet'}</span>
-                    </a>
-                  ) : (
-                    <button
-                      disabled
-                      style={{
-                        background: 'var(--color-bg-tertiary)',
-                        color: 'var(--color-text-muted)',
-                      }}
-                      className="w-full py-2.5 px-4 rounded-xl text-xs font-medium border border-[var(--color-border)] flex items-center justify-center gap-2 opacity-60"
-                    >
-                      <div className="w-3.5 h-3.5 border-2 border-[var(--color-brand-primary)] border-t-transparent rounded-full animate-spin" />
-                      <span>Generating link...</span>
-                    </button>
-                  )}
-
-                  {pairingUri && (
-                    <button
-                      onClick={handleCopyUri}
-                      style={{
-                        background: 'var(--color-bg-tertiary)',
-                        color: 'var(--color-text-secondary)',
-                        borderColor: 'var(--color-border)',
-                      }}
-                      className="w-full py-2 px-3 rounded-xl border text-[11px] font-medium hover:opacity-80 transition-opacity flex items-center justify-center gap-1.5"
-                    >
-                      {copiedUri ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-400">Pairing Link Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy Pairing Link</span>
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-              )}
+              <div className="w-full mt-2">
+                <WalletConnectFallback
+                  walletConfig={activeConnectingConfig}
+                  pairingUri={pairingUri}
+                  isMobile={isMobile}
+                  error={error}
+                  isExtension={
+                    activeConnectingWalletId ? isInstalled(activeConnectingWalletId) : false
+                  }
+                  onRetry={() => {
+                    if (activeConnectingWalletId) {
+                      const w = [...EVM_WALLETS, ...STELLAR_WALLETS].find(
+                        x => x.id === activeConnectingWalletId
+                      );
+                      if (w) handleWalletClick(w);
+                    }
+                  }}
+                  onCancel={handleModalClose}
+                />
+              </div>
 
               <button
                 onClick={handleModalClose}
                 style={{ color: 'var(--color-text-muted)', background: 'var(--color-bg-tertiary)' }}
-                className="px-4 py-1.5 rounded-xl text-xs hover:opacity-80 transition-opacity"
+                className="px-4 py-1.5 rounded-xl text-xs hover:opacity-80 transition-opacity mt-3"
               >
                 Cancel
               </button>

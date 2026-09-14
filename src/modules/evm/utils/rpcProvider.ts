@@ -64,8 +64,8 @@ class RPCManager {
 
     const providers = this.getProviders(numChainId);
 
-    // Faster timeout for L2s, default 1000 for L1
-    const stallTimeout = [42161, 10, 8453, 137, 43114].includes(numChainId) ? 700 : 1000;
+    // Give RPCs a healthy window (2.5s for L2, 3s for L1/testnet) before racing fallbacks
+    const stallTimeout = [42161, 10, 8453, 137, 43114].includes(numChainId) ? 2500 : 3000;
 
     return new Promise<T>((resolve, reject) => {
       let resolved = false;

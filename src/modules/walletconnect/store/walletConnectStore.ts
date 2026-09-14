@@ -68,6 +68,7 @@ interface WalletActions {
   checkSessionHealth: () => Promise<{ type: WalletType; valid: boolean }[]>;
   openModal: () => void;
   closeModal: () => void;
+  cancelConnection: () => void;
   setNetwork: (network: NetworkType) => Promise<void>;
   isConnected: (type: WalletType) => boolean;
   isConnecting: (type: WalletType) => boolean;
@@ -128,7 +129,8 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     setConnectingWalletId: (walletId: string | null) => set({ connectingWalletId: walletId }),
 
     connectWallet: async (type, walletId) => {
-      if (get().connectedWallets[type] || get().isConnecting(type)) return;
+      const existing = get().connectedWallets[type];
+      if (existing?.address) return;
 
       set(state => ({
         pairingUri: null,
@@ -145,10 +147,15 @@ export const useWalletStore = create<WalletState & WalletActions>()(
             ? await walletService.connectStellar(walletId)
             : await walletService.connectChainWallet(walletId);
 
+        const targetAddress = type === 'evm' ? session.evmAddress : session.stellarAddress;
+        if (!targetAddress) {
+          throw new Error('No account address returned by wallet');
+        }
+
         const wallet: ConnectedWallet = {
           type,
           walletId,
-          address: type === 'evm' ? session.evmAddress! : session.stellarAddress!,
+          address: targetAddress,
           chainId: type === 'evm' ? session.evmChainId : session.stellarChainId,
           peerName: session.peerName,
           peerIcon: session.peerIcon,
@@ -562,10 +569,12 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         const status: Partial<Record<WalletType, WalletConnectionStatus>> = {};
 
         sessions.forEach((s: any) => {
+          const address = s.type === 'evm' ? s.evmAddress : s.stellarAddress;
+          if (!address) return;
           wallets[s.type as WalletType] = {
             type: s.type,
             walletId: s.walletId,
-            address: s.type === 'evm' ? s.evmAddress! : s.stellarAddress!,
+            address,
             chainId: s.type === 'evm' ? s.evmChainId : s.stellarChainId,
             peerName: s.peerName,
             peerIcon: s.peerIcon,
@@ -620,18 +629,39 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       });
     },
 
+    cancelConnection: () => {
+      walletService.cancelConnection();
+      set(state => ({
+        pairingUri: null,
+        connectingWalletId: null,
+        connectionStatus: {
+          ...state.connectionStatus,
+          evm:
+            state.connectionStatus.evm?.state === 'connecting'
+              ? { state: 'idle' }
+              : state.connectionStatus.evm,
+          stellar:
+            state.connectionStatus.stellar?.state === 'connecting'
+              ? { state: 'idle' }
+              : state.connectionStatus.stellar,
+        },
+      }));
+    },
+
     openModal: () => {
       set({ isModalOpen: true });
     },
-    closeModal: () =>
+    closeModal: () => {
+      get().cancelConnection();
       set({
         isModalOpen: false,
         isAuthenticating: false,
         pairingUri: null,
         connectingWalletId: null,
-      }),
+      });
+    },
 
-    isConnected: type => !!get().connectedWallets[type],
+    isConnected: type => Boolean(get().connectedWallets[type]?.address),
     isConnecting: type =>
       ['connecting', 'signing', 'deriving'].includes(get().connectionStatus[type]?.state ?? ''),
 
@@ -716,10 +746,18 @@ export const initWalletListener = async () => {
           const session = walletService.getSession(type);
           if (!session) return;
 
+          const address = type === 'evm' ? session.evmAddress : session.stellarAddress;
+          if (!address) {
+            console.warn(
+              `[WalletConnect] Ignored 'connected' state event with empty ${type} address`
+            );
+            return;
+          }
+
           const updatedWallet: ConnectedWallet = {
             type,
             walletId: session.walletId,
-            address: type === 'evm' ? session.evmAddress! : session.stellarAddress!,
+            address,
             chainId: type === 'evm' ? session.evmChainId : session.stellarChainId,
             peerName: session.peerName,
             peerIcon: session.peerIcon,

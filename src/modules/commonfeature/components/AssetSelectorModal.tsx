@@ -69,8 +69,12 @@ const AssetSelectorModal: FC = () => {
   const [nearTokens, setNearTokens] = useState<NearIntentToken[]>([]);
 
   useEffect(() => {
-    fetchNearIntentTokens().then(setNearTokens).catch(console.error);
-  }, []);
+    if (currentNetwork === 'mainnet') {
+      fetchNearIntentTokens('mainnet').then(setNearTokens).catch(console.error);
+    } else {
+      setNearTokens([]);
+    }
+  }, [currentNetwork]);
 
   useEffect(() => {
     const handleUpdate = () => setRegistryVersion(v => v + 1);

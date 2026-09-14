@@ -332,6 +332,14 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
   };
 
   const executeEvmNearIntentBridge = async (checkAborted: () => void) => {
+    if (currentNetwork === 'testnet') {
+      const errMsg = 'Cross-chain swaps via NEAR Intents are not supported on Testnet.';
+      setBridgeErrorMsg(errMsg);
+      setBridgeTxStatus('error');
+      showToast({ type: 'BRIDGE', title: 'Bridge Unavailable', message: errMsg, dontSave: true });
+      return;
+    }
+
     if (!executeNearIntentDeposit) {
       setBridgeTxStatus('idle');
       return;
@@ -349,7 +357,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         matchNearIntentToken,
         safeParseUnits,
       } = await import('../services/oneClickApi');
-      const nearTokens = await fetchNearIntentTokens();
+      const nearTokens = await fetchNearIntentTokens(currentNetwork);
 
       const nearSellAsset = matchNearIntentToken(
         nearTokens,

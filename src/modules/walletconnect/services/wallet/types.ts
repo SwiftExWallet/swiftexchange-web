@@ -45,4 +45,5 @@ export interface WalletServiceContext {
   saveSession: () => void;
   openMobileDeepLink: (walletId: string, uri: string) => void;
   handleDisconnect: (type: WalletType) => void;
+  cancelActiveConnection?: (reason?: string) => void;
 }

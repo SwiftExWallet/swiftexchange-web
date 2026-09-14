@@ -34,7 +34,7 @@ const TradeTransactionUI = () => {
     userAddress: stellarAddress,
   });
 
-  const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
+  const [activeTab, setActiveTab] = useState<'active' | 'completed'>('completed');
   const [cancelStatus, setCancelStatus] = useState<{
     [key: string]: 'pending' | 'success' | 'error';
   }>({});

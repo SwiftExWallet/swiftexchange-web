@@ -5,6 +5,7 @@ import { useSwapStore } from '../../../../../store/swapStore';
 import { getStellarConfig } from '../../../../walletconnect/config/chains';
 import { WalletType } from '../../../../walletconnect/constants/Wallet';
 import {
+  getChainById,
   getEvmChainsForNetwork,
   getEvmSwapEnabledChains,
   isEvmChain,
@@ -208,26 +209,42 @@ export function useSwapAssetDefaults(params: {
     setToChainId,
   ]);
 
+  const lastAttemptedChainIdRef = useRef<string | number | null>(null);
+
+  useEffect(() => {
+    if (currentChainId !== null && String(currentChainId) === String(fromChainId)) {
+      lastAttemptedChainIdRef.current = null;
+    }
+  }, [currentChainId, fromChainId]);
+
   useEffect(() => {
     if (
       isConnected &&
       isEvmChain(fromChainId) &&
       currentChainId !== null &&
       String(currentChainId) !== String(fromChainId) &&
-      !isChainSwitching
+      !isChainSwitching &&
+      lastAttemptedChainIdRef.current !== fromChainId
     ) {
       let active = true;
+      lastAttemptedChainIdRef.current = fromChainId;
+
       const autoSwitchChain = async () => {
         setIsChainSwitching(true);
         try {
           const provider = getProvider(WalletType.EVM);
           await switchOrAddChain(provider, fromChainId);
         } catch (err) {
-          console.error(err);
+          console.error('[useSwapAssetDefaults] autoSwitchChain error:', err);
           if (active) {
             setFromChainId(currentChainId);
             if (fromChainId === toChainId) {
               setToChainId(currentChainId);
+            }
+            const fallbackChain = getChainById(currentChainId);
+            if (fallbackChain?.nativeCurrency?.symbol) {
+              setSellAssetSymbol(fallbackChain.nativeCurrency.symbol);
+              setSellAssetAddress('');
             }
           }
         } finally {
@@ -250,6 +267,8 @@ export function useSwapAssetDefaults(params: {
     setFromChainId,
     setToChainId,
     toChainId,
+    setSellAssetSymbol,
+    setSellAssetAddress,
   ]);
 
   return {

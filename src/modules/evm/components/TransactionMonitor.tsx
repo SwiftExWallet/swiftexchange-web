@@ -70,20 +70,11 @@ export const TransactionMonitor: React.FC = () => {
 
         if (!isConfirmed) {
           const config = getEVMNetworkConfig(tx.chainId);
-          const receipt = await rpcManager.fetchWithFallback(
-            tx.chainId,
-            config.rpcUrls,
-            async provider => {
-              let attempts = 0;
-              while (attempts < 60) {
-                const r = await provider.getTransactionReceipt(tx.hash);
-                if (r) return r;
-                await new Promise(res => setTimeout(res, 5000));
-                attempts++;
-              }
-              return null;
-            }
-          );
+          const receipt = await rpcManager
+            .fetchWithFallback(tx.chainId, config.rpcUrls, async provider => {
+              return await provider.getTransactionReceipt(tx.hash);
+            })
+            .catch(() => null);
 
           if (receipt) {
             isConfirmed = true;

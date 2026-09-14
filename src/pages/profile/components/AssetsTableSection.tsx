@@ -65,26 +65,29 @@ export const AssetsTableSection: React.FC<AssetsTableSectionProps> = ({
             >
               All
             </button>
-            {availableChains.map(chain => (
-              <button
-                key={chain.id}
-                onClick={() => setSelectedChainFilter(chain.id)}
-                className={`px-2.5 py-1 rounded-lg text-[10.5px] font-semibold transition shrink-0 flex items-center gap-1 ${
-                  selectedChainFilter === chain.id
-                    ? 'bg-brand text-white'
-                    : 'bg-secondary text-(--color-text-secondary) hover:bg-(--color-bg-secondary) border border-(--color-border)'
-                }`}
-              >
-                {getChainLogoUrl(chain.id) && (
-                  <img
-                    src={getChainLogoUrl(chain.id)}
-                    alt={chain.name}
-                    className="w-3 h-3 rounded-full shrink-0"
-                  />
-                )}
-                {chain.name}
-              </button>
-            ))}
+            {availableChains?.map(chain => {
+              const isSelected =
+                selectedChainFilter !== 'all' &&
+                String(selectedChainFilter).toLowerCase() === String(chain.id).toLowerCase();
+              const logoUrl = getChainLogoUrl(chain.id);
+
+              return (
+                <button
+                  key={chain.id}
+                  onClick={() => setSelectedChainFilter(chain.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[10.5px] font-semibold transition shrink-0 flex items-center gap-1 cursor-pointer ${
+                    isSelected
+                      ? 'bg-brand text-white'
+                      : 'bg-secondary text-(--color-text-secondary) hover:bg-(--color-bg-secondary) border border-(--color-border)'
+                  }`}
+                >
+                  {logoUrl && (
+                    <img src={logoUrl} alt={chain.name} className="w-3 h-3 rounded-full shrink-0" />
+                  )}
+                  {chain.name}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

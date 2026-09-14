@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import {
+  formatWalletDeepLink,
+  getWalletRedirectUrls,
+  openMobileWallet,
+} from '../../../utils/walletConnectUtils';
 import { getEVMChains, getStellarConfig } from '../config/chains';
 import { WalletType } from '../constants/Wallet';
 import { walletService } from '../services/walletService';
@@ -274,4 +279,95 @@ export const useWalletConnectionStatus = (type: WalletType) => {
     }),
     [status, isConnected, isConnecting, type]
   );
+};
+
+/**
+ * Reactive browser extension detector. Listens to EIP-6963 announces and window injection events.
+ */
+export const useExtensionDetector = () => {
+  const [installedWallets, setInstalledWallets] = useState<string[]>(() =>
+    walletService.getInstalledWallets()
+  );
+
+  useEffect(() => {
+    const refresh = () => {
+      setInstalledWallets(walletService.getInstalledWallets());
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('eip6963:announceProvider', refresh);
+      window.addEventListener('load', refresh);
+    }
+
+    // Initial check and deferred check for extensions that inject late
+    refresh();
+    const timer = setTimeout(refresh, 500);
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('eip6963:announceProvider', refresh);
+        window.removeEventListener('load', refresh);
+      }
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const isInstalled = useCallback(
+    (walletId: string) => {
+      return installedWallets.includes(walletId) || walletService.isExtensionInstalled(walletId);
+    },
+    [installedWallets]
+  );
+
+  return {
+    installedWallets,
+    isInstalled,
+  };
+};
+
+/**
+ * Hook for initiating and parsing mobile native/universal deep-links from WalletConnect URIs.
+ */
+export const useWalletDeepLink = (walletId?: string | null) => {
+  const pairingUri = useWalletStore(state => state.pairingUri);
+  const [copied, setCopied] = useState(false);
+
+  const urls = useMemo(() => {
+    if (!walletId || !pairingUri) return null;
+    return getWalletRedirectUrls(walletId, pairingUri);
+  }, [walletId, pairingUri]);
+
+  const deepLink = useMemo(() => {
+    if (!walletId || !pairingUri) return null;
+    return formatWalletDeepLink(walletId, pairingUri, true);
+  }, [walletId, pairingUri]);
+
+  const openApp = useCallback(() => {
+    if (!walletId || !pairingUri) return;
+    openMobileWallet(walletId, pairingUri);
+  }, [walletId, pairingUri]);
+
+  const copyUri = useCallback(async () => {
+    if (!pairingUri) return false;
+    try {
+      await navigator.clipboard.writeText(pairingUri);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [pairingUri]);
+
+  return {
+    pairingUri,
+    deepLink,
+    nativeUrl: urls?.native,
+    universalUrl: urls?.universal,
+    isUriReady: !!pairingUri,
+    isGenerating: !pairingUri,
+    copied,
+    openApp,
+    copyUri,
+  };
 };

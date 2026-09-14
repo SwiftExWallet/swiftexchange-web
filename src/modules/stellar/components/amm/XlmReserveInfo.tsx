@@ -1,6 +1,8 @@
 import { AlertCircle, HelpCircle, Info, Lock, X } from 'lucide-react';
 import { useState } from 'react';
 
+import { StellarBaseService } from '../../service/StellarBaseService';
+
 interface XlmReserveInfoProps {
   xlmBalance: string;
   trustlineCount: number;
@@ -12,12 +14,11 @@ const BASE_RESERVE = 1;
 const SUBENTRY_RESERVE = 0.5;
 
 const calculateReserve = (trustlineCount: number): number => {
-  return BASE_RESERVE + trustlineCount * SUBENTRY_RESERVE;
+  return (2 + trustlineCount) * SUBENTRY_RESERVE;
 };
 
 const calculateAvailableBalance = (balance: number, trustlineCount: number): number => {
-  const reserve = calculateReserve(trustlineCount);
-  return Math.max(0, balance - reserve);
+  return parseFloat(StellarBaseService.calculateSpendableBalance(balance, trustlineCount, true));
 };
 
 export const XlmReserveInfoModal = ({

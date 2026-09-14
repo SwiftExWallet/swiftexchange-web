@@ -17,6 +17,48 @@ export function parseRawChainId(raw: string | number): number {
   return isNaN(n) ? 0 : n;
 }
 
+/**
+ * Determines whether an error thrown by wallet_switchEthereumChain indicates
+ * that the chain is unrecognized / has not been added to the wallet yet.
+ *
+ * Different wallets and RPC wrappers report this in different ways:
+ * - Standard EIP-1193: error.code === 4902
+ * - MetaMask wrapped JSON-RPC: error.code === -32603 with message 'Unrecognized chain ID...'
+ * - Wrapped errors: error.data?.code === 4902 or error.data?.originalError?.code === 4902
+ * - Fallback: text search for known chain-not-added keywords
+ */
+export function isChainNotAddedError(error: any): boolean {
+  if (!error) return false;
+  if (
+    error.code === 4902 ||
+    error.data?.code === 4902 ||
+    error.data?.originalError?.code === 4902
+  ) {
+    return true;
+  }
+
+  const msg = (
+    (typeof error.message === 'string' ? error.message : '') +
+    ' ' +
+    (typeof error.data?.message === 'string' ? error.data.message : '') +
+    ' ' +
+    (typeof error.data?.originalError?.message === 'string' ? error.data.originalError.message : '')
+  ).toLowerCase();
+
+  return (
+    msg.includes('4902') ||
+    msg.includes('unrecognized chain') ||
+    msg.includes('wallet_addethereumchain') ||
+    msg.includes('chain not added') ||
+    msg.includes('unknown chain') ||
+    msg.includes('could not find chain') ||
+    msg.includes('has not been added') ||
+    msg.includes('try adding the chain')
+  );
+}
+
+const inFlightSwitchRequests = new Map<string, Promise<void>>();
+
 export async function switchOrAddChain(provider: any, chainId: number | string): Promise<void> {
   if (!provider) {
     throw new Error('No EVM provider found');
@@ -38,63 +80,111 @@ export async function switchOrAddChain(provider: any, chainId: number | string):
       : Number(chainId);
   const hexChainId = `0x${numChainId.toString(16)}`;
 
-  console.info(
-    `[EVM:ChainSwitch] [${targetChain.networkType.toUpperCase()}] Switching active chain to Chain ${numChainId} (${targetChain.name})`
-  );
-
-  // WalletConnect UniversalProvider exposes setDefaultChain to switch the
-  // active chain. We call it but do NOT return early — we also send
-  // wallet_switchEthereumChain so the wallet's UI reflects the switch and
-  // subsequent RPC calls are routed to the correct chain.
-  if (typeof provider.setDefaultChain === 'function') {
-    try {
-      provider.setDefaultChain(`eip155:${numChainId}`, targetChain.rpcUrl);
-    } catch (e) {
-      console.warn('[switchOrAddChain] setDefaultChain failed (non-fatal):', e);
-    }
+  // Deduplicate concurrent in-flight switch requests for the same chain ID
+  const flightKey = hexChainId.toLowerCase();
+  const existingRequest = inFlightSwitchRequests.get(flightKey);
+  if (existingRequest) {
+    return existingRequest;
   }
 
-  try {
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: hexChainId }],
-    });
-  } catch (error: any) {
-    if (error.code === 4902) {
-      console.info(
-        `[EVM:ChainSwitch] [${targetChain.networkType.toUpperCase()}] Requesting wallet_addEthereumChain for Chain ${numChainId} (${targetChain.name})`
-      );
-      // Chain not added to the wallet — add it first
+  const switchPromise = (async () => {
+    console.info(
+      `[EVM:ChainSwitch] [${targetChain.networkType.toUpperCase()}] Switching active chain to Chain ${numChainId} (${targetChain.name})`
+    );
+
+    // WalletConnect UniversalProvider exposes setDefaultChain to switch the
+    // active chain. We call it but do NOT return early — we also send
+    // wallet_switchEthereumChain so the wallet's UI reflects the switch and
+    // subsequent RPC calls are routed to the correct chain.
+    if (typeof provider.setDefaultChain === 'function') {
       try {
-        await provider.request({
-          method: 'wallet_addEthereumChain',
-          params: [
-            {
-              chainId: hexChainId,
-              chainName: targetChain.name,
-              nativeCurrency: targetChain.nativeCurrency,
-              rpcUrls: [targetChain.rpcUrl, ...(targetChain.fallbackRpcUrls || [])],
-              blockExplorerUrls: [targetChain.blockExplorerUrl],
-            },
-          ],
-        });
-      } catch (addError: any) {
-        throw new Error(`Failed to add network: ${addError.message}`);
+        provider.setDefaultChain(`eip155:${numChainId}`, targetChain.rpcUrl);
+      } catch (e) {
+        console.warn('[switchOrAddChain] setDefaultChain failed (non-fatal):', e);
       }
-    } else if (
-      // WalletConnect sometimes throws when calling wallet_switchEthereumChain
-      // even though setDefaultChain already handled the switch. Treat these
-      // as non-fatal so we still proceed to signing.
-      error.code === -32601 || // method not found
-      error.code === -32603 || // generic internal error
-      /method.*not.*found|not.*supported/i.test(error.message ?? '')
-    ) {
-      console.warn(
-        '[switchOrAddChain] wallet_switchEthereumChain not supported by this provider (likely WalletConnect). ' +
-          'Proceeding — setDefaultChain was already called.'
-      );
-    } else {
-      throw error;
     }
-  }
+
+    try {
+      await provider.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: hexChainId }],
+      });
+    } catch (error: any) {
+      if (isChainNotAddedError(error)) {
+        console.info(
+          `[EVM:ChainSwitch] [${targetChain.networkType.toUpperCase()}] Requesting wallet_addEthereumChain for Chain ${numChainId} (${targetChain.name})`
+        );
+
+        // Strictly sanitize EIP-3085 parameters:
+        // nativeCurrency must ONLY contain { name, symbol, decimals }.
+        // Extra properties (logoURI, coingeckoId, address) trigger schema validation errors in MetaMask.
+        const cleanNativeCurrency = {
+          name: targetChain.nativeCurrency?.name || targetChain.name || 'POL',
+          symbol: targetChain.nativeCurrency?.symbol || targetChain.symbol || 'POL',
+          decimals: Number(targetChain.nativeCurrency?.decimals) || 18,
+        };
+
+        const cleanRpcUrls = Array.from(
+          new Set(
+            [
+              targetChain.rpcUrl,
+              ...(Array.isArray(targetChain.rpcUrls) ? targetChain.rpcUrls : []),
+              ...(Array.isArray(targetChain.fallbackRpcUrls) ? targetChain.fallbackRpcUrls : []),
+            ].filter(
+              (url): url is string => typeof url === 'string' && url.trim().startsWith('http')
+            )
+          )
+        );
+
+        const cleanBlockExplorerUrls = [targetChain.blockExplorerUrl].filter(
+          (url): url is string => typeof url === 'string' && url.trim().startsWith('http')
+        );
+
+        try {
+          await provider.request({
+            method: 'wallet_addEthereumChain',
+            params: [
+              {
+                chainId: hexChainId,
+                chainName: targetChain.name,
+                nativeCurrency: cleanNativeCurrency,
+                rpcUrls: cleanRpcUrls.length > 0 ? cleanRpcUrls : [targetChain.rpcUrl],
+                blockExplorerUrls:
+                  cleanBlockExplorerUrls.length > 0 ? cleanBlockExplorerUrls : undefined,
+              },
+            ],
+          });
+
+          // Some wallets add the network without automatically switching to it.
+          // Try switching now that the chain has been added.
+          try {
+            await provider.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: hexChainId }],
+            });
+          } catch {
+            // Non-fatal if the wallet already activated the chain upon addition
+          }
+        } catch (addError: any) {
+          throw new Error(`Failed to add network: ${addError.message || addError}`);
+        }
+      } else if (
+        // Genuine method-not-supported on WalletConnect bridges
+        error.code === -32601 ||
+        /method.*not.*found|not.*supported/i.test(error.message ?? '')
+      ) {
+        console.warn(
+          '[switchOrAddChain] wallet_switchEthereumChain not supported by this provider (likely WalletConnect). ' +
+            'Proceeding — setDefaultChain was already called.'
+        );
+      } else {
+        throw error;
+      }
+    }
+  })().finally(() => {
+    inFlightSwitchRequests.delete(flightKey);
+  });
+
+  inFlightSwitchRequests.set(flightKey, switchPromise);
+  return switchPromise;
 }

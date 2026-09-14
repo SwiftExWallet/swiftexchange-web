@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Horizon } from '@stellar/stellar-sdk';
 
 import { getStellarConfig } from '../../walletconnect/config/chains';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
+import { StellarBaseService } from '../service/StellarBaseService';
 
 interface UseStellarBalancesReturn {
   balances: any[];
@@ -22,12 +23,10 @@ export const useStellarBalances = (publicKey?: string): UseStellarBalancesReturn
   const server = useMemo(() => {
     const config = getStellarConfig(currentNetwork);
     if (!config) return null;
-    return new Horizon.Server(config.horizonUrl, {
-      allowHttp: config.horizonUrl.startsWith('http://'),
-    });
+    return StellarBaseService.getOrCreateServer(config.horizonUrl);
   }, [currentNetwork]);
 
-  const fetchBalances = async () => {
+  const fetchBalances = useCallback(async () => {
     if (!publicKey || !server) {
       setLoading(false);
       return;
@@ -49,11 +48,11 @@ export const useStellarBalances = (publicKey?: string): UseStellarBalancesReturn
     } finally {
       setLoading(false);
     }
-  };
+  }, [publicKey, server]);
 
   useEffect(() => {
     fetchBalances();
-  }, [publicKey, server]);
+  }, [fetchBalances]);
 
   return { balances, loading, error, server, refetch: fetchBalances };
 };

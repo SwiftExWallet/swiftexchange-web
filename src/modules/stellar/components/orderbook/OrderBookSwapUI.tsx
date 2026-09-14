@@ -21,9 +21,11 @@ import { portfolioUtils } from '../../../walletconnect/utils/portfolioUtils';
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../../constants/orderBookSwapConstants';
 import { useLargeOrder } from '../../hook/useOrderBookSwap';
 import { useStickySidebar } from '../../hook/useStickySidebar';
+import { StellarBaseService } from '../../service/StellarBaseService';
 import { useAmmSwapStore } from '../../store/ammSwapStore';
 import { useLargeOrderStore } from '../../store/orderBookSwapStore';
 import { StellarAccountPanel } from '../account/StellarAccountPanel';
+import { StellarShimmerSkeleton } from '../common/StellarShimmerSkeleton';
 import StellarAssetSelectorModal from '../modals/StellarAssetSelectorModal';
 import OrderBook from './OrderBook';
 
@@ -58,6 +60,7 @@ const OrderBookSwapUI = () => {
     quote,
     isLoading,
     error,
+    isInsufficientBalance,
     orderBook,
     availableTokens,
     setIsBuy,
@@ -205,6 +208,28 @@ const OrderBookSwapUI = () => {
     reset,
   ]);
 
+  const fromSpendable = fromToken
+    ? StellarBaseService.calculateSpendableBalance(
+        fromToken.balance || '0',
+        subentryCount,
+        fromToken.code === 'XLM' || fromToken.asset?.isNative() || false
+      )
+    : '0';
+
+  const toSpendable = toToken
+    ? StellarBaseService.calculateSpendableBalance(
+        toToken.balance || '0',
+        subentryCount,
+        toToken.code === 'XLM' || toToken.asset?.isNative() || false
+      )
+    : '0';
+
+  const fromSpendableFormatted = portfolioUtils.formatBalance(fromSpendable);
+  const toSpendableFormatted = portfolioUtils.formatBalance(toSpendable);
+
+  const payingToken = isBuy ? toToken : fromToken;
+  const payingSpendableFormatted = isBuy ? toSpendableFormatted : fromSpendableFormatted;
+
   const canPlaceOrder =
     amount &&
     parseFloat(amount) > 0 &&
@@ -212,21 +237,13 @@ const OrderBookSwapUI = () => {
     parseFloat(price) > 0 &&
     !isLoading &&
     quote &&
-    stellarWallet;
-  const toBalance = toToken?.balance ? parseFloat(toToken.balance).toFixed(4) : '0.00';
-
-  const spendableAmount = fromToken?.balance
-    ? portfolioUtils.formatBalance(
-        fromToken.code === 'XLM'
-          ? Math.max(0, parseFloat(fromToken.balance) - (1 + subentryCount * 0.5 + 0.05)).toString()
-          : fromToken.balance
-      )
-    : '0.00';
+    stellarWallet &&
+    !isInsufficientBalance;
 
   const renderOrderForm = () => {
     const baseCode = fromToken?.code || 'XLM';
     const quoteCode = toToken?.code || 'USDC';
-    const activeBalance = isBuy ? toBalance : spendableAmount;
+    const activeBalance = isBuy ? toSpendableFormatted : fromSpendableFormatted;
     const activeUnit = isBuy ? quoteCode : baseCode;
 
     const targetToken = !fromToken?.asset.isNative() ? fromToken : toToken;
@@ -535,6 +552,16 @@ const OrderBookSwapUI = () => {
           </div>
         </div>
 
+        {isInsufficientBalance && !(error || errorMessage) && (
+          <div className="mb-3 p-2 bg-amber-500/10 rounded-xl flex items-start gap-1.5 border border-amber-500/20">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+            <p className="text-[11px] text-amber-500 font-bold leading-tight uppercase tracking-wider">
+              Insufficient {payingToken?.code} balance (Spendable: {payingSpendableFormatted}{' '}
+              {payingToken?.code})
+            </p>
+          </div>
+        )}
+
         {(error || errorMessage) && (
           <div className="mb-3 p-2 bg-red-500/10 rounded-xl flex items-start gap-1.5 border border-red-500/20">
             <AlertCircle className="w-3.5 h-3.5 text-red-500 mt-0.5 shrink-0" />
@@ -552,9 +579,11 @@ const OrderBookSwapUI = () => {
                 ? 'btn btn-primary bg-brand hover:bg-brand-hover text-white'
                 : orderStatus === 'pending'
                   ? 'bg-brand/50 text-white cursor-wait'
-                  : isBuy
-                    ? 'bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-500/20'
-                    : 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/20'
+                  : isInsufficientBalance
+                    ? 'bg-tertiary text-muted opacity-50 cursor-not-allowed border border-divider'
+                    : isBuy
+                      ? 'bg-green-500 hover:bg-green-600 text-white shadow-lg shadow-green-500/20'
+                      : 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/20'
             }`}
           >
             {!stellarWallet ? (
@@ -569,6 +598,8 @@ const OrderBookSwapUI = () => {
                 <CheckCircle className="w-3.5 h-3.5" />
                 {SUCCESS_MESSAGES.ORDER_SUCCESS || 'ORDER PLACED'}
               </span>
+            ) : isInsufficientBalance ? (
+              `INSUFFICIENT ${payingToken?.code || ''} BALANCE`
             ) : !toToken?.hasTrustline && !toToken?.asset.isNative() ? (
               `ADD TRUSTLINE & ${isBuy ? 'BUY' : 'SELL'} ${baseCode}`
             ) : (
@@ -579,6 +610,10 @@ const OrderBookSwapUI = () => {
       </div>
     );
   };
+
+  if (availableTokens.length === 0 && !fromToken) {
+    return <StellarShimmerSkeleton view="orderbook" />;
+  }
 
   return (
     <>
@@ -684,7 +719,13 @@ const OrderBookSwapUI = () => {
                       ? toToken.balance
                       : '0.00'
                 }
-                spendableXlm={spendableAmount}
+                spendableXlm={
+                  fromToken?.code === 'XLM'
+                    ? fromSpendableFormatted
+                    : toToken?.code === 'XLM'
+                      ? toSpendableFormatted
+                      : '0.00'
+                }
                 subentryCount={subentryCount}
               />
 
@@ -851,7 +892,13 @@ const OrderBookSwapUI = () => {
                     ? toToken.balance
                     : '0.00'
               }
-              spendableXlm={spendableAmount}
+              spendableXlm={
+                fromToken?.code === 'XLM'
+                  ? fromSpendableFormatted
+                  : toToken?.code === 'XLM'
+                    ? toSpendableFormatted
+                    : '0.00'
+              }
               subentryCount={subentryCount}
             />
           </div>

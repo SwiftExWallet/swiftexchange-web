@@ -112,19 +112,17 @@ export async function ensureFusionAllowance(
   provider: any,
   chainId: number | string,
   onBeforeWalletSign?: () => void,
-  useUnlimitedApproval: boolean = false
+  useUnlimitedApproval: boolean = false,
+  knownAllowance?: bigint
 ): Promise<{ approvalTxHash?: string }> {
   if (!tokenAddress || isNativeAddress(tokenAddress)) {
     return {};
   }
 
-  const allowance = await readAllowance(
-    tokenAddress,
-    walletAddress,
-    LIMIT_ORDER_PROTOCOL,
-    chainId,
-    provider
-  );
+  const allowance =
+    knownAllowance !== undefined
+      ? knownAllowance
+      : await readAllowance(tokenAddress, walletAddress, LIMIT_ORDER_PROTOCOL, chainId, provider);
 
   if (allowance >= amountBN) {
     return {};

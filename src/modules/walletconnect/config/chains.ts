@@ -87,8 +87,12 @@ export const WALLETCONNECT_PROJECT_ID = import.meta.env.VITE_WALLETCONNECT_PROJE
 export const WALLETCONNECT_METADATA = {
   name: 'SwiftExchange',
   description: 'Trade Swiftly, Trade Securely',
-  url: 'https://app.swiftexchange.io',
-  icons: ['/logo.png'],
+  url: typeof window !== 'undefined' ? window.location.origin : 'https://app.swiftexchange.io',
+  icons: [
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/logo.png`
+      : 'https://app.swiftexchange.io/logo.png',
+  ],
 };
 
 export const buildUnifiedNamespaces = (

@@ -351,10 +351,58 @@ describe('Unified Multi-Chain & EVM Request Verification', () => {
             expect.objectContaining({
               chainId: '0x89',
               chainName: 'Polygon',
+              nativeCurrency: {
+                name: 'Polygon',
+                symbol: 'POL',
+                decimals: 18,
+              },
             }),
           ],
         })
       );
+    });
+
+    it('adds chain via wallet_addEthereumChain when wallet returns -32603 unrecognized chain (e.g. Polygon Amoy 80002)', async () => {
+      let switchAttempts = 0;
+      const provider = {
+        setDefaultChain: vi.fn(),
+        request: vi.fn(async ({ method }: { method: string }) => {
+          if (method === 'wallet_switchEthereumChain') {
+            switchAttempts++;
+            if (switchAttempts === 1) {
+              const err: any = new Error(
+                'Unrecognized chain ID "0x13882". Try adding the chain using wallet_addEthereumChain.'
+              );
+              err.code = -32603;
+              throw err;
+            }
+            return null; // switch succeeds on follow-up after add
+          }
+          if (method === 'wallet_addEthereumChain') {
+            return null;
+          }
+        }),
+      };
+
+      await switchOrAddChain(provider, 80002);
+
+      expect(provider.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'wallet_addEthereumChain',
+          params: [
+            expect.objectContaining({
+              chainId: '0x13882',
+              chainName: 'Polygon Amoy',
+              nativeCurrency: {
+                name: 'Polygon',
+                symbol: 'POL',
+                decimals: 18,
+              },
+            }),
+          ],
+        })
+      );
+      expect(switchAttempts).toBe(2);
     });
 
     it('adjusts fee data to respect minimum gas price on L2 networks (e.g. Polygon 30 Gwei)', () => {

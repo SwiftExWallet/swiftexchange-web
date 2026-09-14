@@ -7,7 +7,7 @@ import {
   PanelBottom,
   PanelTop,
 } from 'lucide-react';
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 interface OrderBookProps {
   orderBook: any;
@@ -91,11 +91,14 @@ const OrderBook: React.FC<OrderBookProps> = ({
     }
   }, [orderBook]);
 
-  const handlePriceClick = (price: string) => {
-    setPrice(price);
-    setHighlightedPrice(price);
-    setTimeout(() => setHighlightedPrice(null), 400);
-  };
+  const handlePriceClick = useCallback(
+    (price: string) => {
+      setPrice(price);
+      setHighlightedPrice(price);
+      setTimeout(() => setHighlightedPrice(null), 400);
+    },
+    [setPrice]
+  );
 
   const maxRows = viewMode === 'both' ? 8 : 16;
 
@@ -104,22 +107,26 @@ const OrderBook: React.FC<OrderBookProps> = ({
     return [...orderBook.asks].slice(0, maxRows);
   }, [orderBook?.asks, hasAsks, maxRows]);
 
-  let cumAsk = 0;
-  const asksWithTotal = topAsks.map((a: any) => {
-    cumAsk += parseFloat(a.amount);
-    return { ...a, cumulativeAmount: cumAsk };
-  });
+  const asksWithTotal = useMemo(() => {
+    let cumAsk = 0;
+    return topAsks.map((a: any) => {
+      cumAsk += parseFloat(a.amount);
+      return { ...a, cumulativeAmount: cumAsk };
+    });
+  }, [topAsks]);
 
   const topBids = useMemo(() => {
     if (!hasBids) return [];
     return [...orderBook.bids].slice(0, maxRows);
   }, [orderBook?.bids, hasBids, maxRows]);
 
-  let cumBid = 0;
-  const bidsWithTotal = topBids.map((b: any) => {
-    cumBid += parseFloat(b.amount);
-    return { ...b, cumulativeAmount: cumBid };
-  });
+  const bidsWithTotal = useMemo(() => {
+    let cumBid = 0;
+    return topBids.map((b: any) => {
+      cumBid += parseFloat(b.amount);
+      return { ...b, cumulativeAmount: cumBid };
+    });
+  }, [topBids]);
 
   const maxTotal = useMemo(() => {
     const askMax =

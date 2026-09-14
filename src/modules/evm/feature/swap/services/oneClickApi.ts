@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 
+import { useWalletStore } from '../../../../walletconnect/store/walletConnectStore';
 import { findChain } from '../../../utils/Chainregistry';
 
 export interface NearIntentQuoteRequest {
@@ -51,6 +52,11 @@ export interface NearIntentToken {
 }
 
 const API_BASE_URL = import.meta.env.VITE_ONE_CLICK_API_URL || 'https://1click.chaindefuser.com';
+
+export const isNearIntentNetworkSupported = (network?: string): boolean => {
+  const currentNet = network || useWalletStore?.getState?.()?.network || 'mainnet';
+  return currentNet === 'mainnet';
+};
 
 export const DUMMY_STELLAR_ADDRESS = 'GA222A4L4FY52R67PGYL5TBCUKQVJUUDGROKUOMKF2AZWLXQPMY6MIFY';
 export const DUMMY_EVM_ADDRESS = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
@@ -195,7 +201,11 @@ let lastNearIntentTokensFetch = 0;
 const NEAR_INTENT_TOKENS_TTL = 5 * 60 * 1000; // 5 minutes
 let fetchNearIntentTokensPromise: Promise<NearIntentToken[]> | null = null;
 
-export const fetchNearIntentTokens = async (): Promise<NearIntentToken[]> => {
+export const fetchNearIntentTokens = async (network?: string): Promise<NearIntentToken[]> => {
+  if (!isNearIntentNetworkSupported(network)) {
+    return [];
+  }
+
   const now = Date.now();
   if (cachedNearIntentTokens && now - lastNearIntentTokensFetch < NEAR_INTENT_TOKENS_TTL) {
     return cachedNearIntentTokens;
@@ -227,8 +237,13 @@ export const fetchNearIntentTokens = async (): Promise<NearIntentToken[]> => {
 };
 
 export const getNearIntentQuote = async (
-  request: NearIntentQuoteRequest
+  request: NearIntentQuoteRequest,
+  network?: string
 ): Promise<NearIntentQuoteResponse> => {
+  if (!isNearIntentNetworkSupported(network)) {
+    throw new Error('NEAR Intents is not supported on Testnet. Please switch to Mainnet.');
+  }
+
   const response = await fetch(`${API_BASE_URL}/v0/quote`, {
     method: 'POST',
     headers: getHeaders(),
@@ -244,8 +259,13 @@ export const getNearIntentQuote = async (
 export const submitNearIntentDeposit = async (
   txHash: string,
   depositAddress: string,
-  memo?: string
+  memo?: string,
+  network?: string
 ): Promise<void> => {
+  if (!isNearIntentNetworkSupported(network)) {
+    throw new Error('NEAR Intents is not supported on Testnet. Please switch to Mainnet.');
+  }
+
   const response = await fetch(`${API_BASE_URL}/v0/deposit/submit`, {
     method: 'POST',
     headers: getHeaders(),
@@ -260,8 +280,13 @@ export const submitNearIntentDeposit = async (
 export const pollNearIntentStatus = async (
   quoteHash: string,
   depositAddress?: string,
-  depositMemo?: string
+  depositMemo?: string,
+  network?: string
 ): Promise<any> => {
+  if (!isNearIntentNetworkSupported(network)) {
+    throw new Error('NEAR Intents is not supported on Testnet. Please switch to Mainnet.');
+  }
+
   let url = `${API_BASE_URL}/v0/status?quoteHash=${encodeURIComponent(quoteHash)}`;
   if (depositAddress) {
     url += `&depositAddress=${encodeURIComponent(depositAddress)}`;

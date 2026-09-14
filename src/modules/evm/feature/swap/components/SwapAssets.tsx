@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowRight,
   ArrowUpDown,
   ChevronDown,
@@ -51,6 +52,7 @@ import { isSameAsset, isStellar, matchesAddress } from '../utils/swapAssetUtils'
 import { parseSwapError } from '../utils/swapErrorHandler';
 import { ActivationModal } from './ActivationModal';
 import FusionQuoteScreen from './FusionQuoteScreen';
+import { QuoteCountdownBadge, SwapMiddleProgressRing } from './QuoteRefreshTimer';
 import SlippageSettingsModal from './SlippageSettingsModal';
 import { SwapExecutionScreen } from './SwapExecutionScreen';
 
@@ -71,29 +73,27 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   const currentChainId = evmWallet?.chainId || null;
   const currentNetwork = useWalletStore((state: any) => state.network) as 'mainnet' | 'testnet';
 
-  const {
-    fromChainId,
-    setFromChainId,
-    toChainId,
-    setToChainId,
-    sellAssetSymbol,
-    setSellAssetSymbol,
-    sellAssetAddress,
-    setSellAssetAddress,
-    buyAssetSymbol,
-    setBuyAssetSymbol,
-    buyAssetAddress,
-    setBuyAssetAddress,
-    sellAmount,
-    setSellAmount,
-    isGasless,
-    setIsGasless,
-    userSlippageTolerance,
-    setUserSlippageTolerance,
-    feePayType,
-    setFeePayType,
-    resetInputs,
-  } = useSwapStore();
+  const fromChainId = useSwapStore(s => s.fromChainId);
+  const setFromChainId = useSwapStore(s => s.setFromChainId);
+  const toChainId = useSwapStore(s => s.toChainId);
+  const setToChainId = useSwapStore(s => s.setToChainId);
+  const sellAssetSymbol = useSwapStore(s => s.sellAssetSymbol);
+  const setSellAssetSymbol = useSwapStore(s => s.setSellAssetSymbol);
+  const sellAssetAddress = useSwapStore(s => s.sellAssetAddress);
+  const setSellAssetAddress = useSwapStore(s => s.setSellAssetAddress);
+  const buyAssetSymbol = useSwapStore(s => s.buyAssetSymbol);
+  const setBuyAssetSymbol = useSwapStore(s => s.setBuyAssetSymbol);
+  const buyAssetAddress = useSwapStore(s => s.buyAssetAddress);
+  const setBuyAssetAddress = useSwapStore(s => s.setBuyAssetAddress);
+  const sellAmount = useSwapStore(s => s.sellAmount);
+  const setSellAmount = useSwapStore(s => s.setSellAmount);
+  const isGasless = useSwapStore(s => s.isGasless);
+  const setIsGasless = useSwapStore(s => s.setIsGasless);
+  const userSlippageTolerance = useSwapStore(s => s.userSlippageTolerance);
+  const setUserSlippageTolerance = useSwapStore(s => s.setUserSlippageTolerance);
+  const feePayType = useSwapStore(s => s.feePayType);
+  const setFeePayType = useSwapStore(s => s.setFeePayType);
+  const resetInputs = useSwapStore(s => s.resetInputs);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
@@ -389,7 +389,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     );
   }, [actionType, fromChainId, toChainId, selectedSellAsset, selectedBuyAsset]);
 
-  const { currentQuote, setCurrentQuote, timeLeft, isQuoteLoading } = useSwapQuote({
+  const { currentQuote, setCurrentQuote, isQuoteLoading, fetchUnifiedQuote } = useSwapQuote({
     sellAmount,
     isChainSwitching,
     showFusionScreen: false,
@@ -415,6 +415,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     evmAddress,
     stellarAddress,
     isStellarAccountActive,
+    currentNetwork,
   });
 
   const { executeDeposit: executeNearIntentDeposit } = useNearIntentCrossChain({
@@ -533,6 +534,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     showFusionScreen,
     missingWallets,
     isStellarAccountActive,
+    currentNetwork,
   });
 
   useEffect(() => {
@@ -926,6 +928,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
             setFromChainId(newChainId);
           } catch (err: any) {
             console.error('Failed to switch chain:', err);
+            throw err;
           } finally {
             setIsChainSwitching(false);
           }
@@ -1166,6 +1169,25 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
               )}
             </div>
           )}
+
+          {currentNetwork === 'testnet' && actionType === 'BRIDGE' && (
+            <div className="flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 mb-3 animate-fade-in shadow-sm">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5">
+                <AlertTriangle size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                  Cross-Chain Swaps Unsupported on Testnet
+                </h4>
+                <p className="text-xs text-muted mt-1 leading-relaxed">
+                  Cross-chain swaps between Stellar and EVM networks use NEAR Intents, which
+                  operates exclusively on <span className="font-bold text-primary">Mainnet</span>.
+                  Please switch to Mainnet in the top navigation to bridge assets.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Pay Card */}
           <div className="bg-tertiary rounded-2xl p-4 py-6 lg:p-6 shadow-sm relative overflow-hidden flex flex-col border border-divider/50 w-full max-w-full">
             <div
@@ -1190,14 +1212,18 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                   openAssetSelector(actionType, {
                     defaultNetwork: fromChainId,
                     pairedChainId: toChainId,
-                    onSelect: (a: any) => {
+                    onSelect: async (a: any) => {
                       const stellarTargetId = getStellarConfig(currentNetwork).chainId;
-                      handleChainSelectInModal(
-                        isStellar(a.chainId) ? stellarTargetId : Number(a.chainId),
-                        true
-                      );
-                      setSellAssetSymbol(a.symbol);
-                      setSellAssetAddress(a.address || '');
+                      const targetChainId = isStellar(a.chainId)
+                        ? stellarTargetId
+                        : Number(a.chainId);
+                      try {
+                        await handleChainSelectInModal(targetChainId, true);
+                        setSellAssetSymbol(a.symbol);
+                        setSellAssetAddress(a.address || '');
+                      } catch (err) {
+                        console.warn('[SwapAssets] Source chain switch failed or rejected:', err);
+                      }
                     },
                   })
                 }
@@ -1304,35 +1330,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           {/* Swap Middle Button */}
           <div className="flex justify-center -my-4 lg:-my-5 relative z-10">
             <div className="relative flex items-center justify-center w-12 h-12 md:w-14 md:h-14">
-              <div
-                className={`absolute inset-0 w-full h-full select-none pointer-events-none ${isQuoteLoading ? 'animate-spin' : ''}`}
-              >
-                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 56 56">
-                  <circle
-                    cx="28"
-                    cy="28"
-                    r="24"
-                    className="stroke-white/5"
-                    strokeWidth="2.5"
-                    fill="transparent"
-                  />
-                  <circle
-                    cx="28"
-                    cy="28"
-                    r="24"
-                    className="stroke-brand transition-all duration-1000 origin-center"
-                    strokeWidth="2.5"
-                    fill="transparent"
-                    strokeDasharray={`${2 * Math.PI * 24}`}
-                    strokeDashoffset={
-                      isQuoteLoading
-                        ? 2 * Math.PI * 24 * 0.75
-                        : 2 * Math.PI * 24 * (1 - timeLeft / 30)
-                    }
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
+              <SwapMiddleProgressRing isQuoteLoading={isQuoteLoading} />
 
               <button
                 onClick={handleAssetSwap}
@@ -1438,12 +1436,10 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                     </div>
                   )}
                 {currentQuote.data && !isSameAssetSelected && !isErrorState && (
-                  <div className="text-[9px] sm:text-[10px] text-green-500 font-extrabold uppercase tracking-widest mt-1 flex items-center justify-end gap-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full border border-green-500/30 flex items-center justify-center">
-                      <div className="w-0.5 h-0.5 rounded-full bg-green-500" />
-                    </div>
-                    {`Refreshing in ${timeLeft}s`}
-                  </div>
+                  <QuoteCountdownBadge
+                    isQuoteLoading={isQuoteLoading}
+                    onRefresh={fetchUnifiedQuote}
+                  />
                 )}
               </div>
             </div>
@@ -1453,7 +1449,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
             >
               <div className="overflow-hidden">
                 <div className="pt-5 sm:pt-6 border-t border-dotted border-white/10 space-y-1">
-                  {currentQuote.alternativeQuote && (
+                  {currentNetwork !== 'testnet' && currentQuote.alternativeQuote && (
                     <div className="flex items-center justify-between py-3 border-b border-white/5">
                       <div className="flex flex-col">
                         <span className="text-[11px] font-black uppercase tracking-widest text-[#00E08B]">

@@ -13,6 +13,7 @@ import {
   matchNearIntentToken,
   safeParseUnits,
 } from '../services/oneClickApi';
+import { useQuoteTimerStore } from '../store/quoteTimerStore';
 import type { UnifiedAsset, UnifiedQuote } from '../types/swap.types';
 import { isStellar } from '../utils/swapAssetUtils';
 import { parseSwapError } from '../utils/swapErrorHandler';
@@ -43,6 +44,7 @@ export interface UseSwapQuoteParams {
   evmAddress?: string;
   stellarAddress?: string;
   isStellarAccountActive?: boolean | null;
+  currentNetwork?: 'mainnet' | 'testnet';
 }
 
 export function useSwapQuote(params: UseSwapQuoteParams) {
@@ -69,6 +71,7 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     evmAddress,
     stellarAddress,
     isStellarAccountActive,
+    currentNetwork,
   } = params;
 
   const [currentQuote, setCurrentQuote] = useState<UnifiedQuote>({
@@ -77,7 +80,6 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     error: null,
     loading: false,
   });
-  const [timeLeft, setTimeToNextRefresh] = useState(30);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const latestRequestId = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -238,9 +240,27 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     } else {
       if (!selectedSellAsset || !selectedBuyAsset) return;
 
+      if (currentNetwork === 'testnet') {
+        const isFromStellar = isStellar(fromChainId);
+        const isToStellar = isStellar(toChainId);
+        const unsupportedMsg =
+          isFromStellar || isToStellar
+            ? 'Cross-chain swaps (Stellar ↔ EVM) via NEAR Intents are not supported on Testnet. Please switch to Mainnet.'
+            : 'Cross-chain bridging is not supported on Testnet. Please switch to Mainnet.';
+
+        setCurrentQuote({
+          source: isFromStellar || isToStellar ? 'NEAR_INTENT' : 'FUSION_PLUS',
+          data: null,
+          error: unsupportedMsg,
+          loading: false,
+        });
+        setCrossChainWarning(unsupportedMsg);
+        return;
+      }
+
       const fetchNearIntentQuote = async () => {
         try {
-          const nearTokens = await fetchNearIntentTokens();
+          const nearTokens = await fetchNearIntentTokens(currentNetwork);
           const nearSellAsset = matchNearIntentToken(
             nearTokens,
             sellAssetSymbol,
@@ -436,12 +456,13 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     setBridgeErrorMsg,
     resetSwap,
     isStellarAccountActive,
+    currentNetwork,
   ]);
 
   const isQuoteLoading = !!(currentQuote.loading || swapQuoteLoading || isRefreshing);
 
   useEffect(() => {
-    setTimeToNextRefresh(30);
+    useQuoteTimerStore.getState().resetTimer(30);
     resetSwap();
   }, [fromChainId, toChainId, sellAssetSymbol, buyAssetSymbol, resetSwap]);
 
@@ -465,17 +486,16 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
 
     if (sellAmount && parseFloat(sellAmount) > 0 && !shouldPauseTimer) {
       timer = setInterval(() => {
-        setTimeToNextRefresh(prev => {
-          if (prev <= 1) return 0;
-          return prev - 1;
-        });
+        const { timeLeft, setTimeLeft, resetTimer } = useQuoteTimerStore.getState();
+        if (timeLeft <= 1) {
+          resetTimer(30);
+          fetchUnifiedQuote();
+        } else {
+          setTimeLeft(prev => prev - 1);
+        }
       }, 1000);
     } else {
-      if (isQuoteLoading) {
-        setTimeToNextRefresh(30);
-      } else if (!shouldPauseTimer) {
-        setTimeToNextRefresh(30);
-      }
+      useQuoteTimerStore.getState().resetTimer(30);
     }
 
     return () => {
@@ -488,20 +508,12 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     isSameAssetSelected,
     isQuoteLoading,
     bridgeTxStatus,
+    fetchUnifiedQuote,
   ]);
-
-  useEffect(() => {
-    if (timeLeft <= 0) {
-      setTimeToNextRefresh(30);
-      fetchUnifiedQuote();
-    }
-  }, [timeLeft, fetchUnifiedQuote]);
 
   return {
     currentQuote,
     setCurrentQuote,
-    timeLeft,
-    setTimeToNextRefresh,
     isRefreshing,
     setIsRefreshing,
     isQuoteLoading,

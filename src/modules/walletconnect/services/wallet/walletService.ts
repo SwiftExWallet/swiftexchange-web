@@ -217,6 +217,35 @@ class WalletService {
     this.ctx.isSignRequestInFlight.clear();
   }
 
+  cancelConnection(): void {
+    try {
+      if (this.ctx.cancelActiveConnection) {
+        try {
+          this.ctx.cancelActiveConnection('Connection cancelled by user');
+        } catch {
+          // ignore
+        }
+        this.ctx.cancelActiveConnection = undefined;
+      }
+      for (const modal of this.ctx.modals.values()) {
+        try {
+          modal?.closeModal?.();
+        } catch {
+          // ignore
+        }
+      }
+      for (const provider of this.ctx.providers.values()) {
+        try {
+          provider?.abortPairing?.();
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      console.warn('[WalletService] cancelConnection error:', err);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Public accessors
   // ---------------------------------------------------------------------------

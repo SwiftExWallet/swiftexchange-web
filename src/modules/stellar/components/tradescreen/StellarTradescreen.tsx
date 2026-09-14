@@ -5,8 +5,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { StellarActivationBanner } from '../../../walletconnect/components/StellarActivationBanner';
 import { WalletType } from '../../../walletconnect/constants/Wallet';
 import { useWalletConnect } from '../../../walletconnect/hooks/useWalletConnect';
-import { TradeTransactionService } from '../../service/tradeTransactionService';
 import { useAmmSwapStore } from '../../store/ammSwapStore';
+import { StellarShimmerSkeleton } from '../common/StellarShimmerSkeleton';
 import ClaimableBalanceModal from '../modals/ClaimableBalanceModal';
 import { StellarTickerBar } from './StellarTickerBar';
 
@@ -28,7 +28,6 @@ const StellarTradeScreen = () => {
     return 'amm';
   });
   const [showClaimModal, setShowClaimModal] = useState(false);
-  const [hasCheckedClaims, setHasCheckedClaims] = useState(false);
   const { setPreSelectedToken } = useAmmSwapStore();
 
   useEffect(() => {
@@ -64,25 +63,6 @@ const StellarTradeScreen = () => {
     }
   }, [activeTab, navigate, location.search]);
 
-  useEffect(() => {
-    if (!stellarWallet?.address || hasCheckedClaims) return;
-
-    const checkClaims = async () => {
-      const service = new TradeTransactionService();
-      try {
-        const claims = await service.getClaimableBalances(stellarWallet.address);
-        if (claims.length > 0) {
-          setShowClaimModal(true);
-        }
-      } catch (err) {
-        console.warn('Failed to auto check claims:', err);
-      } finally {
-        setHasCheckedClaims(true);
-      }
-    };
-    checkClaims();
-  }, [stellarWallet?.address, hasCheckedClaims]);
-
   return (
     <div className="bg-[var(--color-bg-primary)] max-w-[100vw] px-3 sm:px-4 md:px-6 py-2 sm:py-4 lg:p-4 lg:pb-0 min-h-screen overflow-x-clip relative transition-colors">
       <StellarActivationBanner className="mb-2" />
@@ -103,9 +83,7 @@ const StellarTradeScreen = () => {
       <div className="animate-fade-in pb-10">
         <Suspense
           fallback={
-            <div className="w-full h-[400px] flex items-center justify-center bg-[var(--color-bg-secondary)] lg:rounded-2xl border border-[var(--color-border)]/60 shadow-xl">
-              <div className="w-8 h-8 border-3 border-[var(--color-brand-primary)] border-t-transparent rounded-full animate-spin"></div>
-            </div>
+            <StellarShimmerSkeleton view={activeTab === 'orderbook' ? 'orderbook' : 'swap'} />
           }
         >
           <div className="mb-1 lg:mb-4">

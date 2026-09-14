@@ -16,6 +16,7 @@ const EIP6963_RDNS_MAP: Record<string, string[]> = {
   rabby: ['io.rabby'],
   coinbase: ['com.coinbase.wallet'],
   rainbow: ['me.rainbow'],
+  hotwallet: ['org.hot-labs'],
 };
 
 // Reverse map: rdns → walletId
@@ -40,7 +41,8 @@ function isGenuineMetaMask(provider: any): boolean {
     provider.isBitKeep ||
     provider.isTokenPocket ||
     provider.isEnkrypt ||
-    provider.isApex
+    provider.isApex ||
+    provider.isHotWallet
   );
 }
 
@@ -88,6 +90,9 @@ export async function resolveEvmProvider(
     case 'phantom':
       if (win.phantom?.ethereum) return win.phantom.ethereum;
       break;
+    case 'swiftex':
+      if (win.swiftex?.ethereum || win.swiftex) return win.swiftex?.ethereum || win.swiftex;
+      break;
   }
 
   if (!Array.isArray(injectedProviders) && win.ethereum) {
@@ -110,6 +115,12 @@ export async function resolveEvmProvider(
       case 'phantom':
         if (win.ethereum.isPhantom) return win.ethereum;
         break;
+      case 'hotwallet':
+        if (win.ethereum.isHotWallet) return win.ethereum;
+        break;
+      case 'swiftex':
+        if (win.ethereum.isSwiftEx) return win.ethereum;
+        break;
     }
   }
 
@@ -130,6 +141,10 @@ function findInProvidersArray(providers: any[], walletId: string): any | null {
       return providers.find(p => p.isRainbow) ?? null;
     case 'phantom':
       return providers.find(p => p.isPhantom) ?? null;
+    case 'hotwallet':
+      return providers.find(p => p.isHotWallet) ?? null;
+    case 'swiftex':
+      return providers.find(p => p.isSwiftEx) ?? null;
     default:
       return null;
   }
@@ -140,7 +155,7 @@ function findInProvidersArray(providers: any[], walletId: string): any | null {
 // ---------------------------------------------------------------------------
 
 export function isExtensionInstalled(ctx: WalletServiceContext, walletId: string): boolean {
-  if (walletId === 'walletconnect' || walletId === 'swiftex') return false;
+  if (walletId === 'walletconnect') return false;
   const win = window as any;
 
   if (walletId in EIP6963_RDNS_MAP) {
@@ -149,6 +164,7 @@ export function isExtensionInstalled(ctx: WalletServiceContext, walletId: string
 
   if (walletId === 'freighter') return !!(win.freighterApi || win.freighter);
   if (walletId === 'lobstr') return !!win.lobstr;
+  if (walletId === 'swiftex') return !!(win.swiftex || win.ethereum?.isSwiftEx);
 
   const win_ = win;
   switch (walletId) {
@@ -168,6 +184,8 @@ export function isExtensionInstalled(ctx: WalletServiceContext, walletId: string
       return !!win_.ethereum?.isRabby;
     case 'rainbow':
       return !!win_.ethereum?.isRainbow;
+    case 'hotwallet':
+      return !!win_.ethereum?.isHotWallet;
   }
   return false;
 }
@@ -193,6 +211,7 @@ export function getInstalledWallets(ctx: WalletServiceContext): string[] {
   if (win.phantom?.ethereum || win.ethereum?.isPhantom) installed.add('phantom');
   if (win.ethereum?.isRabby) installed.add('rabby');
   if (win.ethereum?.isRainbow) installed.add('rainbow');
+  if (win.ethereum?.isHotWallet) installed.add('hotwallet');
   if (win.freighter || win.freighterApi) installed.add('freighter');
   if (win.lobstr) installed.add('lobstr');
   if (win.ethereum?.isSwiftEx || win.swiftex) installed.add('swiftex');
@@ -231,14 +250,8 @@ export async function getOrCreateProvider(ctx: WalletServiceContext, key: string
         return existing;
       }
     } else {
-      try {
-        existing.removeAllListeners?.();
-      } catch {
-        // ignore
-      }
-      for (const [k, p] of ctx.providers.entries()) {
-        if (p === existing) ctx.providers.delete(k);
-      }
+      // Reuse existing provider instance awaiting connection
+      return existing;
     }
   }
 

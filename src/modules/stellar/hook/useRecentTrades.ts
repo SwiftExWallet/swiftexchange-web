@@ -69,10 +69,19 @@ export const useRecentTrades = ({ baseAsset, counterAsset }: UseRecentTradesProp
     (newTrade: RecentTrade) => {
       if (!mountedRef.current) return;
 
+      let isNew = false;
       setTrades(prev => {
         if (prev.some(t => t.id === newTrade.id)) return prev;
+        isNew = true;
+        const updated = [newTrade, ...prev].slice(0, 50);
+        const key = getCacheKey(baseAsset, counterAsset);
+        if (key) globalTradesCache.set(key, updated);
+        return updated;
+      });
 
+      if (isNew) {
         setNewTradeIds(ids => {
+          if (ids.has(newTrade.id)) return ids;
           const next = new Set(ids);
           next.add(newTrade.id);
           return next;
@@ -81,18 +90,14 @@ export const useRecentTrades = ({ baseAsset, counterAsset }: UseRecentTradesProp
         setTimeout(() => {
           if (mountedRef.current) {
             setNewTradeIds(ids => {
+              if (!ids.has(newTrade.id)) return ids;
               const next = new Set(ids);
               next.delete(newTrade.id);
               return next;
             });
           }
         }, 2000);
-
-        const updated = [newTrade, ...prev].slice(0, 50);
-        const key = getCacheKey(baseAsset, counterAsset);
-        if (key) globalTradesCache.set(key, updated);
-        return updated;
-      });
+      }
     },
     [baseAsset, counterAsset]
   );

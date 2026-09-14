@@ -6,11 +6,31 @@ import { StellarSequenceTracker } from '../utils/StellarSequenceTracker';
 import { signAndSubmitTransaction } from '../utils/transactionService';
 import { StellarBaseService } from './StellarBaseService';
 
+const poolCache = new Map<string, { pools: LiquidityPool[]; timestamp: number }>();
+const POOL_CACHE_TTL = 10_000; // 10s TTL prevents sequential Horizon hammering
+
 export class AmmSwapService extends StellarBaseService {
+  static clearPoolCache() {
+    poolCache.clear();
+  }
+
   async findLiquidityPools(
     assetA: StellarSDK.Asset,
     assetB?: StellarSDK.Asset
   ): Promise<LiquidityPool[]> {
+    const keyA = assetA.isNative() ? 'native' : `${assetA.getCode()}:${assetA.getIssuer()}`;
+    const keyB = assetB
+      ? assetB.isNative()
+        ? 'native'
+        : `${assetB.getCode()}:${assetB.getIssuer()}`
+      : '';
+    const cacheKey = `${this.networkPassphrase}-${[keyA, keyB].sort().join('_')}`;
+
+    const cached = poolCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < POOL_CACHE_TTL) {
+      return cached.pools;
+    }
+
     try {
       const pools: LiquidityPool[] = [];
       let poolsCall = this.server.liquidityPools();
@@ -38,6 +58,7 @@ export class AmmSwapService extends StellarBaseService {
         });
       }
 
+      poolCache.set(cacheKey, { pools, timestamp: Date.now() });
       return pools;
     } catch (error) {
       console.error('Failed to fetch liquidity pools:', error);

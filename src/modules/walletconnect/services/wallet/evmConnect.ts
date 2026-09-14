@@ -168,22 +168,29 @@ export async function connectWalletConnectSingle(
       '4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0', // Trust Wallet
       'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96', // MetaMask
       'a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393', // Phantom
+      'aee5083aac025c4c3f1c9afc31ea89dbddca0b1c248195bef469fc4886ae3ab2', // HOT Wallet
     ],
   });
   ctx.modals.set('evm', modal);
 
-  const namespaces = {
-    eip155: {
-      methods: [
-        'eth_sendTransaction',
-        'eth_signTypedData_v4',
-        'eth_signTypedData',
-        'personal_sign',
-      ],
-      chains: evmChains,
-      events: ['chainChanged', 'accountsChanged'],
-    },
+  const eip155Namespace = {
+    methods: [
+      'eth_sendTransaction',
+      'eth_signTypedData_v4',
+      'eth_signTypedData',
+      'personal_sign',
+      'wallet_switchEthereumChain',
+      'wallet_addEthereumChain',
+    ],
+    chains: evmChains,
+    events: ['chainChanged', 'accountsChanged'],
   };
+
+  // For testnet, pass namespaces as optional to prevent rigid rejection by wallets that don't support custom testnets
+  const connectParams =
+    ctx.currentNetwork === 'testnet'
+      ? { optionalNamespaces: { eip155: eip155Namespace }, requiredNamespaces: {} }
+      : { namespaces: { eip155: eip155Namespace } };
 
   return new Promise((resolve, reject) => {
     let sessionResolved = false;
@@ -207,6 +214,7 @@ export async function connectWalletConnectSingle(
     };
 
     const cleanup = () => {
+      ctx.cancelActiveConnection = undefined;
       clearTimeout(timeout);
       unsubscribe();
       try {
@@ -218,6 +226,12 @@ export async function connectWalletConnectSingle(
       } catch {
         // ignore
       }
+    };
+
+    ctx.cancelActiveConnection = (reason = 'Connection cancelled by user') => {
+      cleanup();
+      modal.closeModal();
+      reject(new Error(reason));
     };
 
     const timeout = setTimeout(() => {
@@ -248,7 +262,7 @@ export async function connectWalletConnectSingle(
     provider.on('display_uri', onDisplayUri);
 
     provider
-      .connect({ namespaces: namespaces as any })
+      .connect(connectParams as any)
       .then((session: any) => {
         sessionResolved = true;
         console.info('[WalletConnect:EVM] ✓ provider.connect() resolved — session established');

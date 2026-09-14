@@ -24,7 +24,7 @@ export const StellarAccountPanel: React.FC<StellarAccountPanelProps> = memo(
       }
     };
 
-    const reserveLocked = (1 + subentryCount * 0.5).toFixed(2);
+    const reserveLocked = ((2 + subentryCount) * 0.5).toFixed(2);
 
     return (
       <div className="bg-[var(--color-bg-secondary)] rounded-2xl border border-[var(--color-border)]/60 shadow-sm p-4 text-xs select-none">

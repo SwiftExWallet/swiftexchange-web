@@ -4,6 +4,7 @@ import * as StellarSDK from '@stellar/stellar-sdk';
 
 import { getStellarConfig } from '../../walletconnect/config/chains';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
+import { StellarBaseService } from '../service/StellarBaseService';
 import { AmmSwapService } from '../service/ammSwapService';
 import { useAmmSwapStore } from '../store/ammSwapStore';
 import type { SwapQuote, TokenInfo } from '../types/ammSwap.types';
@@ -223,23 +224,6 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
       return;
     }
 
-    // Validate sufficient balance
-    const availableBalance = parseFloat(fromToken.balance || '0');
-    const requestedAmount = parseFloat(fromAmount);
-
-    // Instead of hardcoding 2 XLM, we use the actual calculated reserve.
-    // The native balance from Stellar SDK is total balance. Spendable = total - reserve.
-    const reserve = fromToken.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
-
-    if (requestedAmount > availableBalance - reserve) {
-      setError(
-        `Insufficient ${fromToken.code} balance. Available: ${Math.max(0, availableBalance - reserve).toFixed(7)}`
-      );
-      setQuote(null);
-      setToAmount('');
-      return;
-    }
-
     const getQuote = async () => {
       setIsLoading(true);
       setError(null);
@@ -345,6 +329,11 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
     }
   }, [service, quote, userAddress, slippageTolerance]);
 
+  const latestParamsRef = useRef({ fromAmount, toAmount, fetchTokens });
+  useEffect(() => {
+    latestParamsRef.current = { fromAmount, toAmount, fetchTokens };
+  }, [fromAmount, toAmount, fetchTokens]);
+
   const executeSwapWithWalletConnect = useCallback(
     async (transaction: any, walletProvider: any) => {
       console.log('Waletprovider [useAmmswap ------]', walletProvider);
@@ -352,22 +341,31 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
         throw new Error('AMM service not initialized');
       }
 
+      const {
+        fromAmount: curFromAmount,
+        toAmount: curToAmount,
+        fetchTokens: curFetchTokens,
+      } = latestParamsRef.current;
+
       try {
         const txHash = await service.executeSwapWithWalletConnect(transaction, walletProvider);
 
         setFromToken(prev => {
           if (!prev) return prev;
-          const newBalance = Math.max(0, parseFloat(prev.balance || '0') - parseFloat(fromAmount));
+          const newBalance = Math.max(
+            0,
+            parseFloat(prev.balance || '0') - parseFloat(curFromAmount || '0')
+          );
           return { ...prev, balance: newBalance.toFixed(7) };
         });
 
         setToToken(prev => {
           if (!prev) return prev;
-          const newBalance = parseFloat(prev.balance || '0') + parseFloat(toAmount);
+          const newBalance = parseFloat(prev.balance || '0') + parseFloat(curToAmount || '0');
           return { ...prev, balance: newBalance.toFixed(7) };
         });
 
-        setTimeout(() => fetchTokens(true), 8000);
+        setTimeout(() => curFetchTokens(true), 8000);
 
         return txHash;
       } catch (err) {
@@ -376,6 +374,24 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
       }
     },
     [service]
+  );
+
+  const isFromNative = fromToken?.code === 'XLM' || fromToken?.asset?.isNative() || false;
+  const spendableBalance = fromToken
+    ? StellarBaseService.calculateSpendableBalance(
+        fromToken.balance || '0',
+        subentryCount,
+        isFromNative
+      )
+    : '0';
+
+  const requestedAmountNum = parseFloat(fromAmount || '0');
+  const isInsufficientBalance = Boolean(
+    fromToken &&
+    fromAmount &&
+    !isNaN(requestedAmountNum) &&
+    requestedAmountNum > 0 &&
+    requestedAmountNum > parseFloat(spendableBalance)
   );
 
   const reset = useCallback(() => {
@@ -393,6 +409,8 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
     quote,
     isLoading,
     error,
+    isInsufficientBalance,
+    spendableBalance,
     slippageTolerance,
     availableTokens,
     subentryCount,

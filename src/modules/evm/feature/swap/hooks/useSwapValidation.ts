@@ -39,6 +39,7 @@ export interface UseSwapValidationParams {
   showFusionScreen: boolean;
   missingWallets?: string[];
   isStellarAccountActive?: boolean | null;
+  currentNetwork?: 'mainnet' | 'testnet';
 }
 
 export function useSwapValidation(params: UseSwapValidationParams) {
@@ -65,6 +66,7 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     showFusionScreen,
     missingWallets,
     isStellarAccountActive,
+    currentNetwork,
   } = params;
 
   const isWalletMissing = !!(missingWallets && missingWallets.length > 0);
@@ -165,6 +167,12 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   }, [swapAssets]);
 
   const errorMessage = useMemo(() => {
+    if (currentNetwork === 'testnet' && actionType === 'BRIDGE') {
+      return (
+        crossChainWarning ||
+        'Cross-chain swaps (Stellar ↔ EVM) via NEAR Intents are not supported on Testnet. Please switch to Mainnet.'
+      );
+    }
     return getErrorMessage({
       bridgeTxStatus,
       bridgeErrorMsg,
@@ -184,6 +192,7 @@ export function useSwapValidation(params: UseSwapValidationParams) {
       toChainId,
     });
   }, [
+    currentNetwork,
     bridgeTxStatus,
     bridgeErrorMsg,
     swapError,
@@ -241,6 +250,9 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   ]);
 
   const isErrorState = useMemo(() => {
+    if (currentNetwork === 'testnet' && actionType === 'BRIDGE') {
+      return true;
+    }
     if (
       isWalletMissing ||
       !sellAmount ||
@@ -264,6 +276,7 @@ export function useSwapValidation(params: UseSwapValidationParams) {
       (actionType === 'BRIDGE' && crossChainWarning)
     );
   }, [
+    currentNetwork,
     isWalletMissing,
     sellAmount,
     isQuoteLoading,
@@ -335,6 +348,10 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   ]);
 
   const isSwapDisabled = useMemo(() => {
+    if (currentNetwork === 'testnet' && actionType === 'BRIDGE') {
+      return true;
+    }
+
     if (
       buttonLabel === 'ACTIVATE ACCOUNT' ||
       buttonLabel === 'ADD TRUSTLINE' ||
@@ -364,6 +381,8 @@ export function useSwapValidation(params: UseSwapValidationParams) {
       !!errorMessage
     );
   }, [
+    currentNetwork,
+    actionType,
     buttonLabel,
     isWalletMissing,
     sellAmount,

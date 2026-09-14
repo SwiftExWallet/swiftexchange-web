@@ -198,6 +198,15 @@ export function getButtonLabel(params: ButtonLabelParams): string {
     return 'CONNECT WALLETS';
   }
 
+  if (
+    errorMessage &&
+    (errorMessage.toLowerCase().includes('not supported on testnet') ||
+      errorMessage.toLowerCase().includes('unsupported on testnet') ||
+      errorMessage.toLowerCase().includes('testnet'))
+  ) {
+    return 'UNSUPPORTED ON TESTNET';
+  }
+
   if (isFetchingSwapAssets || isQuoteLoading || isFetchingStellarAssets)
     return 'FETCHING QUOTES...';
   if (!sellAmount || parseFloat(sellAmount) <= 0) return 'ENTER AMOUNT';
@@ -279,6 +288,7 @@ export function getErrorMessage(params: ErrorParams): string | null {
   ) {
     return activeQuoteError;
   }
+  if (actionType === 'BRIDGE' && crossChainWarning) return crossChainWarning;
   if (isInsufficientBalance) return 'Insufficient balance for this transaction';
   if (isAmountLessThanFee) {
     const feeAmount = parseFloat(activeQuoteData?.fee?.stablecoin?.amount || '0');
@@ -295,6 +305,5 @@ export function getErrorMessage(params: ErrorParams): string | null {
     return `Insufficient ${nativeSymbol} balance for gas fees.`;
   }
   if (isSameAssetSelected) return 'Please select different assets to swap';
-  if (actionType === 'BRIDGE' && crossChainWarning) return crossChainWarning;
   return null;
 }
