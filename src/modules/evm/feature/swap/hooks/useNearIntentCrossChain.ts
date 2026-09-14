@@ -198,7 +198,7 @@ export const useNearIntentCrossChain = ({
 
           const result = await signAndSubmitTransaction({
             xdr,
-            network: 'mainnet',
+            network: currentNetwork === 'testnet' ? 'testnet' : 'mainnet',
             networkPassphrase: config.networkPassphrase,
             provider: stellarProvider,
             stellarAddress,
@@ -350,7 +350,7 @@ export const useNearIntentCrossChain = ({
         setLoading(false);
       }
     },
-    [quote, getProvider]
+    [quote, getProvider, evmAddress, stellarAddress, currentNetwork]
   );
 
   const reset = useCallback(() => {

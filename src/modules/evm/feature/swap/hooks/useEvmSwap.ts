@@ -5,10 +5,8 @@ import { ethers } from 'ethers';
 import { notifyWalletSignRequest } from '../../../../../utils/walletConnectUtils';
 import { WalletType } from '../../../../walletconnect/constants/Wallet';
 import { usePortfolioStore } from '../../../../walletconnect/store/portfolioStore';
-import { useWalletStore } from '../../../../walletconnect/store/walletConnectStore';
 import { simulateSwapTransaction } from '../../../service/evmSimulationService';
 import { storeSwapOrder } from '../../../service/evmTransactionStatusService';
-import { addLocalTransaction } from '../../../service/localTransactionService';
 import {
   type TokenInfo,
   fetchSingleTokenBalance,
@@ -350,31 +348,18 @@ export const useEvmSwap = ({
             );
           },
           swapHash => {
-            if (quote.provider === 'ONEINCH' || quote.provider === 'UNISWAP') {
-              storeSwapOrder({
-                txHash: swapHash,
-                walletAddress: senderAddress,
-                provider: quote.provider,
-                fromChain: getChainById(chainId)?.symbol || '',
-                fromToken: sellAsset.symbol,
-                toChain: getChainById(buyAsset.chainId || chainId)?.symbol || '',
-                toToken: buyAsset.symbol,
-                amountIn: sellAmount,
-                amountOut: quote.outputAmount,
-                txType: 'Swap',
-              } as any).catch(err => console.error('Failed to store swap order on backend:', err));
-            } else if (chainId !== 'pubnet' && chainId !== 'testnet' && chainId !== 'stellar') {
-              addLocalTransaction({
-                hash: swapHash,
-                chainId,
-                type: 'swap',
-                timestamp: Date.now(),
-                description: `Swap ${sellAsset.symbol} → ${buyAsset.symbol}`,
-                status: 'pending',
-                from: senderAddress,
-                network: useWalletStore.getState().network,
-              });
-            }
+            storeSwapOrder({
+              txHash: swapHash,
+              walletAddress: senderAddress,
+              provider: quote.provider || 'UNISWAP',
+              fromChain: getChainById(chainId)?.symbol || '',
+              fromToken: sellAsset.symbol,
+              toChain: getChainById(buyAsset.chainId || chainId)?.symbol || '',
+              toToken: buyAsset.symbol,
+              amountIn: sellAmount,
+              amountOut: quote.outputAmount,
+              txType: 'Swap',
+            } as any).catch(err => console.error('Failed to store swap order on backend:', err));
           },
           () => {
             onBeforeSign?.();

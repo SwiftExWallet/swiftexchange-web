@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { usePortfolioStore } from '../../../../../walletconnect/store/portfolioStore';
 import { storeSwapOrder } from '../../../../service/evmTransactionStatusService';
-import { addLocalTransaction } from '../../../../service/localTransactionService';
 import { fetchSingleTokenBalance, getTokensForChain } from '../../../../service/tokenListService';
 import { isEvmChain } from '../../../../utils/Chainregistry';
 import { rpcManager } from '../../../../utils/rpcProvider';
@@ -40,10 +39,6 @@ vi.mock('../../../../../walletconnect/store/walletConnectStore', () => ({
 
 vi.mock('../../../../service/evmTransactionStatusService', () => ({
   storeSwapOrder: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock('../../../../service/localTransactionService', () => ({
-  addLocalTransaction: vi.fn(),
 }));
 
 vi.mock('../../../../service/tokenListService', () => ({
@@ -436,7 +431,7 @@ describe('useEvmSwap', () => {
       );
     });
 
-    it('records a local transaction for a non-routed provider on a standard EVM chain', async () => {
+    it('stores swap order on backend even for non-standard providers', async () => {
       mockExecuteSwapCallbacks('0xLOCALHASH');
       const { result } = renderHook(() => useEvmSwap(baseProps()));
       const quote = { outputAmount: '3000', provider: 'DIRECT' } as any;
@@ -445,10 +440,9 @@ describe('useEvmSwap', () => {
         await result.current.performSwap(quote, ethAsset, usdcAsset, '1', 1);
       });
 
-      expect(addLocalTransaction).toHaveBeenCalledWith(
-        expect.objectContaining({ hash: '0xLOCALHASH', type: 'swap', status: 'pending' })
+      expect(storeSwapOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ txHash: '0xLOCALHASH', txType: 'Swap', provider: 'DIRECT' })
       );
-      expect(storeSwapOrder).not.toHaveBeenCalled();
     });
 
     it('sets error state and rethrows a parsed message on failure', async () => {

@@ -1,5 +1,4 @@
 const STORAGE_KEY = 'swiftex_local_transactions';
-const MAX_TRANSACTIONS = 30;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export type TransactionType =
@@ -74,27 +73,6 @@ export const getLocalTransactions = (
   } catch (error) {
     console.error('Failed to get local transactions:', error);
     return [];
-  }
-};
-
-export const addLocalTransaction = (tx: LocalTransaction): void => {
-  try {
-    const isStellar =
-      tx.chainId === 'stellar' || tx.chainId === 'pubnet' || tx.chainId === 'testnet';
-    if (isStellar && tx.type !== 'bridge' && tx.type !== 'crosschain-swap') {
-      return;
-    }
-
-    const transactions = getLocalTransactions();
-    if (transactions.some(t => t.hash.toLowerCase() === tx.hash.toLowerCase())) {
-      return;
-    }
-    transactions.unshift(tx);
-    const trimmed = transactions.slice(0, MAX_TRANSACTIONS);
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
-  } catch (error) {
-    console.error('Failed to add local transaction:', error);
   }
 };
 

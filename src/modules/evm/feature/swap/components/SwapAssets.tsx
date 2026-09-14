@@ -271,6 +271,11 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     if (tokenMatch) return tokenMatch;
 
     if (sellAssetSymbol) {
+      const isNative =
+        !sellAssetAddress ||
+        sellAssetAddress.toLowerCase() === 'native' ||
+        sellAssetAddress.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+        sellAssetAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
       return {
         id: `evm-${fromChainId}-${sellAssetSymbol}`,
         symbol: sellAssetSymbol,
@@ -278,7 +283,8 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
         logoURI: getGlobalAssetMetadata(sellAssetSymbol)?.logoURI,
         balance: '0',
         decimals: 18,
-        address: sellAssetAddress || '',
+        isNative,
+        address: isNative ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' : sellAssetAddress || '',
         chainId: Number(fromChainId) || fromChainId,
       };
     }
@@ -336,12 +342,14 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     const symbolMatch = destTokens.find((t: any) => t.symbol === buyAssetSymbol);
     if (symbolMatch) return symbolMatch;
 
-    if (buyAssetAddress) {
-      const match = swapAssets.find((a: any) => matchesAddress(a, buyAssetAddress));
-      if (match) return match;
+    if (String(toChainId) === String(fromChainId)) {
+      if (buyAssetAddress) {
+        const match = swapAssets.find((a: any) => matchesAddress(a, buyAssetAddress));
+        if (match) return match;
+      }
+      const swapSymbolMatch = swapAssets.find((a: any) => a.symbol === buyAssetSymbol);
+      if (swapSymbolMatch) return swapSymbolMatch;
     }
-    const swapSymbolMatch = swapAssets.find((a: any) => a.symbol === buyAssetSymbol);
-    if (swapSymbolMatch) return swapSymbolMatch;
 
     const chainAssets = getAssetsForChain(toChainId);
     const chainAsset = chainAssets.find((a: any) =>
@@ -352,6 +360,11 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     if (chainAsset) return chainAsset;
 
     if (buyAssetSymbol) {
+      const isNative =
+        !buyAssetAddress ||
+        buyAssetAddress.toLowerCase() === 'native' ||
+        buyAssetAddress.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+        buyAssetAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
       return {
         id: `evm-${toChainId}-${buyAssetSymbol}`,
         symbol: buyAssetSymbol,
@@ -359,7 +372,8 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
         logoURI: getGlobalAssetMetadata(buyAssetSymbol)?.logoURI,
         balance: '0',
         decimals: 18,
-        address: buyAssetAddress || '',
+        isNative,
+        address: isNative ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' : buyAssetAddress || '',
         chainId: Number(toChainId) || toChainId,
       };
     }
@@ -814,12 +828,35 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     const prevSell = sellAssetSymbol;
     const prevSellAddr = sellAssetAddress;
     const prevFromChain = fromChainId;
+    const prevToChain = toChainId;
+
+    const resolveTokenAddr = (
+      targetChainId: number | string,
+      symbol: string,
+      currentAddr: string
+    ) => {
+      if (!symbol) return currentAddr;
+      if (isStellar(targetChainId)) {
+        return symbol.toUpperCase() === 'XLM' ? 'native' : currentAddr;
+      }
+      const tokens = [...getTokensForChain(targetChainId), ...getAssetsForChain(targetChainId)];
+      const matched = tokens.find(t => t.symbol?.toUpperCase() === symbol.toUpperCase());
+      if (matched) {
+        return matched.isNative
+          ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+          : matched.address || '';
+      }
+      return currentAddr;
+    };
+
+    const newSellAddr = resolveTokenAddr(prevToChain, buyAssetSymbol, buyAssetAddress);
+    const newBuyAddr = resolveTokenAddr(prevFromChain, prevSell, prevSellAddr);
 
     setSellAssetSymbol(buyAssetSymbol);
-    setSellAssetAddress(buyAssetAddress);
+    setSellAssetAddress(newSellAddr);
     setBuyAssetSymbol(prevSell);
-    setBuyAssetAddress(prevSellAddr);
-    setFromChainId(toChainId);
+    setBuyAssetAddress(newBuyAddr);
+    setFromChainId(prevToChain);
     setToChainId(prevFromChain);
 
     setSellAmount('');

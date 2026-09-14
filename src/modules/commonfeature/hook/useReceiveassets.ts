@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { validateAddress } from '../../../validator/AddressValidator';
-import { addLocalTransaction } from '../../evm/service/localTransactionService';
 import { getTokensForChain } from '../../evm/service/tokenListService';
 import { CHAIN_REGISTRY, getChainById } from '../../evm/utils/Chainregistry';
 import {
@@ -257,16 +256,6 @@ export const useReceiveAssets = () => {
       });
 
       if (res.status === 'success') {
-        addLocalTransaction({
-          hash: res.hash || '',
-          chainId: 'pubnet',
-          type: 'trustline',
-          timestamp: Date.now(),
-          status: 'success',
-          from: walletAddress,
-          network: currentNetwork,
-          description: `Add trustline for ${currentAsset.symbol}`,
-        });
         setHasTrustline(true);
       } else {
         throw new Error(res.error || 'Failed to add trustline');

@@ -75,7 +75,12 @@ export function getGasBuffer(
       const [whole, frac = ''] = plainFee.split('.');
       let fracKept = frac.slice(0, decimals);
       if (frac.length > decimals) {
-        fracKept = (BigInt(fracKept || '0') + 1n).toString().padStart(fracKept.length, '0');
+        const incremented = (BigInt(fracKept || '0') + 1n).toString();
+        // Ensure string length does not exceed decimals
+        fracKept =
+          incremented.length > decimals
+            ? incremented.slice(0, decimals)
+            : incremented.padStart(decimals, '0');
       }
       const cleanFee = fracKept ? `${whole}.${fracKept}` : whole;
 
@@ -143,10 +148,9 @@ export function calculateMaxSwapAmount(params: CalculateMaxAmountParams): string
       bridgeNativeFee ? { fee: { native: bridgeNativeFee } } : null
     );
     if (parsedBridgeFee > 0) {
-      const bridgeFeeWei = ethers.parseUnits(
-        parsedBridgeFee.toFixed(18),
-        selectedSellAsset.decimals
-      );
+      const feeDecimals = selectedSellAsset?.decimals ?? decimals ?? 18;
+      const safeDigits = Math.min(18, feeDecimals);
+      const bridgeFeeWei = ethers.parseUnits(parsedBridgeFee.toFixed(safeDigits), feeDecimals);
       gasRequiredBN += bridgeFeeWei;
     }
 

@@ -4,7 +4,6 @@ import React, { useMemo, useState } from 'react';
 import { ConfirmationModal } from '../../../../components/common/ConfirmationModal';
 import { useTransactionModalStore } from '../../../../store/transactionModalStore';
 import { ActionGuard } from '../../../commonfeature/components/ActionGuard';
-import { addLocalTransaction } from '../../../evm/service/localTransactionService';
 import * as ChainUrlHelpers from '../../../evm/utils/ChainUrlHelpers';
 import { getAssetsForChain, getChainById } from '../../../evm/utils/Chainregistry';
 import { getStellarConfig } from '../../../walletconnect/config/chains';
@@ -152,17 +151,6 @@ const UnifiedAssets: React.FC<UnifiedAssetsProps> = ({
       const result = await signAndSubmitTrustline(xdr, currentNetwork, networkPassphrase, provider);
 
       if (result.success) {
-        addLocalTransaction({
-          hash: result.transactionHash || '',
-          chainId: 'pubnet',
-          type: 'trustline',
-          timestamp: Date.now(),
-          description: `${action === 'add' ? 'Added' : 'Removed'} trustline for ${asset.code}`,
-          status: 'success',
-          from: stellarAddress,
-          network: currentNetwork,
-        });
-
         useTransactionModalStore.getState().openModal({
           status: 'success',
           type: 'Trustline',

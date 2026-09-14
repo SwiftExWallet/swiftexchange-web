@@ -71,7 +71,11 @@ export function useSwapValidation(params: UseSwapValidationParams) {
 
   const isInsufficientBalance = useMemo(() => {
     if (isWalletMissing) return false;
-    return checkInsufficientBalance(sellAmount, selectedSellAsset?.balance);
+    return checkInsufficientBalance(
+      sellAmount,
+      selectedSellAsset?.balance,
+      selectedSellAsset?.decimals ?? 18
+    );
   }, [sellAmount, selectedSellAsset, isWalletMissing]);
 
   const isSameAssetSelected = useMemo(() => {

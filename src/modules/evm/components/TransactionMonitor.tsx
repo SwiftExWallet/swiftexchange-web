@@ -62,7 +62,7 @@ export const TransactionMonitor: React.FC = () => {
 
         if (chainSymbol) {
           const apiResult = await checkTxStatus(tx.hash, chainSymbol);
-          if (apiResult) {
+          if (apiResult && apiResult.isConfirmed) {
             isConfirmed = true;
             isSuccess = apiResult.status;
           }

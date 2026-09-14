@@ -334,23 +334,36 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
           });
         }
       } else {
-        // EVM to EVM cross-chain -> Fusion Plus (1inch)
+        // EVM to EVM cross-chain -> Fusion Plus (1inch) with NEAR Intents fallback
         setCurrentQuote({ source: 'FUSION_PLUS', data: null, error: null, loading: true });
         setCrossChainWarning(null);
+
+        const resolveTokenAddr = (asset: any) => {
+          if (!asset) return '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+          const addr = (asset.address || '').toLowerCase();
+          if (
+            asset.isNative ||
+            !addr ||
+            addr === 'native' ||
+            addr === '0x0000000000000000000000000000000000000000'
+          ) {
+            return '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+          }
+          return asset.address;
+        };
+
+        const tokenInAddr = resolveTokenAddr(selectedSellAsset);
+        const tokenOutAddr = resolveTokenAddr(selectedBuyAsset);
 
         try {
           const fusionQuote = await get1InchFusionQuote(
             fromChainId,
             {
-              tokenIn: selectedSellAsset.isNative
-                ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-                : selectedSellAsset.address || '',
-              tokenOut: selectedBuyAsset.isNative
-                ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-                : selectedBuyAsset.address || '',
-              amount: safeParseUnits(sellAmount, selectedSellAsset.decimals),
+              tokenIn: tokenInAddr,
+              tokenOut: tokenOutAddr,
+              amount: safeParseUnits(sellAmount, selectedSellAsset.decimals || 18),
               walletAddress: evmAddress || '0x0000000000000000000000000000000000000000',
-              decimals: selectedSellAsset.decimals,
+              decimals: selectedSellAsset.decimals || 18,
             },
             toChainId
           );
@@ -374,14 +387,32 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
             err?.message === 'Quote request superseded'
           )
             return;
-          console.error('Fusion Plus quote error:', err);
-          setCrossChainWarning(parseSwapError(err));
-          setCurrentQuote({
-            source: 'FUSION_PLUS',
-            data: null,
-            error: parseSwapError(err),
-            loading: false,
-          });
+          console.warn('Fusion Plus quote failed, attempting fallback to NEAR Intents:', err);
+
+          try {
+            setCurrentQuote(prev => ({ ...prev, source: 'NEAR_INTENT', loading: true }));
+            const inQ = await fetchNearIntentQuote();
+            if (requestId !== latestRequestId.current) return;
+            if (!inQ || (inQ as any).error) {
+              throw new Error((inQ as any)?.error || 'Pair not supported');
+            }
+            setCurrentQuote({
+              source: 'NEAR_INTENT',
+              data: inQ,
+              error: warningError,
+              loading: false,
+            });
+          } catch (nearErr: any) {
+            if (requestId !== latestRequestId.current) return;
+            console.error('Fusion Plus and NEAR Intents both failed:', nearErr);
+            setCrossChainWarning(parseSwapError(err));
+            setCurrentQuote({
+              source: 'FUSION_PLUS',
+              data: null,
+              error: parseSwapError(err),
+              loading: false,
+            });
+          }
         }
       }
     }

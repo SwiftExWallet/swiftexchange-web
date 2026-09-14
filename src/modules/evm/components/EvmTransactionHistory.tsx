@@ -1,5 +1,5 @@
 import { Clock, ExternalLink, Loader2, RefreshCw, SearchX } from 'lucide-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import PageLayout from '../../../components/layout/PageLayout';
@@ -29,6 +29,9 @@ import { formatAssetName, formatTxAmount, getDisplayAmountWithSign } from '../ut
 import { rpcManager } from '../utils/rpcProvider';
 import TransactionDetailsSheet from './TransactionDetailsSheet';
 import TransactionDetailsView from './TransactionDetailsView';
+
+const REFRESH_TTL_MS = 12000;
+let globalLastFetchTime = 0;
 
 type ViewType = 'recent' | 'stellar' | number;
 
@@ -187,6 +190,8 @@ const EvmTransactionHistory: React.FC = () => {
     Record<string, 'success' | 'failed'>
   >({});
   const [showPendingOnly, setShowPendingOnly] = useState(false);
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const isRefreshingRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (!hasEvm && hasStellar && selectedView !== 'stellar') {
@@ -204,7 +209,11 @@ const EvmTransactionHistory: React.FC = () => {
 
   const { transactions: localTransactions } = useLocalTransactions();
 
-  const hasPending = (() => {
+  const activeAddresses = useMemo(() => {
+    return [evmWallet?.address, stellarWallet?.address].filter(Boolean) as string[];
+  }, [evmWallet?.address, stellarWallet?.address]);
+
+  const hasPending = useMemo(() => {
     const hasLocalPending = localTransactions?.some(tx => {
       const isStellarTx =
         tx.chainId === 'pubnet' ||
@@ -223,7 +232,7 @@ const EvmTransactionHistory: React.FC = () => {
     });
 
     return Boolean(hasLocalPending || hasBackendPending);
-  })();
+  }, [localTransactions, backendOrders?.data, liveStatusOverrides]);
 
   useEffect(() => {
     if (!hasPending) {
@@ -232,87 +241,329 @@ const EvmTransactionHistory: React.FC = () => {
   }, [hasPending]);
 
   const isCheckingOnChain = useRef<boolean>(false);
-
   const checkingHashes = useRef<Set<string>>(new Set());
   const processedHashRef = useRef<string | null>(null);
 
-  useEffect(() => {
+  // Memoized recent transactions
+  const combinedRecent = useMemo(() => {
+    const mergedMap = new Map<
+      string,
+      LocalTransactionWithStatus & {
+        provider?: string;
+        isBackendOrder?: boolean;
+        fromChainSymbol?: string;
+        toChainSymbol?: string;
+        amountIn?: string;
+        amountOut?: string;
+        fromToken?: string;
+        toToken?: string;
+      }
+    >();
+
+    localTransactions?.forEach(tx => {
+      const isStellarNativeTx =
+        tx.chainId === 'pubnet' ||
+        tx.chainId === 'testnet' ||
+        tx.chainId === 'stellar' ||
+        (tx.from && tx.from.toUpperCase().startsWith('G') && tx.from.length === 56);
+
+      if (isStellarNativeTx) return;
+
+      const normalized = {
+        ...tx,
+        isBackendOrder: false,
+        provider: tx.provider,
+      };
+      mergedMap.set(tx.hash.toLowerCase(), normalized);
+    });
+
+    backendOrders?.data?.forEach((order: SwapOrder) => {
+      const isLocalCheckable = isBypassedProvider(order.provider);
+      const resolvedStatus = isLocalCheckable
+        ? liveStatusOverrides[order.txHash.toLowerCase()] || resolveOrderStatus(order.status)
+        : resolveOrderStatus(order.status);
+
+      const fromChainId = resolveChainId(order.fromChain, currentNetwork);
+      const isBridge = order.fromChain !== order.toChain;
+      const defaultTxType = isBridge ? 'Bridge' : 'Swap';
+      const description = order.txType || defaultTxType;
+
+      const normalized = {
+        hash: order.txHash,
+        chainId: fromChainId,
+        type: (isBridge ? 'bridge' : 'swap') as 'bridge' | 'swap',
+        timestamp: new Date(order.createdAt).getTime(),
+        description: description,
+        status: resolvedStatus,
+        from: order.walletAddress,
+        network: currentNetwork,
+        provider: order.provider,
+        isBackendOrder: true,
+        fromChainSymbol: order.fromChain,
+        toChainSymbol: order.toChain,
+        amountIn: order.amountIn,
+        amountOut: order.amountOut,
+        fromToken: order.fromToken,
+        toToken: order.toToken,
+      };
+      mergedMap.set(order.txHash.toLowerCase(), normalized);
+    });
+
+    return Array.from(mergedMap.values()).sort((a, b) => {
+      const aPending = a.status === 'pending' ? 1 : 0;
+      const bPending = b.status === 'pending' ? 1 : 0;
+      if (aPending !== bPending) {
+        return bPending - aPending;
+      }
+      return (b.timestamp || 0) - (a.timestamp || 0);
+    });
+  }, [localTransactions, backendOrders?.data, liveStatusOverrides, currentNetwork]);
+
+  const pendingTransactions = useMemo(
+    () => combinedRecent.filter(tx => tx.status === 'pending'),
+    [combinedRecent]
+  );
+  const completedTransactions = useMemo(
+    () => combinedRecent.filter(tx => tx.status !== 'pending'),
+    [combinedRecent]
+  );
+
+  const dateGroups = useMemo(() => {
+    const groups: { title: string; transactions: typeof completedTransactions }[] = [];
+    const groupMap: { [key: string]: number } = {};
+
+    completedTransactions.forEach(tx => {
+      const timestamp = tx.timestamp;
+      let dateString = 'Unknown Date';
+
+      if (timestamp) {
+        const date = new Date(timestamp);
+        const d = date.getDate();
+        const m = date.toLocaleString('default', { month: 'short' }).toUpperCase();
+        const y = date.getFullYear();
+        dateString = `${d} ${m} ${y}`;
+      }
+
+      if (groupMap[dateString] === undefined) {
+        groupMap[dateString] = groups.length;
+        groups.push({ title: dateString, transactions: [] });
+      }
+      groups[groupMap[dateString]].transactions.push(tx);
+    });
+    return groups;
+  }, [completedTransactions]);
+
+  const historyGroups = useMemo(() => {
+    if (!historyData || historyData.length === 0) return [];
+    const groups: { title: string; transactions: TransactionItem[] }[] = [];
+    const groupMap: { [key: string]: number } = {};
+
+    historyData.forEach(tx => {
+      const timestamp = tx.metadata?.blockTimestamp;
+      let dateString = 'Unknown Date';
+
+      if (timestamp) {
+        const date = new Date(timestamp);
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        if (date.toDateString() === today.toDateString()) {
+          dateString = 'Today';
+        } else if (date.toDateString() === yesterday.toDateString()) {
+          dateString = 'Yesterday';
+        } else {
+          dateString = date.toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          });
+        }
+      }
+
+      if (groupMap[dateString] === undefined) {
+        groupMap[dateString] = groups.length;
+        groups.push({ title: dateString, transactions: [] });
+      }
+      groups[groupMap[dateString]].transactions.push(tx);
+    });
+    return groups;
+  }, [historyData]);
+
+  // Verify pending backend orders on-chain via direct RPC receipt
+  const checkPendingOrdersOnChain = useCallback(async () => {
+    if (isCheckingOnChain.current) return;
     const pendingOrders = backendOrders?.data?.filter(
       (order: SwapOrder) =>
         (isBypassedProvider(order.provider) || order.txType === 'Token Approval') &&
         order.status === 'pending' &&
         !liveStatusOverrides[order.txHash.toLowerCase()]
     );
-    const ordersToCheck = pendingOrders || [];
+    if (!pendingOrders || pendingOrders.length === 0) return;
 
-    if (!ordersToCheck || ordersToCheck.length === 0) return;
+    isCheckingOnChain.current = true;
+    try {
+      for (const order of pendingOrders) {
+        try {
+          let isConfirmed = false;
+          let isSuccess = false;
 
-    const checkStatuses = async () => {
-      if (isCheckingOnChain.current) return;
-      isCheckingOnChain.current = true;
+          const chainConfig = findChain(order.fromChain, currentNetwork);
+          const chainSymbol = chainConfig?.symbol === 'BNB' ? 'BSC' : chainConfig?.symbol;
+
+          if (chainSymbol) {
+            const apiResult = await checkTxStatus(order.txHash, chainSymbol, currentNetwork);
+            if (apiResult && apiResult.isConfirmed) {
+              isConfirmed = true;
+              isSuccess = apiResult.status;
+            }
+          }
+
+          if (!isConfirmed && chainConfig && chainConfig.rpcUrls?.length) {
+            const receipt = await rpcManager.fetchWithFallback(
+              chainConfig.chainId,
+              chainConfig.rpcUrls,
+              async provider => provider.getTransactionReceipt(order.txHash)
+            );
+            if (receipt) {
+              isConfirmed = true;
+              isSuccess = receipt.status === 1;
+            }
+          }
+
+          if (isConfirmed) {
+            const newStatus = isSuccess ? 'success' : 'failed';
+            setLiveStatusOverrides(prev => ({
+              ...prev,
+              [order.txHash.toLowerCase()]: newStatus,
+            }));
+          }
+        } catch (err) {
+          console.error('Failed to verify pending backend order on-chain:', err);
+        }
+      }
+    } finally {
+      isCheckingOnChain.current = false;
+    }
+  }, [backendOrders?.data, currentNetwork, liveStatusOverrides]);
+
+  // Unified refresh function
+  const performRefresh = useCallback(
+    async (silent = false) => {
+      if (isRefreshingRef.current) return;
+      isRefreshingRef.current = true;
+      if (silent) setIsAutoRefreshing(true);
 
       try {
-        for (const order of ordersToCheck) {
-          try {
-            let isConfirmed = false;
-            let isSuccess = false;
+        const promises: Promise<any>[] = [];
 
-            const chainConfig = findChain(order.fromChain, currentNetwork);
-            const chainSymbol = chainConfig?.symbol === 'BNB' ? 'BSC' : chainConfig?.symbol;
-
-            if (chainSymbol) {
-              const apiResult = await checkTxStatus(order.txHash, chainSymbol);
-              if (apiResult) {
-                isConfirmed = true;
-                isSuccess = apiResult.status;
-              }
-            }
-
-            if (!isConfirmed) {
-              if (!chainConfig || !chainConfig.rpcUrls?.length) continue;
-              const receipt = await rpcManager.fetchWithFallback(
-                chainConfig.chainId,
-                chainConfig.rpcUrls,
-                async provider => provider.getTransactionReceipt(order.txHash)
-              );
-
-              if (receipt) {
-                isConfirmed = true;
-                isSuccess = receipt.status === 1;
-              }
-            }
-
-            if (isConfirmed) {
-              const newStatus = isSuccess ? 'success' : 'failed';
-              setLiveStatusOverrides(prev => ({
-                ...prev,
-                [order.txHash.toLowerCase()]: newStatus,
-              }));
-            }
-          } catch (err) {
-            console.error('Failed to verify pending backend order on-chain:', err);
-          }
+        if (activeAddresses.length > 0) {
+          promises.push(
+            refreshOrders(activeAddresses, 1, 10, false).catch(err =>
+              console.error('Failed to refresh orders:', err)
+            )
+          );
         }
+
+        if (walletAddress && typeof selectedView === 'number') {
+          promises.push(
+            getEvmTransactionHistory(walletAddress, selectedView, currentNetwork)
+              .then(response => {
+                setHistoryData(response.data);
+                setSentPageKey(response.pagination.nextSentPageKey);
+                setReceivedPageKey(response.pagination.nextReceivedPageKey);
+                setHasNextPage(response.pagination.hasNextPage);
+              })
+              .catch(err => {
+                console.error('Failed to refresh chain history:', err);
+              })
+          );
+        }
+
+        await Promise.all(promises);
+        await checkPendingOrdersOnChain();
+        globalLastFetchTime = Date.now();
       } finally {
-        isCheckingOnChain.current = false;
+        isRefreshingRef.current = false;
+        setIsAutoRefreshing(false);
+      }
+    },
+    [
+      activeAddresses,
+      walletAddress,
+      selectedView,
+      currentNetwork,
+      refreshOrders,
+      checkPendingOrdersOnChain,
+    ]
+  );
+
+  // 12-second TTL auto-refresh controller with screen active and tab visibility detection
+  useEffect(() => {
+    let initialTimeout: ReturnType<typeof setTimeout> | null = null;
+    let intervalTimer: ReturnType<typeof setInterval> | null = null;
+
+    const startPolling = () => {
+      if (intervalTimer) clearInterval(intervalTimer);
+      intervalTimer = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          performRefresh(true);
+        }
+      }, REFRESH_TTL_MS);
+    };
+
+    if (document.visibilityState === 'visible') {
+      const elapsed = Date.now() - globalLastFetchTime;
+      if (elapsed >= REFRESH_TTL_MS || globalLastFetchTime === 0) {
+        performRefresh(false);
+        startPolling();
+      } else {
+        const remaining = REFRESH_TTL_MS - elapsed;
+        initialTimeout = setTimeout(() => {
+          if (document.visibilityState === 'visible') {
+            performRefresh(true);
+            startPolling();
+          }
+        }, remaining);
+      }
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (intervalTimer) {
+          clearInterval(intervalTimer);
+          intervalTimer = null;
+        }
+        if (initialTimeout) {
+          clearTimeout(initialTimeout);
+          initialTimeout = null;
+        }
+      } else if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - globalLastFetchTime;
+        if (elapsed >= REFRESH_TTL_MS) {
+          performRefresh(true);
+          startPolling();
+        } else {
+          const remaining = REFRESH_TTL_MS - elapsed;
+          if (initialTimeout) clearTimeout(initialTimeout);
+          initialTimeout = setTimeout(() => {
+            if (document.visibilityState === 'visible') {
+              performRefresh(true);
+              startPolling();
+            }
+          }, remaining);
+        }
       }
     };
 
-    checkStatuses();
-    const interval = setInterval(checkStatuses, 8000);
-    return () => clearInterval(interval);
-  }, [backendOrders?.data, currentNetwork, liveStatusOverrides]);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-  const activeAddresses = useMemo(() => {
-    return [evmWallet?.address, stellarWallet?.address].filter(Boolean) as string[];
-  }, [evmWallet?.address, stellarWallet?.address]);
-
-  useEffect(() => {
-    if (activeAddresses.length > 0) {
-      setOrdersPage(1);
-      refreshOrders(activeAddresses, 1, 10, false);
-    }
-  }, [activeAddresses]);
+    return () => {
+      if (intervalTimer) clearInterval(intervalTimer);
+      if (initialTimeout) clearTimeout(initialTimeout);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [performRefresh]);
 
   const clearTxHashFromUrl = () => {
     setSearchParams(
@@ -556,8 +807,8 @@ const EvmTransactionHistory: React.FC = () => {
             const chainSymbol = chainConfig?.symbol === 'BNB' ? 'BSC' : chainConfig?.symbol;
 
             if (chainSymbol) {
-              const apiResult = await checkTxStatus(tx.hash, chainSymbol);
-              if (apiResult) {
+              const apiResult = await checkTxStatus(tx.hash, chainSymbol, currentNetwork);
+              if (apiResult && apiResult.isConfirmed) {
                 isConfirmed = true;
                 isSuccess = apiResult.status;
               }
@@ -672,86 +923,6 @@ const EvmTransactionHistory: React.FC = () => {
   );
 
   const renderRecentTransactions = () => {
-    const combinedRecent = (() => {
-      const mergedMap = new Map<string, LocalTransactionWithStatus>();
-      localTransactions?.forEach(tx => {
-        const isStellarNativeTx =
-          tx.chainId === 'pubnet' ||
-          tx.chainId === 'testnet' ||
-          tx.chainId === 'stellar' ||
-          (tx.from && tx.from.toUpperCase().startsWith('G') && tx.from.length === 56);
-
-        if (isStellarNativeTx) return;
-
-        const normalized: LocalTransactionWithStatus & {
-          provider?: string;
-          isBackendOrder?: boolean;
-          fromChainSymbol?: string;
-          amountIn?: string;
-          amountOut?: string;
-          fromToken?: string;
-          toToken?: string;
-        } = {
-          ...tx,
-          isBackendOrder: false,
-          provider: tx.provider,
-        };
-        mergedMap.set(tx.hash.toLowerCase(), normalized);
-      });
-
-      backendOrders?.data?.forEach((order: SwapOrder) => {
-        const isLocalCheckable = isBypassedProvider(order.provider);
-        const resolvedStatus = isLocalCheckable
-          ? liveStatusOverrides[order.txHash.toLowerCase()] || resolveOrderStatus(order.status)
-          : resolveOrderStatus(order.status);
-
-        const fromChainId = resolveChainId(order.fromChain, currentNetwork);
-        const isBridge = order.fromChain !== order.toChain;
-        const defaultTxType = isBridge ? 'Bridge' : 'Swap';
-        const description = order.txType || defaultTxType;
-
-        const normalized: LocalTransactionWithStatus & {
-          provider?: string;
-          isBackendOrder?: boolean;
-          fromChainSymbol?: string;
-          toChainSymbol?: string;
-          amountIn?: string;
-          amountOut?: string;
-          fromToken?: string;
-          toToken?: string;
-        } = {
-          hash: order.txHash,
-          chainId: fromChainId,
-          type: isBridge ? 'bridge' : 'swap',
-          timestamp: new Date(order.createdAt).getTime(),
-          description: description,
-          status: resolvedStatus,
-          from: order.walletAddress,
-          network: currentNetwork,
-          provider: order.provider,
-          isBackendOrder: true,
-          fromChainSymbol: order.fromChain,
-          toChainSymbol: order.toChain,
-          amountIn: order.amountIn,
-          amountOut: order.amountOut,
-          fromToken: order.fromToken,
-          toToken: order.toToken,
-        };
-        mergedMap.set(order.txHash.toLowerCase(), normalized);
-      });
-
-      return Array.from(mergedMap.values()).sort((a, b) => {
-        // Pending transactions always on top
-        const aPending = a.status === 'pending' ? 1 : 0;
-        const bPending = b.status === 'pending' ? 1 : 0;
-        if (aPending !== bPending) {
-          return bPending - aPending;
-        }
-        // Secondary sort by timestamp descending
-        return (b.timestamp || 0) - (a.timestamp || 0);
-      });
-    })();
-
     const showFullLoader = ordersLoading && !backendOrders?.data;
 
     if (showFullLoader) {
@@ -789,30 +960,7 @@ const EvmTransactionHistory: React.FC = () => {
       );
     }
 
-    const pendingTransactions = combinedRecent.filter(tx => tx.status === 'pending');
-    const completedTransactions = combinedRecent.filter(tx => tx.status !== 'pending');
-
-    const groups: { title: string; transactions: typeof completedTransactions }[] = [];
-    const groupMap: { [key: string]: number } = {};
-
-    completedTransactions.forEach(tx => {
-      const timestamp = tx.timestamp;
-      let dateString = 'Unknown Date';
-
-      if (timestamp) {
-        const date = new Date(timestamp);
-        const d = date.getDate();
-        const m = date.toLocaleString('default', { month: 'short' }).toUpperCase();
-        const y = date.getFullYear();
-        dateString = `${d} ${m} ${y}`;
-      }
-
-      if (groupMap[dateString] === undefined) {
-        groupMap[dateString] = groups.length;
-        groups.push({ title: dateString, transactions: [] });
-      }
-      groups[groupMap[dateString]].transactions.push(tx);
-    });
+    const groups = dateGroups;
 
     const renderTransactionRow = (tx: (typeof combinedRecent)[0]) => {
       const isSelected = selectedLocalTx?.hash === tx.hash;
@@ -1129,9 +1277,11 @@ const EvmTransactionHistory: React.FC = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <p className="text-xs text-muted">
-              {backendOrders?.data?.some(order => order.status === 'pending')
-                ? 'Auto-refreshing pending transactions...'
-                : `${showPendingOnly ? pendingTransactions.length : combinedRecent.length} transaction(s)`}
+              {isAutoRefreshing
+                ? 'Refreshing transactions...'
+                : hasPending
+                  ? 'Auto-refreshing pending transactions (12s)...'
+                  : `${showPendingOnly ? pendingTransactions.length : combinedRecent.length} transaction(s)`}
             </p>
             {hasPending && (
               <div className="flex bg-tertiary rounded-lg p-0.5 gap-0.5 border border-color">
@@ -1161,15 +1311,16 @@ const EvmTransactionHistory: React.FC = () => {
           </div>
           <button
             onClick={() => {
-              if (activeAddresses.length > 0) {
-                setOrdersPage(1);
-                refreshOrders(activeAddresses, 1, 10, false);
-              }
+              setOrdersPage(1);
+              performRefresh(false);
             }}
             className="p-2 rounded-lg bg-tertiary hover:bg-tertiary/80 text-muted hover:text-primary transition-colors"
             title="Refresh All"
           >
-            <RefreshCw size={14} className={ordersLoading ? 'animate-spin' : ''} />
+            <RefreshCw
+              size={14}
+              className={ordersLoading || isAutoRefreshing ? 'animate-spin' : ''}
+            />
           </button>
         </div>
 
@@ -1273,43 +1424,24 @@ const EvmTransactionHistory: React.FC = () => {
       );
     }
 
-    const groups: { title: string; transactions: TransactionItem[] }[] = [];
-    const groupMap: { [key: string]: number } = {};
-
-    historyData.forEach(tx => {
-      const timestamp = tx.metadata?.blockTimestamp;
-      let dateString = 'Unknown Date';
-
-      if (timestamp) {
-        const date = new Date(timestamp);
-        const today = new Date();
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-
-        if (date.toDateString() === today.toDateString()) {
-          dateString = 'Today';
-        } else if (date.toDateString() === yesterday.toDateString()) {
-          dateString = 'Yesterday';
-        } else {
-          dateString = date.toLocaleDateString(undefined, {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-          });
-        }
-      }
-
-      if (groupMap[dateString] === undefined) {
-        groupMap[dateString] = groups.length;
-        groups.push({ title: dateString, transactions: [] });
-      }
-      groups[groupMap[dateString]].transactions.push(tx);
-    });
-
-    const groupedTransactions = groups;
+    const groupedTransactions = historyGroups;
 
     return (
       <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted">
+            {isAutoRefreshing
+              ? 'Refreshing transactions...'
+              : `${historyData.length} transaction(s)`}
+          </p>
+          <button
+            onClick={() => performRefresh(false)}
+            className="p-2 rounded-lg bg-tertiary hover:bg-tertiary/80 text-muted hover:text-primary transition-colors"
+            title="Refresh All"
+          >
+            <RefreshCw size={14} className={loading || isAutoRefreshing ? 'animate-spin' : ''} />
+          </button>
+        </div>
         {groupedTransactions.map((group, index) => (
           <div key={index} className="space-y-3">
             <h4 className="text-xs font-bold text-muted uppercase tracking-wider pl-1 sticky top-0 bg-secondary/90 backdrop-blur z-10 py-1">
