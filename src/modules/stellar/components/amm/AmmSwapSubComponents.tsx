@@ -124,7 +124,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = memo(
     return (
       <>
         <div className="fixed inset-0 bg-bg-overlay z-20" onClick={onClose} />
-        <div className="absolute card right-0 top-14 z-30 w-80 bg-secondary rounded-xl border border-color p-4 animate-slide-up">
+        <div className="absolute card right-0 top-14 z-30 w-80 bg-secondary rounded-xl border border-color p-4 animate-slide-up shadow-xl">
           <h3 className="heading-3 mb-4">Transaction Settings</h3>
 
           <div className="mb-4">
@@ -176,74 +176,121 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = memo(
 
 interface SwapDetailsProps {
   quote: SwapQuote | null;
+  isLoading?: boolean;
 }
 
-export const SwapDetails: React.FC<SwapDetailsProps> = memo(({ quote }: SwapDetailsProps) => {
-  const [showDetails, setShowDetails] = useState(false);
+export const SwapDetails: React.FC<SwapDetailsProps> = memo(
+  ({ quote, isLoading }: SwapDetailsProps) => {
+    const [showDetails, setShowDetails] = useState(false);
 
-  if (!quote) return null;
-
-  const rate =
-    quote.path.path[0].code === quote.path.path[1].code
-      ? '1'
-      : (
-          parseFloat(quote.estimatedOutput) /
-          parseFloat(quote.path.path[0].code === 'XLM' ? '100' : '1')
-        ).toFixed(6);
-  const priceImpactColor =
-    quote.priceImpact > 5 ? 'price-down' : quote.priceImpact > 2 ? 'text-warning' : 'price-up';
-
-  return (
-    <div className="card card-glass p-4 space-y-3 animate-fade-in">
-      <button
-        onClick={() => setShowDetails(!showDetails)}
-        className="w-full flex items-center justify-between text-small text-muted hover:text-text-primary transition-colors"
-      >
-        <span>Swap Details</span>
-        <ChevronDown
-          className={`w-4 h-4 transition-transform ${showDetails ? 'rotate-180' : ''}`}
-        />
-      </button>
-
-      {showDetails && (
-        <div className="space-y-2 pt-2 border-t border-color">
-          <div className="flex justify-between text-small">
-            <span className="text-muted">Rate</span>
-            <span className="text-text-primary font-medium">
-              1 {quote.path.path[0].code} ≈ {rate} {quote.path.path[1].code}
-            </span>
+    if (!quote) {
+      if (isLoading) {
+        return (
+          <div className="card card-glass p-4 space-y-3 animate-fade-in border border-white/5">
+            <div className="flex justify-between items-center py-1">
+              <div className="w-24 h-3 rounded bg-white/5 animate-shimmer" />
+              <div className="w-4 h-4 rounded bg-white/5 animate-shimmer" />
+            </div>
+            <div className="space-y-2.5 pt-2 border-t border-color">
+              <div className="flex justify-between items-center py-1">
+                <div className="w-24 h-3 rounded bg-white/5 animate-shimmer" />
+                <div className="w-28 h-4 rounded-md animate-shimmer-brand" />
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <div className="w-14 h-3 rounded bg-white/5 animate-shimmer" />
+                <div className="w-32 h-3.5 rounded-md animate-shimmer" />
+              </div>
+            </div>
           </div>
+        );
+      }
+      return null;
+    }
 
-          <div className="flex justify-between text-small">
-            <span className="text-muted flex items-center gap-1">
-              Price Impact
-              <Info className="w-3 h-3" />
-            </span>
-            <span className={`font-medium ${priceImpactColor}`}>
-              {quote.priceImpact.toFixed(2)}%
-            </span>
-          </div>
+    const inputNum = parseFloat(quote.inputAmount) || 1;
+    const outputNum = parseFloat(quote.estimatedOutput) || 0;
+    const rate =
+      quote.path.path[0].code === quote.path.path[1].code
+        ? '1.000000'
+        : (outputNum / inputNum).toFixed(6);
 
-          <div className="flex justify-between text-small">
-            <span className="text-muted">Minimum Received</span>
-            <span className="text-text-primary font-medium">
-              {parseFloat(quote.minimumOutput).toFixed(4)} {quote.path.path[1].code}
-            </span>
-          </div>
+    const priceImpactColor =
+      quote.priceImpact > 5 ? 'price-down' : quote.priceImpact > 2 ? 'text-warning' : 'price-up';
 
-          <div className="flex justify-between text-small">
-            <span className="text-muted">Route</span>
-            <span className="text-text-primary font-medium">
-              {quote.path.path.map(t => t.code).join(' → ')}
-            </span>
-          </div>
+    const providerName =
+      quote.source === 'SOROSWAP'
+        ? quote.platform?.toLowerCase() === 'sdex'
+          ? 'Soroswap Router (SDEX)'
+          : 'Soroswap Router (AMM)'
+        : quote.source === 'AQUARIUS'
+          ? 'Aquarius Router'
+          : 'Classic Horizon AMM';
 
-          <div className="flex justify-between text-small">
-            <span className="text-muted">Network Fee</span>
-            <span className="text-text-primary font-medium">~0.00001 XLM</span>
+    return (
+      <div className="card card-glass p-4 space-y-3 animate-fade-in">
+        <button
+          onClick={() => setShowDetails(!showDetails)}
+          className="w-full flex items-center justify-between text-small text-muted hover:text-text-primary transition-colors"
+        >
+          <span>Swap Details</span>
+          <ChevronDown
+            className={`w-4 h-4 transition-transform ${showDetails ? 'rotate-180' : ''}`}
+          />
+        </button>
+
+        {showDetails && (
+          <div className="space-y-2 pt-2 border-t border-color">
+            <div className="flex justify-between items-center text-small gap-2">
+              <span className="text-muted shrink-0">Routing Provider</span>
+              <span className="text-text-primary font-medium text-right">
+                <span className="px-2 py-0.5 rounded-md bg-brand/10 text-brand text-xs font-bold">
+                  {providerName}
+                </span>
+              </span>
+            </div>
+
+            <div className="flex justify-between text-small">
+              <span className="text-muted">Rate</span>
+              <span className="text-text-primary font-medium">
+                1 {quote.path.path[0].code} ≈ {rate} {quote.path.path[1].code}
+              </span>
+            </div>
+
+            <div className="flex justify-between text-small">
+              <span className="text-muted flex items-center gap-1">
+                Price Impact
+                <Info className="w-3 h-3" />
+              </span>
+              <span className={`font-medium ${priceImpactColor}`}>
+                {quote.priceImpact.toFixed(2)}%
+              </span>
+            </div>
+
+            <div className="flex justify-between text-small">
+              <span className="text-muted">Minimum Received</span>
+              <span className="text-text-primary font-medium">
+                {(() => {
+                  const minNum = parseFloat(quote.minimumOutput) || 0;
+                  return minNum < 1 && minNum > 0 ? minNum.toFixed(6) : minNum.toFixed(4);
+                })()}{' '}
+                {quote.path.path[1].code}
+              </span>
+            </div>
+
+            <div className="flex justify-between text-small">
+              <span className="text-muted">Route</span>
+              <span className="text-text-primary font-medium">
+                {quote.path.path.map(t => t.code).join(' → ')}
+              </span>
+            </div>
+
+            <div className="flex justify-between text-small">
+              <span className="text-muted">Network Fee</span>
+              <span className="text-text-primary font-medium">~0.00001 XLM</span>
+            </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-});
+        )}
+      </div>
+    );
+  }
+);

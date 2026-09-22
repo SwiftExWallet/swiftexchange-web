@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -34,13 +35,12 @@ export const Modal: React.FC<ModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div ref={overlayRef} className="absolute inset-0" onClick={onClose} />
       <div
         className={`relative bg-secondary border border-color rounded-2xl shadow-2xl overflow-hidden flex flex-col ${width} max-h-[90vh] animate-in fade-in zoom-in-95 duration-200`}
       >
-        {/* Beta Ribbon */}
         <div className="absolute top-0 left-0 overflow-hidden w-[90px] h-[90px] pointer-events-none z-10">
           <div className="absolute top-[18px] -left-[26px] w-[130px] -rotate-45 bg-gradient-to-r from-yellow-400 to-amber-500 text-[9px] font-black text-yellow-950 py-0.5 text-center shadow-md uppercase tracking-[0.2em]">
             BETA
@@ -58,6 +58,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
         <div className="relative z-20 p-5 overflow-y-auto scrollbar-thin">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

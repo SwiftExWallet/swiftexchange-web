@@ -169,7 +169,9 @@ export function useSwapAssetDefaults(params: {
     sellAssetAddress,
     buyAssetSymbol,
     buyAssetAddress,
-    setSearchParams,
+    // setSearchParams intentionally omitted: React Router v6 returns a new reference
+    // on every render, which would cause this effect to re-run (and re-navigate)
+    // on every keystroke. setSearchParams is stable once the router is mounted.
   ]);
 
   const isInitialMount = useRef(true);
@@ -186,28 +188,11 @@ export function useSwapAssetDefaults(params: {
     }
   }, [fromChainId, toChainId, resetInputs]);
 
-  useEffect(() => {
-    if (locationState?.selectedAsset) {
-      const asset = locationState.selectedAsset;
-      const targetChainId =
-        asset.chainType === 'stellar'
-          ? getStellarConfig(currentNetwork).chainId
-          : asset.chainId || 1;
-      setFromChainId(targetChainId);
-      setSellAssetSymbol(asset.symbol);
-      setSellAssetAddress(asset.address || '');
-      if (locationState.isPerp) {
-        setToChainId(targetChainId);
-      }
-    }
-  }, [
-    locationState,
-    currentNetwork,
-    setFromChainId,
-    setSellAssetSymbol,
-    setSellAssetAddress,
-    setToChainId,
-  ]);
+  // Note: locationState?.selectedAsset handling is covered by the combined URL-params
+  // effect above (lines 67-103), which sets hasInitializedDefaults.current = true and
+  // returns early on subsequent renders. The duplicate effect was removed because it
+  // had no initialization guard and re-fired setFromChainId/setSellAssetSymbol on
+  // every dependency change, overriding user selections made after mount.
 
   const lastAttemptedChainIdRef = useRef<string | number | null>(null);
 

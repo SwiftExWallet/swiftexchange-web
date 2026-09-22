@@ -214,7 +214,7 @@ async function parseError(res: Response): Promise<string> {
   return res.statusText;
 }
 
-function getConnectedWalletAddress(): string {
+export function getConnectedWalletAddress(): string {
   try {
     const state = useWalletStore.getState();
     const evmAddr = state.connectedWallets.evm?.address;
@@ -240,6 +240,7 @@ function makeHeaders(extra?: Record<string, string>): Record<string, string> {
   const walletAddress = getConnectedWalletAddress();
   return {
     'Content-Type': 'application/json',
+    'x-auth-wallet-token': token,
     'x-auth-device-token': token,
     ...(walletAddress ? { 'x-wallet-address': walletAddress } : {}),
     Authorization: token ? `Bearer ${token}` : '',

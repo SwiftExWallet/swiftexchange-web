@@ -12,6 +12,7 @@ import {
   Zap,
 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useNotificationStore } from '../../../../store/notificationStore';
 import { useWalletStore } from '../../../walletconnect/store/walletConnectStore';
@@ -691,7 +692,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
 
   return (
     <div className="flex flex-col h-full w-full bg-secondary text-primary font-sans select-none">
-      {/* 1. Top Header Bar using exact bg-secondary matching the top header */}
       <div className="flex items-center justify-between px-3.5 py-2.5 bg-secondary border-b border-color shrink-0">
         <div className="flex items-center gap-3">
           <button
@@ -701,26 +701,15 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
             <ArrowLeft size={18} />
           </button>
           <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <span className={`text-[15px] font-bold ${isLong ? 'text-success' : 'text-danger'}`}>
-                {isLong ? 'Open Long' : 'Open Short'}
-              </span>
-              <button
-                type="button"
-                onClick={() => onSwitchSide(isLong ? 'SELL' : 'BUY')}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-tertiary text-secondary hover:text-primary transition-colors cursor-pointer border border-color"
-                title="Switch Long/Short"
-              >
-                Switch
-              </button>
-            </div>
+            <span className={`text-[15px] font-bold ${isLong ? 'text-success' : 'text-danger'}`}>
+              {isLong ? 'Open Long' : 'Open Short'}
+            </span>
             <span className="text-[11px] text-muted font-mono-tabular">
               {baseAsset} ${currentPrice ? currentPrice.toLocaleString('en-US') : '--'}
             </span>
           </div>
         </div>
 
-        {/* Right Header Buttons: Order Type Selector */}
         <div className="flex items-center gap-2">
           <div className="relative">
             <button
@@ -741,156 +730,180 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
         </div>
       </div>
 
-      {/* Order Type Selection Modal / Sheet */}
-      {showOrderTypeMenu && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs"
-          onClick={() => setShowOrderTypeMenu(false)}
-        >
+      {showOrderTypeMenu &&
+        createPortal(
           <div
-            className="w-full max-w-sm bg-secondary border border-color rounded-t-3xl sm:rounded-2xl p-4 shadow-2xl space-y-3 animate-slide-up text-primary max-h-[85vh] overflow-y-auto"
-            onClick={e => e.stopPropagation()}
+            className="fixed inset-0 z-[99999] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs"
+            onClick={() => setShowOrderTypeMenu(false)}
           >
-            <div className="flex items-center justify-between pb-1 border-b border-color/40">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-brand" />
-                <h3 className="text-sm font-bold text-primary">Select Order Type</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowOrderTypeMenu(false)}
-                className="w-7 h-7 rounded-full bg-tertiary flex items-center justify-center text-secondary hover:text-primary transition-colors cursor-pointer"
-              >
-                <X size={15} />
-              </button>
-            </div>
-
-            {/* Standard Orders */}
-            <div className="space-y-1.5">
-              <div className="text-[10.5px] font-semibold text-muted uppercase tracking-wider px-0.5">
-                Standard Execution
-              </div>
-              <div className="grid grid-cols-2 gap-2">
+            <div
+              className="w-full max-w-sm bg-secondary border border-color rounded-t-3xl sm:rounded-2xl p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl space-y-3 animate-slide-up text-primary max-h-[85vh] overflow-y-auto"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between pb-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-primary">Select Order Type</h3>
+                </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    store.setOrderType('MARKET');
-                    setShowOrderTypeMenu(false);
-                  }}
-                  className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
-                    store.orderType === 'MARKET'
-                      ? 'border-brand bg-brand/10 text-brand shadow-xs'
-                      : 'border-color bg-tertiary text-secondary hover:text-primary'
-                  }`}
+                  onClick={() => setShowOrderTypeMenu(false)}
+                  className="w-7 h-7 rounded-full bg-tertiary flex items-center justify-center text-secondary hover:text-primary transition-colors cursor-pointer"
                 >
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-xs font-bold text-primary">Market</span>
-                    {store.orderType === 'MARKET' && <Check size={13} className="text-brand" />}
-                  </div>
-                  <div className="text-[10px] text-muted leading-tight">
-                    Instant fill at best price
-                  </div>
+                  <X size={15} />
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    store.setOrderType('LIMIT');
-                    if (!store.price || store.price === '0') store.setPrice(String(currentPrice));
-                    setShowOrderTypeMenu(false);
-                  }}
-                  className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
-                    store.orderType === 'LIMIT'
-                      ? 'border-brand bg-brand/10 text-brand shadow-xs'
-                      : 'border-color bg-tertiary text-secondary hover:text-primary'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-xs font-bold text-primary">Limit</span>
-                    {store.orderType === 'LIMIT' && <Check size={13} className="text-brand" />}
-                  </div>
-                  <div className="text-[10px] text-muted leading-tight">
-                    Fill at specified target price
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Advanced Orders */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between px-0.5">
-                <span className="text-[10.5px] font-semibold text-muted uppercase tracking-wider">
-                  Advanced Orders
-                </span>
-                <span className="text-[9.5px] font-medium text-brand bg-brand/10 px-1.5 py-0.5 rounded-full border border-brand/20">
-                  Conditional & Algo
-                </span>
               </div>
 
               <div className="space-y-1.5">
-                {ADVANCED_ORDER_TYPES.map(item => {
-                  const isSelected = store.orderType === item.value;
-                  return (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => {
-                        store.setOrderType(item.value);
-                        if (
-                          (item.value === 'STOP' || item.value === 'STOP_MARKET') &&
-                          (!store.stopPrice || store.stopPrice === '0')
-                        ) {
-                          store.setStopPrice(String(currentPrice));
-                        }
-                        if (item.value === 'SCALED') {
-                          if (!store.scaledPriceLower || store.scaledPriceLower === '0') {
-                            store.setScaledPriceLower((currentPrice * 0.98).toFixed(priceDecimals));
+                <div className="text-[10.5px] font-semibold text-muted uppercase tracking-wider px-0.5">
+                  Standard Execution
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      store.setOrderType('MARKET');
+                      setShowOrderTypeMenu(false);
+                    }}
+                    className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
+                      store.orderType === 'MARKET'
+                        ? 'border-brand bg-brand/10 text-brand shadow-xs'
+                        : 'border-color bg-tertiary text-secondary hover:text-primary'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs font-bold text-primary">Market</span>
+                      {store.orderType === 'MARKET' && <Check size={13} className="text-brand" />}
+                    </div>
+                    <div className="text-[10px] text-muted leading-tight">
+                      Instant fill at best price
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      store.setOrderType('LIMIT');
+                      if (!store.price || store.price === '0') store.setPrice(String(currentPrice));
+                      setShowOrderTypeMenu(false);
+                    }}
+                    className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
+                      store.orderType === 'LIMIT'
+                        ? 'border-brand bg-brand/10 text-brand shadow-xs'
+                        : 'border-color bg-tertiary text-secondary hover:text-primary'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs font-bold text-primary">Limit</span>
+                      {store.orderType === 'LIMIT' && <Check size={13} className="text-brand" />}
+                    </div>
+                    <div className="text-[10px] text-muted leading-tight">
+                      Fill at specified target price
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between px-0.5">
+                  <span className="text-[10.5px] font-semibold text-muted uppercase tracking-wider">
+                    Advanced Orders
+                  </span>
+                  <span className="text-[9.5px] font-medium text-brand bg-brand/10 px-1.5 py-0.5 rounded-full border border-brand/20">
+                    Conditional & Algo
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  {ADVANCED_ORDER_TYPES.map(item => {
+                    const isSelected = store.orderType === item.value;
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => {
+                          store.setOrderType(item.value);
+                          if (
+                            (item.value === 'STOP' || item.value === 'STOP_MARKET') &&
+                            (!store.stopPrice || store.stopPrice === '0')
+                          ) {
+                            store.setStopPrice(String(currentPrice));
                           }
-                          if (!store.scaledPriceUpper || store.scaledPriceUpper === '0') {
-                            store.setScaledPriceUpper((currentPrice * 1.02).toFixed(priceDecimals));
+                          if (item.value === 'SCALED') {
+                            if (!store.scaledPriceLower || store.scaledPriceLower === '0') {
+                              store.setScaledPriceLower(
+                                (currentPrice * 0.98).toFixed(priceDecimals)
+                              );
+                            }
+                            if (!store.scaledPriceUpper || store.scaledPriceUpper === '0') {
+                              store.setScaledPriceUpper(
+                                (currentPrice * 1.02).toFixed(priceDecimals)
+                              );
+                            }
                           }
-                        }
-                        setShowOrderTypeMenu(false);
-                      }}
-                      className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex items-start justify-between gap-2 ${
-                        isSelected
-                          ? 'border-brand bg-brand/10 shadow-xs'
-                          : 'border-color bg-tertiary hover:bg-hover'
-                      }`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span
-                            className={`text-xs font-bold ${isSelected ? 'text-brand' : 'text-primary'}`}
-                          >
-                            {item.label}
-                          </span>
-                          <span
-                            className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border ${item.badgeColor}`}
-                          >
-                            {item.badge}
-                          </span>
+                          setShowOrderTypeMenu(false);
+                        }}
+                        className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex items-start justify-between gap-2 ${
+                          isSelected
+                            ? 'border-brand bg-brand/10 shadow-xs'
+                            : 'border-color bg-tertiary hover:bg-hover'
+                        }`}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span
+                              className={`text-xs font-bold ${isSelected ? 'text-brand' : 'text-primary'}`}
+                            >
+                              {item.label}
+                            </span>
+                            <span
+                              className={`text-[9px] font-semibold px-1.5 py-0.2 rounded border ${item.badgeColor}`}
+                            >
+                              {item.badge}
+                            </span>
+                          </div>
+                          <p className="text-[10.5px] text-muted leading-tight line-clamp-2">
+                            {item.description}
+                          </p>
                         </div>
-                        <p className="text-[10.5px] text-muted leading-tight line-clamp-2">
-                          {item.description}
-                        </p>
-                      </div>
-                      {isSelected && <Check size={14} className="text-brand shrink-0 mt-0.5" />}
-                    </button>
-                  );
-                })}
+                        {isSelected && <Check size={14} className="text-brand shrink-0 mt-0.5" />}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
 
-      {/* 2. Main Content Split: Left Form & Right Ultra-Thin Orderbook */}
-      <div className="flex-1 flex overflow-hidden min-h-0 bg-secondary">
-        {/* Left Form: Real, working, reactive inputs matching desktop functionality */}
+      <div className="flex-1 flex overflow-hidden min-h-0 bg-secondary pb-6">
         <div className="flex-1 flex flex-col justify-between p-3.5 overflow-y-auto scrollbar-none space-y-3">
-          <div className="space-y-3">
-            {/* Header Balance & Margin Card: Minimal, clean, uncrowded */}
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-2 gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => onSwitchSide('BUY')}
+                className={`h-9 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none active:scale-[0.98] ${
+                  isLong
+                    ? 'bg-success text-white shadow-xs'
+                    : 'bg-tertiary text-secondary hover:text-primary hover:bg-hover'
+                }`}
+              >
+                <span>Long</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchSide('SELL')}
+                className={`h-9 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none active:scale-[0.98] ${
+                  !isLong
+                    ? 'bg-danger text-white shadow-xs'
+                    : 'bg-tertiary text-secondary hover:text-primary hover:bg-hover'
+                }`}
+              >
+                <span>Short</span>
+              </button>
+            </div>
+
             <div className="p-2.5 bg-tertiary/70 border border-color rounded-xl shadow-xs space-y-2">
               <div className="flex items-center justify-between">
                 <div>
@@ -930,7 +943,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               </div>
             </div>
 
-            {/* Slider with Active Step Fill & Step Dots */}
             <div className="space-y-1.5">
               <div className="relative py-1">
                 <div
@@ -968,7 +980,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 />
               </div>
 
-              {/* Quick Percentage Buttons */}
               <div className="grid grid-cols-4 gap-1.5">
                 {PERCENT_BUTTONS.map(pct => (
                   <button
@@ -987,7 +998,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               </div>
             </div>
 
-            {/* Validation Error Banner if present */}
             {validation.error && (
               <div className="flex items-center gap-1.5 text-[11px] text-danger bg-danger/10 border border-danger/25 rounded-lg px-2.5 py-1.5 leading-snug">
                 <AlertCircle size={13} className="shrink-0 text-danger" />
@@ -995,9 +1005,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               </div>
             )}
 
-            {/* Form Fields: Real working inputs */}
             <div className="space-y-2 pt-0.5 text-[12px]">
-              {/* Trigger Price Input (For Stop Limit and Stop Market Orders) */}
               {(store.orderType === 'STOP' || store.orderType === 'STOP_MARKET') && (
                 <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
                   <span className="text-secondary font-medium shrink-0">Trigger Price</span>
@@ -1028,7 +1036,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               )}
 
-              {/* Limit Price Input (For Limit, Post Only, Stop Limit Orders) */}
               {(store.orderType === 'LIMIT' ||
                 store.orderType === 'POST_ONLY' ||
                 store.orderType === 'STOP') && (
@@ -1058,7 +1065,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               )}
 
-              {/* Post Only (GTX) Info Badge */}
               {store.orderType === 'POST_ONLY' && (
                 <div className="text-[11px] text-brand bg-brand/10 border border-brand/20 rounded-xl px-3 py-1.5 flex items-center justify-between font-medium">
                   <span>Post Only (Maker Only)</span>
@@ -1068,7 +1074,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               )}
 
-              {/* Trailing Stop Dynamic Inputs */}
               {store.orderType === 'TRAILING_STOP_MARKET' && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
@@ -1104,7 +1109,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     </div>
                   </div>
 
-                  {/* Callback Rate Chips */}
                   <div className="flex gap-1.5">
                     {['0.5', '1.0', '2.0', '3.0', '5.0'].map(rate => (
                       <button
@@ -1128,7 +1132,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               )}
 
-              {/* Chase Order Dynamic Inputs */}
               {store.orderType === 'CHASE' && (
                 <div className="space-y-2 bg-tertiary/80 border border-color rounded-xl p-2.5">
                   <div className="flex justify-between items-center text-xs">
@@ -1207,7 +1210,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               )}
 
-              {/* Scaled Order Dynamic Inputs */}
               {store.orderType === 'SCALED' && (
                 <div className="space-y-2">
                   <div className="grid grid-cols-2 gap-2">
@@ -1286,7 +1288,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               )}
 
-              {/* Size Input with Interactive Currency Toggle */}
               <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
                 <span className="text-secondary font-medium shrink-0">Size</span>
                 <div className="flex items-center gap-1.5 flex-1 justify-end">
@@ -1316,7 +1317,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               </div>
 
-              {/* Leverage Selector Row */}
               <button
                 type="button"
                 onClick={() => setShowLeverageModal(true)}
@@ -1330,7 +1330,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               </button>
 
-              {/* TP / SL Toggle & Inputs (For non-scaled/chase or limit/market) */}
               {store.orderType !== 'SCALED' && store.orderType !== 'CHASE' && (
                 <div className="space-y-1.5 border-t border-color/40 pt-1.5">
                   <div className="flex items-center justify-between py-0.5 px-1">
@@ -1386,7 +1385,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               )}
 
-              {/* Liquidation Price Row */}
               <div className="flex items-center justify-between py-1 px-1">
                 <span className="text-secondary font-medium">Liquidation price</span>
                 <span className="text-warning font-mono font-bold tracking-tight">
@@ -1401,7 +1399,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
             </div>
           </div>
 
-          {/* Action Button: Connect EVM / 1-Click Trading / Submit Order */}
           <div className="pt-2">
             {!isEvmConnected ? (
               <button
@@ -1483,7 +1480,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
           </div>
         </div>
 
-        {/* Right Live Mini Orderbook (120px) using bg-secondary */}
         <div className="w-[120px] shrink-0 border-l border-color px-1 py-1 flex flex-col h-full bg-secondary">
           <MobileMiniOrderbook
             currentPrice={currentPrice}
@@ -1493,10 +1489,8 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
         </div>
       </div>
 
-      {/* Real Leverage Modal */}
       <LeverageModal isOpen={showLeverageModal} onClose={() => setShowLeverageModal(false)} />
 
-      {/* Real Deposit / Account Modal */}
       <AccountModal
         isOpen={showDepositModal}
         onClose={() => setShowDepositModal(false)}

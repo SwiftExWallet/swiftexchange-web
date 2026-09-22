@@ -1,9 +1,10 @@
-import { getTestnetTokensForChain } from '../../../data/testnet/evm-testnet-tokens';
 import { CHAINS } from './assetmanagement/chains';
 import {
   AGGREGATOR_NATIVE_ADDRESS,
   GET_TOKEN_LOGO_URL,
   NATIVE_ADDRESS,
+  RESOURCE_BASE_URL_MAINNET,
+  RESOURCE_BASE_URL_TESTNET,
 } from './assetmanagement/constants';
 import { mapIChainToChainConfig } from './assetmanagement/mapper';
 
@@ -108,7 +109,7 @@ const BY_SLUG = new Map<string, ChainConfig>(
   CHAIN_REGISTRY.map(c => [`${c.slug}:${c.networkType}`, c])
 );
 
-const CACHE_KEY_PREFIX = 'swift_token_cache_';
+const CACHE_KEY_PREFIX = 'swift_token_cache_v2_';
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 interface TokenCache {
@@ -242,22 +243,6 @@ export function getAssetByAddress(
 
   const found = chain.assets.find(a => a.address.toLowerCase() === addr);
   if (found) return found;
-
-  const testnetMatch = getTestnetTokensForChain(Number(chainId)).find(
-    t => t.address.toLowerCase() === addr
-  );
-  if (testnetMatch) {
-    return {
-      asset: testnetMatch.symbol,
-      type: testnetMatch.isNative ? 'NATIVE' : 'ERC20',
-      name: testnetMatch.name,
-      symbol: testnetMatch.symbol,
-      decimals: testnetMatch.decimals,
-      address: testnetMatch.address,
-      logoURI: testnetMatch.logoURI,
-      isNative: testnetMatch.isNative,
-    };
-  }
 
   return undefined;
 }
@@ -437,23 +422,46 @@ export async function initDynamicTokenLists() {
       try {
         const response = await fetch(chain.supportedTokenList);
         if (!response.ok) continue;
-        const tokens = await response.json();
+
+        const text = await response.text();
+        let tokens: any;
+        try {
+          tokens = JSON.parse(text);
+        } catch {
+          try {
+            const trimmed = text.trim().replace(/,\s*$/, '');
+            const repaired = trimmed.endsWith(']') ? trimmed + '}' : trimmed + '}]}';
+            tokens = JSON.parse(repaired);
+          } catch {
+            console.error(`[Chainregistry] Failed to parse JSON for ${chain.name}`);
+            continue;
+          }
+        }
 
         let dynamicAssets: ChainAsset[] = [];
         if (
-          Array.isArray(tokens.assets) &&
+          Array.isArray(tokens?.assets) &&
           (chain.chainId === 'pubnet' || chain.chainId === 'testnet')
         ) {
-          dynamicAssets = tokens.assets.map((asset: any) => ({
-            asset: `${asset.code}-${asset.issuer}`,
-            type: 'STELLAR',
-            address: asset.issuer,
-            name: asset.name || asset.code,
-            symbol: asset.code,
-            decimals: asset.decimals,
-            logoURI: asset.icon,
-            domain: asset.domain,
-          }));
+          dynamicAssets = tokens.assets
+            .filter((asset: any) => asset && (asset.code || asset.name))
+            .map((asset: any) => {
+              const isNative = !asset.issuer || asset.issuer === 'native' || asset.code === 'XLM';
+              return {
+                asset: isNative ? 'XLM' : `${asset.code}-${asset.issuer}`,
+                type: isNative ? 'NATIVE' : 'STELLAR',
+                address: isNative ? NATIVE_ADDRESS : asset.issuer,
+                name: asset.name || asset.code,
+                symbol: asset.code,
+                decimals: asset.decimals ?? 7,
+                logoURI:
+                  asset.icon ||
+                  (asset.code
+                    ? `${chain.chainId === 'testnet' ? RESOURCE_BASE_URL_TESTNET : RESOURCE_BASE_URL_MAINNET}/stellar/${asset.code}.png`
+                    : undefined),
+                domain: asset.domain,
+              };
+            });
 
           const hasNative = dynamicAssets.some(
             a => a.symbol.toUpperCase() === chain.nativeCurrency.symbol.toUpperCase()
@@ -462,7 +470,7 @@ export async function initDynamicTokenLists() {
             dynamicAssets.unshift({
               asset: chain.nativeToken.symbol,
               type: chain.nativeToken.type || 'NATIVE',
-              address: chain.nativeToken.address || 'NATIVE',
+              address: chain.nativeToken.address || NATIVE_ADDRESS,
               name: chain.nativeToken.name,
               symbol: chain.nativeToken.symbol,
               decimals: chain.nativeToken.decimals,
@@ -472,12 +480,12 @@ export async function initDynamicTokenLists() {
         } else if (Array.isArray(tokens)) {
           dynamicAssets = tokens.map((t: any) => ({
             asset: t.asset || `c${chain.chainId}_t${t.address}`,
-            type: 'ERC20',
+            type: t.type === 'NATIVE' ? 'NATIVE' : 'ERC20',
             address: t.address,
             name: t.name,
             symbol: t.symbol,
             decimals: t.decimals,
-            logoURI: t.logoURI || GET_TOKEN_LOGO_URL(chain.slug, t.address),
+            logoURI: t.logoURI || GET_TOKEN_LOGO_URL(chain.slug, t.address, chain.networkType),
           }));
         }
 

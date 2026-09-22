@@ -72,10 +72,25 @@ export function useTradeTransaction({ userAddress }: UseTradeTransactionProps) {
           const list = cursor ? [...prev, ...offers] : offers;
           const seen = new Set<string>();
           const deduped = list.filter(o => {
-            if (seen.has(o.id)) return false;
-            seen.add(o.id);
+            if (seen.has(String(o.id))) return false;
+            seen.add(String(o.id));
             return true;
           });
+
+          // Retain pending optimistic offers until confirmed by Horizon
+          const optimisticOffers = prev.filter(o => String(o.id).startsWith('optimistic-'));
+          const pendingOptimistic = optimisticOffers.filter(opt => {
+            const matched = deduped.some(
+              r =>
+                r.selling.code === opt.selling.code &&
+                r.buying.code === opt.buying.code &&
+                Math.abs(parseFloat(r.price) - parseFloat(opt.price)) < 0.0001
+            );
+            return !matched;
+          });
+
+          const finalList = [...pendingOptimistic, ...deduped];
+
           const existingIds = new Set(prev.map(o => o.id));
           const freshIds = offers.filter(o => !existingIds.has(o.id)).map(o => o.id);
           if (freshIds.length > 0) {
@@ -90,7 +105,7 @@ export function useTradeTransaction({ userAddress }: UseTradeTransactionProps) {
               }
             }, 2000);
           }
-          return deduped;
+          return finalList;
         });
         setActivePagination({ cursor: nextCursor, hasMore });
       } catch (err) {
@@ -152,21 +167,79 @@ export function useTradeTransaction({ userAddress }: UseTradeTransactionProps) {
   );
 
   useEffect(() => {
-    const handler = () => {
+    let timer1: any = null;
+    let timer2: any = null;
+
+    const handler = (e: Event) => {
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
-      refreshTimeoutRef.current = setTimeout(() => {
-        fetchActiveOffers();
-        fetchCompletedTrades();
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+
+      const customEvent = e as CustomEvent;
+      const detail = customEvent?.detail;
+
+      if (detail?.quote) {
+        try {
+          const isBuy = detail.isBuy;
+          const sellingCode = isBuy
+            ? detail.toToken?.code || 'USDC'
+            : detail.fromToken?.code || 'XLM';
+          const buyingCode = isBuy
+            ? detail.fromToken?.code || 'XLM'
+            : detail.toToken?.code || 'USDC';
+          const sellingIssuer = isBuy ? detail.toToken?.issuer : detail.fromToken?.issuer;
+          const buyingIssuer = isBuy ? detail.fromToken?.issuer : detail.toToken?.issuer;
+
+          const amount = isBuy
+            ? detail.quote.total || detail.quote.amount || '0'
+            : detail.quote.amount || '0';
+          const price = detail.quote.price || '0';
+
+          const optimisticId = `optimistic-${Date.now()}`;
+          const optimisticOffer: ActiveOffer = {
+            id: optimisticId,
+            selling: { code: sellingCode, issuer: sellingIssuer },
+            buying: { code: buyingCode, issuer: buyingIssuer },
+            amount: String(amount),
+            price: String(price),
+            lastModifiedTime: new Date().toISOString(),
+          };
+
+          setActiveOffers(prev => [
+            optimisticOffer,
+            ...prev.filter(o => !String(o.id).startsWith('optimistic-')),
+          ]);
+          setNewOfferIds(s => new Set([...s, optimisticId]));
+        } catch (err) {
+          console.error('Failed to create optimistic offer:', err);
+        }
+      }
+
+      // Fetch immediately (0ms delay) in background
+      fetchActiveOffers(undefined, true);
+      fetchCompletedTrades(undefined, true);
+
+      // Follow up quickly in case Horizon needs a short moment to index the ledger
+      timer1 = setTimeout(() => {
+        fetchActiveOffers(undefined, true);
+      }, 800);
+
+      timer2 = setTimeout(() => {
+        fetchActiveOffers(undefined, true);
+        fetchCompletedTrades(undefined, true);
       }, 2000);
     };
+
     window.addEventListener('stellar:order-placed', handler);
     return () => {
       window.removeEventListener('stellar:order-placed', handler);
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
     };
   }, [fetchActiveOffers, fetchCompletedTrades]);
 

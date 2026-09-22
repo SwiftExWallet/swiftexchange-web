@@ -21,7 +21,6 @@ const TIME_RANGES: { label: string; value: TimeRange; ms: number }[] = [
   { label: '1 week', value: '1w', ms: 7 * 24 * 60 * 60 * 1000 },
   { label: '1 month', value: '1m', ms: 30 * 24 * 60 * 60 * 1000 },
   { label: '3 months', value: '3m', ms: 90 * 24 * 60 * 60 * 1000 },
-  { label: 'All', value: 'all', ms: Infinity },
 ];
 
 function formatSplitDate(timestamp: number): { date: string; time: string } {
@@ -87,7 +86,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
   signer,
   userAddr,
   asterSymbol,
-  timeRange = '1w',
+  timeRange = '1m',
   hideOtherSymbols = false,
 }) => {
   const currentExchange = useExchangeManager(state => state.currentExchange);
@@ -97,7 +96,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
 
   const querySymbol = hideOtherSymbols ? asterSymbol : null;
 
-  const asterHook = useAsterTradeHistory(signer, userAddr, querySymbol);
+  const asterHook = useAsterTradeHistory(signer, userAddr, querySymbol, timeRange);
   const hlHook = useHyperliquidTradeHistory(userAddr, querySymbol);
 
   const { trades, isLoading, isLoadingMore, hasMore, loadMore } =

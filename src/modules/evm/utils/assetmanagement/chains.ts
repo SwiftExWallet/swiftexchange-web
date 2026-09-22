@@ -749,7 +749,7 @@ export const CHAINS: Record<string, IChain> = {
     slug: 'stellar',
     networkType: 'mainnet',
     blockExplorerUrl: EXPLORER_URLS.STR,
-    supportedTokenList: 'https://lobstr.co/api/v1/sep/assets/curated.json',
+    supportedTokenList: GET_STELLAR_TOKEN_LIST_URL('mainnet'),
     nativeToken: {
       name: 'Stellar',
       symbol: 'XLM',
@@ -816,7 +816,7 @@ export const CHAINS: Record<string, IChain> = {
     slug: 'sepolia',
     networkType: 'testnet',
     blockExplorerUrl: EXPLORER_URLS.SEPOLIA,
-    supportedTokenList: [],
+    supportedTokenList: GET_RESOURCES_LIST_URL('eth_tokens.json', 'testnet'),
     nativeToken: {
       name: 'Ether',
       symbol: 'ETH',
@@ -849,7 +849,7 @@ export const CHAINS: Record<string, IChain> = {
     slug: 'bsc-testnet',
     networkType: 'testnet',
     blockExplorerUrl: EXPLORER_URLS.BSC_TESTNET,
-    supportedTokenList: [],
+    supportedTokenList: GET_RESOURCES_LIST_URL('bsc_tokens.json', 'testnet'),
     nativeToken: {
       name: 'BNB',
       symbol: 'BNB',
@@ -881,7 +881,7 @@ export const CHAINS: Record<string, IChain> = {
     slug: 'amoy',
     networkType: 'testnet',
     blockExplorerUrl: EXPLORER_URLS.AMOY,
-    supportedTokenList: [],
+    supportedTokenList: GET_RESOURCES_LIST_URL('poly_tokens.json', 'testnet'),
     nativeToken: {
       name: 'Polygon',
       symbol: 'POL',
@@ -913,7 +913,7 @@ export const CHAINS: Record<string, IChain> = {
     slug: 'arb-sepolia',
     networkType: 'testnet',
     blockExplorerUrl: EXPLORER_URLS.ARB_SEPOLIA,
-    supportedTokenList: [],
+    supportedTokenList: GET_RESOURCES_LIST_URL('arb_tokens.json', 'testnet'),
     nativeToken: {
       name: 'Ether',
       symbol: 'ETH',
@@ -945,7 +945,7 @@ export const CHAINS: Record<string, IChain> = {
     slug: 'op-sepolia',
     networkType: 'testnet',
     blockExplorerUrl: EXPLORER_URLS.OPT_SEPOLIA,
-    supportedTokenList: [],
+    supportedTokenList: GET_RESOURCES_LIST_URL('op_tokens.json', 'testnet'),
     nativeToken: {
       name: 'Ether',
       symbol: 'ETH',
@@ -977,7 +977,7 @@ export const CHAINS: Record<string, IChain> = {
     slug: 'base-sepolia',
     networkType: 'testnet',
     blockExplorerUrl: EXPLORER_URLS.BASE_SEPOLIA,
-    supportedTokenList: [],
+    supportedTokenList: GET_RESOURCES_LIST_URL('base_tokens.json', 'testnet'),
     nativeToken: {
       name: 'Ether',
       symbol: 'ETH',
@@ -1009,7 +1009,7 @@ export const CHAINS: Record<string, IChain> = {
     slug: 'avax-fuji',
     networkType: 'testnet',
     blockExplorerUrl: EXPLORER_URLS.AVAX_FUJI,
-    supportedTokenList: [],
+    supportedTokenList: GET_RESOURCES_LIST_URL('avax_tokens.json', 'testnet'),
     nativeToken: {
       name: 'AVAX',
       symbol: 'AVAX',

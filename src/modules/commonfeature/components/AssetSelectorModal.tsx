@@ -257,8 +257,6 @@ const AssetSelectorModal: FC = () => {
 
       targetChains.forEach(activeChainId => {
         const registryTokens = getTokensForChain(activeChainId);
-        // tokenListService now handles testnet EVM chains via src/data/testnet/evm-testnet-tokens.ts
-        // so registryTokens will always be populated for known testnet chains.
         let validTokens = [...registryTokens];
 
         if (effectiveActionType === 'BRIDGE' && currentNetwork === 'mainnet') {

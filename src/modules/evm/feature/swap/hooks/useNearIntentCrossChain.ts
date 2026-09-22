@@ -22,7 +22,6 @@ import {
   getEvmChainId,
   getNearIntentQuote,
   isStellarBlockchain,
-  safeParseUnits,
   submitNearIntentDeposit,
 } from '../services/oneClickApi';
 
@@ -263,7 +262,9 @@ export const useNearIntentCrossChain = ({
           const sellAddress = sellAsset.contractAddress || '';
           let txHashResultHex = '';
           const fromAddr = (await signer.getAddress()).toLowerCase();
-          const amountInWei = BigInt(safeParseUnits(amount, sellAsset.decimals || 18));
+          // ethers.parseUnits always returns a native bigint and handles all edge cases
+          // (scientific notation, leading zeros, etc.) that BigInt(safeParseUnits()) cannot.
+          const amountInWei = ethers.parseUnits(amount, sellAsset.decimals || 18);
 
           // `fromAddr` is obtained from the signer which is already bound to evmAddress,
           // so it will always match the active keyring account. `from` is required for

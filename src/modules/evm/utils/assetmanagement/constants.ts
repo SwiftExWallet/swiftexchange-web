@@ -146,15 +146,31 @@ export const RPC = {
 export const NATIVE_ADDRESS = '0X0000000000000000000000000000000000000000';
 export const AGGREGATOR_NATIVE_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
-export const RESOURCE_BASE_URL =
+export const RESOURCE_BASE_URL_MAINNET =
   'https://raw.githubusercontent.com/sachin-swiftex/resources/refs/heads/master';
+export const RESOURCE_BASE_URL_TESTNET =
+  'https://raw.githubusercontent.com/sachin-swiftex/resources/refs/heads/devTestNet';
+
+export const RESOURCE_BASE_URL = RESOURCE_BASE_URL_MAINNET;
 export const ASSET_CDN_BASE = RESOURCE_BASE_URL;
 
 export const GET_LOGO_URL = (slug: string) => GET_TOKEN_LOGO_URL(slug, NATIVE_ADDRESS);
-export const GET_TOKEN_LOGO_URL = (slug: string, address: string) =>
-  `${ASSET_CDN_BASE}/${slug}/${address}.png`;
-export const GET_RESOURCES_LIST_URL = (filename: string) => `${RESOURCE_BASE_URL}/${filename}`;
+export const GET_TOKEN_LOGO_URL = (
+  slug: string,
+  address: string,
+  network: 'mainnet' | 'testnet' = 'mainnet'
+) => {
+  const base = network === 'testnet' ? RESOURCE_BASE_URL_TESTNET : RESOURCE_BASE_URL_MAINNET;
+  return `${base}/${slug}/${address}.png`;
+};
+export const GET_RESOURCES_LIST_URL = (
+  filename: string,
+  network: 'mainnet' | 'testnet' = 'mainnet'
+) => {
+  const base = network === 'testnet' ? RESOURCE_BASE_URL_TESTNET : RESOURCE_BASE_URL_MAINNET;
+  return `${base}/${filename}`;
+};
 export const GET_STELLAR_TOKEN_LIST_URL = (network: string) =>
   network === 'testnet'
-    ? GET_RESOURCES_LIST_URL('stellar_testnet_tokens.json')
-    : GET_RESOURCES_LIST_URL('stellar_tokens.json');
+    ? `${RESOURCE_BASE_URL_TESTNET}/stellar.json`
+    : `${RESOURCE_BASE_URL_MAINNET}/stellar.json`;

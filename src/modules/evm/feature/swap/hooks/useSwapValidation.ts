@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 import type { UnifiedAsset, UnifiedQuote } from '../types/swap.types';
-import { isSameAsset as checkSameAsset } from '../utils/swapAssetUtils';
+import { isSameAsset as checkSameAsset, isStellar } from '../utils/swapAssetUtils';
 import {
   getMinimumReceived as checkMinimumReceived,
   getButtonLabel,
@@ -167,10 +167,14 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   }, [swapAssets]);
 
   const errorMessage = useMemo(() => {
-    if (currentNetwork === 'testnet' && actionType === 'BRIDGE') {
+    if (
+      currentNetwork === 'testnet' &&
+      actionType === 'BRIDGE' &&
+      (isStellar(fromChainId) || isStellar(toChainId))
+    ) {
       return (
         crossChainWarning ||
-        'Cross-chain swaps (Stellar ↔ EVM) via NEAR Intents are not supported on Testnet. Please switch to Mainnet.'
+        'Stellar ↔ EVM swaps via NEAR Intents are only available on Mainnet. Please switch to Mainnet.'
       );
     }
     return getErrorMessage({
@@ -193,6 +197,9 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     });
   }, [
     currentNetwork,
+    actionType,
+    fromChainId,
+    toChainId,
     bridgeTxStatus,
     bridgeErrorMsg,
     swapError,
@@ -202,13 +209,11 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     hasInsufficientStellarGas,
     hasInsufficientEvmGas,
     isSameAssetSelected,
-    actionType,
     crossChainWarning,
     currentQuote.data,
     feePayType,
     nativeSymbol,
     isStellarAccountActive,
-    toChainId,
   ]);
 
   const buttonLabel = useMemo(() => {

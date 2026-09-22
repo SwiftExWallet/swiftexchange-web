@@ -200,7 +200,7 @@ export const NetworkMonitor: React.FC = () => {
   return (
     <div
       ref={dropdownRef}
-      className="fixed bottom-0 lg:left-16 left-0 right-0 z-30 h-6 bg-[var(--color-bg-primary)] border-t border-[var(--color-border)]/40 text-[10px] sm:text-[10.5px] font-mono text-[var(--color-text-muted)] select-none px-2 sm:px-3 flex items-center justify-between"
+      className="fixed bottom-0 lg:left-16 left-0 right-0 z-0 h-6 bg-[var(--color-bg-primary)] border-t border-[var(--color-border)]/40 text-[10px] sm:text-[10.5px] font-mono text-[var(--color-text-muted)] select-none px-2 sm:px-3 flex items-center justify-between"
     >
       {/* Left side: System status & UTC clock & Wallet info */}
       <div className="flex items-center gap-2 sm:gap-2.5 truncate min-w-0">

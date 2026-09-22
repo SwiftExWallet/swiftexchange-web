@@ -587,7 +587,17 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
 
         setTimeout(() => fetchBalances(true), 8000);
 
-        window.dispatchEvent(new CustomEvent('stellar:order-placed'));
+        window.dispatchEvent(
+          new CustomEvent('stellar:order-placed', {
+            detail: {
+              quote: transaction.quote || quote,
+              isBuy,
+              txHash,
+              fromToken,
+              toToken,
+            },
+          })
+        );
 
         return txHash;
       } catch (err) {
@@ -602,7 +612,7 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
         setIsLoading(false);
       }
     },
-    [service, fetchBalances]
+    [service, fetchBalances, quote, isBuy, fromToken, toToken]
   );
 
   const refreshOrderBook = useCallback(async () => {

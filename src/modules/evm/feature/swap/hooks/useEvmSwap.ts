@@ -372,6 +372,10 @@ export const useEvmSwap = ({
           updateState({ txHash: hash, loading: false });
         }
 
+        // Cancel any previously pending balance-update before scheduling a new one.
+        // Without this, a rapid second swap (or strict-mode double-mount) can fire
+        // the old callback with the wrong sellAsset reference.
+        if (balanceUpdateTimeoutRef.current) clearTimeout(balanceUpdateTimeoutRef.current);
         balanceUpdateTimeoutRef.current = setTimeout(() => {
           if (isMounted.current) {
             updateTokenBalances(sellAsset);
@@ -490,6 +494,8 @@ export const useEvmSwap = ({
           updateState({ txHash: hash, loading: false });
         }
 
+        // Cancel any previously pending balance-update before scheduling a new one.
+        if (balanceUpdateTimeoutRef.current) clearTimeout(balanceUpdateTimeoutRef.current);
         balanceUpdateTimeoutRef.current = setTimeout(() => {
           if (isMounted.current) {
             updateTokenBalances(sellAsset);

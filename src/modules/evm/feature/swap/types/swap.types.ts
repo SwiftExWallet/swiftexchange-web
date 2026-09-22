@@ -87,6 +87,7 @@ export interface FusionPreset {
   auctionStartAmount: string;
   auctionEndAmount: string;
   tokenFee: string;
+  costInDstToken?: string; // present in some 1inch Fusion Plus responses
   exclusiveResolver: string | null;
   estP: number;
   allowPartialFills: boolean;
@@ -110,6 +111,10 @@ export interface FusionQuote {
   srcTokenAmount?: string;
   dstTokenAmount?: string;
   feeToken: string;
+  fee?: {
+    bps?: number;
+    [key: string]: unknown;
+  };
   presets: {
     fast: FusionPreset;
     medium: FusionPreset;
@@ -120,6 +125,8 @@ export interface FusionQuote {
     usd: {
       fromToken: string;
       toToken: string;
+      srcToken?: string; // alias used in some API versions
+      dstToken?: string; // alias used in some API versions
     };
   };
   volume: {
@@ -128,6 +135,7 @@ export interface FusionQuote {
       toToken: string;
     };
   };
+  priceImpact?: number; // present in cross-chain responses
   priceImpactPercent: number;
   suggested: boolean;
   marketAmount: string;
@@ -171,12 +179,54 @@ export interface FusionOrder {
 
 export type QuoteSource = 'EVM_SWAP' | 'STELLAR_SWAP' | 'FUSION_PLUS' | 'NEAR_INTENT';
 
+/**
+ * Per-source data shapes — exported for call-sites that want to narrow quote data
+ * after checking `currentQuote.source`. The interface below keeps `data: any` so
+ * the widespread `setCurrentQuote(prev => ({ ...prev, loading: true }))` spread
+ * pattern compiles without casts on every call-site.
+ *
+ * Migration path: narrow with `if (q.source === 'EVM_SWAP') { const d = q.data as EvmSwapQuoteData; }`
+ */
+export type EvmSwapQuoteData = SwapQuote;
+export type StellarSwapQuoteData = {
+  estimatedOutput?: string;
+  outputAmount?: string;
+  minimumOutput?: string;
+  networkFee?: number;
+  [key: string]: unknown;
+};
+export type FusionPlusQuoteData = FusionQuote;
+export type NearIntentQuoteData = {
+  depositAddress: string;
+  depositMemo?: string;
+  amountOut: string;
+  amountOutFormatted: string;
+  amountOutUsd?: string;
+  amountIn: string;
+  amountInFormatted?: string;
+  amountInUsd?: string;
+  minAmountOut?: string;
+  timeEstimate: number;
+  withdrawFee?: string;
+  refundFee?: string;
+  [key: string]: unknown;
+};
+
+/**
+ * `data: any` preserves compatibility with the `setCurrentQuote(prev => ({ ...prev, ... }))`
+ * spread pattern used throughout the codebase. Narrow via `source` when you need typed access.
+ */
 export interface UnifiedQuote {
   source: QuoteSource | null;
+
   data: any;
   error: string | null;
   loading: boolean;
-  alternativeQuote?: any;
+  alternativeQuote?: {
+    source: QuoteSource | null;
+
+    data: any;
+  };
 }
 
 export interface UnifiedAsset {

@@ -361,8 +361,7 @@ export const MobileCleanChart: React.FC<MobileCleanChartProps> = ({
   }, [candles, symbol, timeframe, chartType, onPriceChange]);
 
   return (
-    <div className={`relative w-full h-full min-h-[260px] select-none ${className}`}>
-      {/* Real-time Mobile Touch Inspection HUD */}
+    <div className={`relative w-full h-full select-none ${className}`}>
       {hoveredData && (
         <div className="absolute top-1.5 left-2 z-20 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-secondary/95 backdrop-blur-md border border-color/80 text-[9.5px] font-mono shadow-sm pointer-events-none transition-all">
           <span className="text-muted">{hoveredData.dateStr}</span>
@@ -400,7 +399,6 @@ export const MobileCleanChart: React.FC<MobileCleanChartProps> = ({
         </div>
       )}
 
-      {/* Loading Spinner */}
       {isLoading && (!candles || candles.length === 0) && (
         <div className="absolute inset-0 flex items-center justify-center bg-transparent z-10 pointer-events-none">
           <div className="flex flex-col items-center gap-2">
@@ -410,7 +408,6 @@ export const MobileCleanChart: React.FC<MobileCleanChartProps> = ({
         </div>
       )}
 
-      {/* Chart Canvas Container with pan-y & pinch-zoom touch handling */}
       <div
         ref={containerRef}
         className="w-full h-full"

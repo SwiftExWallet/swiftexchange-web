@@ -44,78 +44,143 @@ interface BackendToken {
 interface BackendResponse {
   address?: string;
   totalValueUsd?: string | number;
+  syncStatus?: string;
+  stale?: boolean;
   tokens?: BackendToken[];
   data?: {
     tokens?: BackendToken[];
+    syncStatus?: string;
+    stale?: boolean;
   };
 }
 
-const CHAIN_LOOKUP: Record<string, string> = {
-  // Testnet mappings
-  'eth-sepolia': 'ethereum-sepolia',
-  sepolia: 'ethereum-sepolia',
-  '11155111': 'ethereum-sepolia',
-  'bnb-testnet': 'binance-testnet',
-  'bsc-testnet': 'binance-testnet',
-  '97': 'binance-testnet',
-  'matic-amoy': 'polygon-amoy',
-  'polygon-amoy': 'polygon-amoy',
-  amoy: 'polygon-amoy',
-  '80002': 'polygon-amoy',
-  'arb-sepolia': 'arbitrum-sepolia',
-  'arbitrum-sepolia': 'arbitrum-sepolia',
-  '421614': 'arbitrum-sepolia',
-  'opt-sepolia': 'optimism-sepolia',
-  'optimism-sepolia': 'optimism-sepolia',
-  '11155420': 'optimism-sepolia',
-  'base-sepolia': 'base-sepolia',
-  '84532': 'base-sepolia',
-  'avax-fuji': 'avalanche-fuji',
-  'avalanche-fuji': 'avalanche-fuji',
-  fuji: 'avalanche-fuji',
-  '43113': 'avalanche-fuji',
+const CHAIN_SLUG_TO_ID: Record<string, number> = {
   // Mainnet mappings
-  ethereum: 'ethereum',
-  eth: 'ethereum',
-  '1': 'ethereum',
-  arbitrum: 'arbitrum',
-  arb: 'arbitrum',
-  '42161': 'arbitrum',
-  polygon: 'polygon',
-  matic: 'polygon',
-  pol: 'polygon',
-  poly: 'polygon',
-  'polygon-pos': 'polygon',
-  'polygon-mainnet': 'polygon',
-  '137': 'polygon',
-  optimism: 'optimism',
-  opt: 'optimism',
-  '10': 'optimism',
-  avalanche: 'avalanche',
-  avax: 'avalanche',
-  '43114': 'avalanche',
-  base: 'base',
-  '8453': 'base',
-  binance: 'binance',
-  bnb: 'binance',
-  bsc: 'binance',
-  '56': 'binance',
+  'eth-mainnet': 1,
+  'ethereum-mainnet': 1,
+  ethereum: 1,
+  eth: 1,
+  '1': 1,
+
+  'bnb-mainnet': 56,
+  'bsc-mainnet': 56,
+  'binance-mainnet': 56,
+  binance: 56,
+  bnb: 56,
+  bsc: 56,
+  '56': 56,
+
+  'matic-mainnet': 137,
+  'polygon-mainnet': 137,
+  'pol-mainnet': 137,
+  polygon: 137,
+  matic: 137,
+  pol: 137,
+  poly: 137,
+  'polygon-pos': 137,
+  '137': 137,
+
+  'arb-mainnet': 42161,
+  'arbitrum-mainnet': 42161,
+  arbitrum: 42161,
+  'arbitrum-one': 42161,
+  arb: 42161,
+  '42161': 42161,
+
+  'opt-mainnet': 10,
+  'optimism-mainnet': 10,
+  optimism: 10,
+  opt: 10,
+  op: 10,
+  '10': 10,
+
+  'base-mainnet': 8453,
+  base: 8453,
+  '8453': 8453,
+
+  'avax-mainnet': 43114,
+  'avalanche-mainnet': 43114,
+  avalanche: 43114,
+  avax: 43114,
+  '43114': 43114,
+
+  // Testnet mappings
+  'eth-sepolia': 11155111,
+  'ethereum-sepolia': 11155111,
+  sepolia: 11155111,
+  '11155111': 11155111,
+
+  'bnb-testnet': 97,
+  'bsc-testnet': 97,
+  'binance-testnet': 97,
+  '97': 97,
+
+  'matic-amoy': 80002,
+  'polygon-amoy': 80002,
+  amoy: 80002,
+  '80002': 80002,
+
+  'arb-sepolia': 421614,
+  'arbitrum-sepolia': 421614,
+  '421614': 421614,
+
+  'opt-sepolia': 11155420,
+  'optimism-sepolia': 11155420,
+  '11155420': 11155420,
+
+  'base-sepolia': 84532,
+  '84532': 84532,
+
+  'avax-fuji': 43113,
+  'avalanche-fuji': 43113,
+  fuji: 43113,
+  '43113': 43113,
 };
+
+// Industry-standard minimum USD value to filter out airdrop dust attacks
+const DUST_THRESHOLD_USD = 0.05;
+
+// Stablecoin symbols that are known pegged to $1
+const STABLECOIN_SYMBOLS = new Set(['USDC', 'USDCE', 'USDT', 'DAI', 'FDUSD', 'USDE', 'BUSD']);
+
+const SPAM_REGEX = [
+  /t\.me\//i,
+  /t\.ly\//i,
+  /https?:\/\//i,
+  /www\./i,
+  /\.(top|rest|club|cfd|live|mom|website|xyz|link|site|today|claims?|click|cc|vip)\b/i,
+  /\b(claim|airdrop|reward|rewards|unlocked|voucher|gift)\b/i,
+  /\bvisit\b/i,
+  /(?:🎁|💎|🟢|🟩|🥇|💲|☑|✅|⭐)/u,
+  /^[A-Z]\s+[A-Z]\s+[A-Z]/, // e.g. "U S D C"
+];
+
+function isSpamToken(symbol?: string | null, name?: string | null): boolean {
+  const combined = `${symbol || ''} ${name || ''}`.trim();
+  if (!combined) return false;
+  return SPAM_REGEX.some(re => re.test(combined));
+}
 
 function resolveChain(networkSlug: string | number, requestedNetwork: NetworkType) {
   const strSlug = String(networkSlug).toLowerCase().trim();
-  const normalizedKey = CHAIN_LOOKUP[strSlug] || strSlug;
+  const mappedChainId = CHAIN_SLUG_TO_ID[strSlug];
+  if (mappedChainId) {
+    const chain = CHAIN_REGISTRY.find(
+      c => c.networkType === requestedNetwork && Number(c.chainId) === mappedChainId
+    );
+    if (chain) return chain;
+  }
+
+  // Fallback matching against chainId or canonical identifiers
   return CHAIN_REGISTRY.find(
     c =>
       c.networkType === requestedNetwork &&
       (String(c.chainId) === strSlug ||
-        String(c.chainId) === normalizedKey ||
-        c.nativeChainKey?.toLowerCase() === normalizedKey ||
-        c.slug?.toLowerCase() === normalizedKey ||
-        c.symbol?.toLowerCase() === normalizedKey ||
-        c.name.toLowerCase() === normalizedKey ||
-        c.name.toLowerCase().includes(normalizedKey) ||
-        normalizedKey.includes(c.name.toLowerCase()))
+        c.nativeChainKey?.toLowerCase() === strSlug ||
+        c.slug?.toLowerCase() === strSlug ||
+        c.symbol?.toLowerCase() === strSlug ||
+        c.name.toLowerCase() === strSlug ||
+        strSlug.startsWith(c.name.toLowerCase()))
   );
 }
 
@@ -136,6 +201,16 @@ export class EVMPortfolioProvider implements IPortfolioProvider {
 
       const resData = (response.data as any)?.data || response.data;
       const backendTokens: BackendToken[] = Array.isArray(resData?.tokens) ? resData.tokens : [];
+
+      // If backend is still indexing this address, schedule a background update
+      const isSyncing = resData?.syncStatus === 'syncing' || resData?.syncStatus === 'pending';
+      if (isSyncing && typeof window !== 'undefined') {
+        setTimeout(() => {
+          void import('../../store/portfolioStore').then(m => {
+            m.usePortfolioStore.getState().fetchAssets(connectedWallets, network, true);
+          });
+        }, 2500);
+      }
 
       if (backendTokens.length === 0) {
         return [];
@@ -184,17 +259,70 @@ export class EVMPortfolioProvider implements IPortfolioProvider {
 
         if (isNaN(balance) || balance <= 0) continue;
 
-        const symbol =
-          token.symbol ??
-          token.tokenMetadata?.symbol ??
-          registryAsset?.symbol ??
-          (isNative ? getChainNativeSymbol(chainId) : 'TOKEN');
+        const rawSymbol = token.symbol ?? token.tokenMetadata?.symbol ?? registryAsset?.symbol;
+        const rawName = token.name ?? token.tokenMetadata?.name ?? registryAsset?.name;
 
-        const name =
-          token.name ??
-          token.tokenMetadata?.name ??
-          registryAsset?.name ??
-          (isNative ? getChainName(chainId) : symbol);
+        // 1. Immediately drop if symbol or name matches spam/airdrop phishing patterns
+        if (!isNative && isSpamToken(rawSymbol, rawName)) {
+          continue;
+        }
+
+        // Determine unit price & USD value
+        let unitPrice = 0;
+        let valueUsd = 0;
+
+        if (token.priceUsd !== null && token.priceUsd !== undefined && token.priceUsd !== '') {
+          unitPrice = parseFloat(String(token.priceUsd));
+          if (!isNaN(unitPrice) && unitPrice > 0) {
+            valueUsd =
+              token.valueUsd !== null && token.valueUsd !== undefined && token.valueUsd !== ''
+                ? parseFloat(String(token.valueUsd))
+                : balance * unitPrice;
+          }
+        } else if (
+          token.valueUsd !== null &&
+          token.valueUsd !== undefined &&
+          token.valueUsd !== ''
+        ) {
+          valueUsd = parseFloat(String(token.valueUsd));
+          if (!isNaN(valueUsd) && valueUsd > 0 && balance > 0) {
+            unitPrice = valueUsd / balance;
+          }
+        } else if (token.tokenPrices?.[0]?.value) {
+          unitPrice = parseFloat(String(token.tokenPrices[0].value));
+          if (!isNaN(unitPrice) && unitPrice > 0) {
+            valueUsd = balance * unitPrice;
+          }
+        }
+
+        const isVerifiedRegistryToken = Boolean(registryAsset);
+        const upperSymbol = (rawSymbol || registryAsset?.symbol || '').toUpperCase();
+
+        // If it's a known stablecoin (USDC, USDT, etc.) in registry and price is missing, default to $1.0
+        if (unitPrice === 0 && isVerifiedRegistryToken && STABLECOIN_SYMBOLS.has(upperSymbol)) {
+          unitPrice = 1.0;
+          valueUsd = balance * unitPrice;
+        }
+
+        // 2. Filter unverified tokens:
+        // Native tokens are ALWAYS kept (users need to see gas balance regardless of dollar value).
+        // Verified tokens in our registry (e.g. Polygon USDC) are ALWAYS kept.
+        // For unverified tokens:
+        // - If neither price nor value is available -> drop (dummy/airdrop token).
+        // - If total value is below industry dust threshold ($0.05) -> drop (dust airdrop spam).
+        if (!isNative && !isVerifiedRegistryToken) {
+          const hasPriceOrValue = unitPrice > 0 || valueUsd > 0;
+          if (!hasPriceOrValue) {
+            continue;
+          }
+          if (valueUsd < DUST_THRESHOLD_USD) {
+            continue;
+          }
+        }
+
+        const symbol = rawSymbol ?? (isNative ? getChainNativeSymbol(chainId) : 'TOKEN');
+
+        const name = rawName ?? (isNative ? getChainName(chainId) : symbol);
 
         const logo =
           token.logo ??
@@ -203,17 +331,13 @@ export class EVMPortfolioProvider implements IPortfolioProvider {
           getChainLogoUrl(chainId) ??
           '';
 
-        const price = parseFloat(
-          String(token.priceUsd ?? token.valueUsd ?? token.tokenPrices?.[0]?.value ?? '0')
-        );
-
         parsedAssets.push({
           id: `evm-${chainId}-${assetAddress}`,
           symbol,
           name,
           image: logo,
           balance,
-          current_price: isNaN(price) ? 0 : price,
+          current_price: isNaN(unitPrice) ? 0 : unitPrice,
           price_change_percentage_24h: 0,
           chainId,
           chainName: getChainName(chainId),

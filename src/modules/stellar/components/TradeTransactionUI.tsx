@@ -60,6 +60,16 @@ const TradeTransactionUI = () => {
     }
   }, [editingOffer]);
 
+  useEffect(() => {
+    const handleOrderPlaced = () => {
+      setActiveTab('active');
+    };
+    window.addEventListener('stellar:order-placed', handleOrderPlaced);
+    return () => {
+      window.removeEventListener('stellar:order-placed', handleOrderPlaced);
+    };
+  }, []);
+
   const handleCancelClick = (offer: ActiveOffer) => {
     setOfferToCancel(offer);
     setIsCancelModalOpen(true);
@@ -294,24 +304,33 @@ const TradeTransactionUI = () => {
                           </td>
                           <td className="px-6 py-3 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => setEditingOffer(offer)}
-                                disabled={isLoadingActive || removingOfferIds.has(offer.id)}
-                                className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-md border border-brand/35 text-brand bg-brand/5 hover:bg-brand/10 transition-colors disabled:opacity-40"
-                              >
-                                Edit
-                              </button>
-                              {cancelStatus[offer.id] === 'pending' ||
-                              removingOfferIds.has(offer.id) ? (
-                                <div className="w-4 h-4 border-2 border-danger border-t-transparent rounded-full animate-spin ml-2" />
+                              {String(offer.id).startsWith('optimistic-') ? (
+                                <span className="text-[10px] font-bold text-brand bg-brand/10 border border-brand/20 px-2 py-1 rounded-md flex items-center gap-1.5 animate-pulse">
+                                  <Loader2 className="w-3 h-3 animate-spin text-brand" />
+                                  Confirming...
+                                </span>
                               ) : (
-                                <button
-                                  onClick={() => handleCancelClick(offer)}
-                                  disabled={isLoadingActive}
-                                  className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-md border border-danger/30 text-danger bg-danger/5 hover:bg-danger/10 transition-colors"
-                                >
-                                  Cancel
-                                </button>
+                                <>
+                                  <button
+                                    onClick={() => setEditingOffer(offer)}
+                                    disabled={isLoadingActive || removingOfferIds.has(offer.id)}
+                                    className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-md border border-brand/35 text-brand bg-brand/5 hover:bg-brand/10 transition-colors disabled:opacity-40"
+                                  >
+                                    Edit
+                                  </button>
+                                  {cancelStatus[offer.id] === 'pending' ||
+                                  removingOfferIds.has(offer.id) ? (
+                                    <div className="w-4 h-4 border-2 border-danger border-t-transparent rounded-full animate-spin ml-2" />
+                                  ) : (
+                                    <button
+                                      onClick={() => handleCancelClick(offer)}
+                                      disabled={isLoadingActive}
+                                      className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-md border border-danger/30 text-danger bg-danger/5 hover:bg-danger/10 transition-colors"
+                                    >
+                                      Cancel
+                                    </button>
+                                  )}
+                                </>
                               )}
                             </div>
                           </td>
@@ -383,27 +402,34 @@ const TradeTransactionUI = () => {
                             </p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setEditingOffer(offer)}
-                            disabled={isLoadingActive || removingOfferIds.has(offer.id)}
-                            className="flex-1 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold disabled:opacity-40 active:scale-[0.97] transition-transform"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleCancelClick(offer)}
-                            disabled={isLoadingActive || removingOfferIds.has(offer.id)}
-                            className="flex-1 py-1.5 rounded-lg bg-danger/10 text-danger text-xs font-semibold disabled:opacity-40 active:scale-[0.97] transition-transform"
-                          >
-                            {cancelStatus[offer.id] === 'pending' ||
-                            removingOfferIds.has(offer.id) ? (
-                              <span className="inline-block w-3 h-3 border-2 border-danger border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              'Cancel'
-                            )}
-                          </button>
-                        </div>
+                        {String(offer.id).startsWith('optimistic-') ? (
+                          <div className="w-full py-1.5 rounded-lg bg-brand/10 border border-brand/20 text-brand text-xs font-semibold flex items-center justify-center gap-1.5 animate-pulse">
+                            <Loader2 className="w-3 h-3 animate-spin text-brand" />
+                            Confirming on-chain...
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setEditingOffer(offer)}
+                              disabled={isLoadingActive || removingOfferIds.has(offer.id)}
+                              className="flex-1 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold disabled:opacity-40 active:scale-[0.97] transition-transform"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleCancelClick(offer)}
+                              disabled={isLoadingActive || removingOfferIds.has(offer.id)}
+                              className="flex-1 py-1.5 rounded-lg bg-danger/10 text-danger text-xs font-semibold disabled:opacity-40 active:scale-[0.97] transition-transform"
+                            >
+                              {cancelStatus[offer.id] === 'pending' ||
+                              removingOfferIds.has(offer.id) ? (
+                                <span className="inline-block w-3 h-3 border-2 border-danger border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                'Cancel'
+                              )}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

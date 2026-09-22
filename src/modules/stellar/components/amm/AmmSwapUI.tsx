@@ -327,7 +327,13 @@ const AmmSwapUI = () => {
                 }
               }}
               placeholder="0.00"
-              className="peer w-full bg-transparent border-none text-right text-3xl font-black focus:ring-0 p-0 placeholder:text-muted/10 truncate transition-all outline-none"
+              className={`peer w-full bg-transparent border-none text-right font-black focus:ring-0 p-0 placeholder:text-muted/10 truncate transition-all outline-none ${
+                fromAmount.length > 10
+                  ? 'text-lg sm:text-2xl'
+                  : fromAmount.length > 7
+                    ? 'text-xl sm:text-2xl'
+                    : 'text-2xl sm:text-3xl'
+              }`}
               disabled={isLoading}
             />
             <div className="absolute left-[-12px] top-1/2 -translate-y-1/2 w-[2px] h-8 bg-brand opacity-0 transition-opacity peer-focus:opacity-100" />
@@ -423,9 +429,17 @@ const AmmSwapUI = () => {
           </button>
 
           <div className="flex-1 text-right min-w-0">
-            <div className={`font-black truncate text-primary text-3xl tabular-nums`}>
+            <div
+              className={`font-black text-primary tabular-nums overflow-x-auto whitespace-nowrap scrollbar-hide ${
+                (toAmount || '').length > 10
+                  ? 'text-lg sm:text-2xl'
+                  : (toAmount || '').length > 7
+                    ? 'text-xl sm:text-2xl'
+                    : 'text-2xl sm:text-3xl'
+              }`}
+            >
               {isLoading ? (
-                <div className="w-20 h-8 bg-white/5 animate-pulse rounded-md ml-auto" />
+                <div className="w-28 sm:w-36 h-7 sm:h-8 rounded-lg animate-shimmer-brand ml-auto" />
               ) : (
                 toAmount || '0.00'
               )}
@@ -465,7 +479,7 @@ const AmmSwapUI = () => {
         </div>
       )}
 
-      <SwapDetails quote={quote} />
+      <SwapDetails quote={quote} isLoading={isLoading} />
 
       <button
         onClick={handleSwap}

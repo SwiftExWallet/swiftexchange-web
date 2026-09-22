@@ -236,11 +236,16 @@ export const useRecentTrades = ({ baseAsset, counterAsset }: UseRecentTradesProp
   }, [fetchTrades, startStreaming]);
 
   useEffect(() => {
+    let timer: any = null;
     const handler = () => {
-      setTimeout(() => fetchTrades(), 1500);
+      fetchTrades();
+      timer = setTimeout(() => fetchTrades(), 1000);
     };
     window.addEventListener('stellar:order-placed', handler);
-    return () => window.removeEventListener('stellar:order-placed', handler);
+    return () => {
+      window.removeEventListener('stellar:order-placed', handler);
+      if (timer) clearTimeout(timer);
+    };
   }, [fetchTrades]);
 
   return { trades, isLoading, isStreaming, error, newTradeIds, refresh: fetchTrades };

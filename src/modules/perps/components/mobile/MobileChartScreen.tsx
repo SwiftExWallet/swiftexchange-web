@@ -131,8 +131,7 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
 
   return (
     <div className="flex flex-col h-full w-full bg-secondary text-primary font-body select-none overflow-hidden relative">
-      {/* 1. Top Header Bar: Clean Mobile Reference Layout */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-color shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-color shrink-0 bg-secondary z-30">
         <div className="flex items-center gap-2">
           <button
             onClick={() => window.history.back()}
@@ -154,7 +153,6 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
             <div className="flex flex-col leading-tight ml-0.5">
               <div className="flex items-center gap-1.5">
                 <span className="text-[15px] font-bold text-primary">{baseAsset}</span>
-                {/* Max leverage matching Market Modal */}
                 <span className="px-1.5 py-[1px] rounded text-[9px] font-bold bg-tertiary border border-color text-muted">
                   {maxLeverage}x
                 </span>
@@ -167,7 +165,6 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
           </button>
         </div>
 
-        {/* Right Header: Live Price Display */}
         <div className="flex flex-col items-end justify-center leading-tight font-mono-tabular">
           <span className="text-base font-extrabold text-primary tracking-tight">
             $
@@ -187,16 +184,12 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
         </div>
       </div>
 
-      {/* 2. Scrollable Body: Chart + About + Stats + Positions & Order History (No visible scrollbar) */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none pb-28">
-        {/* Clean Chart Container */}
-        <div className="w-full h-[270px] shrink-0 relative bg-secondary">
+      <div className="shrink-0 bg-secondary border-b border-color z-10 flex flex-col">
+        <div className="w-full h-[225px] relative bg-secondary overflow-hidden">
           <MobileCleanChart symbol={selectedSymbol} timeframe={timeframe} chartType={chartType} />
         </div>
 
-        {/* Timeframe Selector Bar */}
-        <div className="flex items-center justify-between px-3 py-1.5 border-y border-color shrink-0 bg-secondary/80">
-          {/* Chart Type Toggle (Line vs Candle) */}
+        <div className="flex items-center justify-between px-3 py-1.5 border-t border-color shrink-0 bg-secondary">
           <button
             onClick={() => setChartType(prev => (prev === 'candle' ? 'line' : 'candle'))}
             className="w-7 h-7 rounded-lg bg-tertiary hover:bg-hover flex items-center justify-center text-secondary hover:text-primary transition-colors cursor-pointer"
@@ -209,7 +202,6 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
             )}
           </button>
 
-          {/* Timeframe Pills */}
           <div className="flex items-center gap-1">
             {QUICK_TIMEFRAMES.map(tf => {
               const isActive = timeframe === tf.value;
@@ -228,7 +220,6 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
               );
             })}
 
-            {/* Candle Intervals Sheet Opener */}
             <button
               onClick={() => setIsIntervalSheetOpen(true)}
               className="flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-medium text-secondary hover:text-primary hover:bg-tertiary transition-colors cursor-pointer"
@@ -238,9 +229,10 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
             </button>
           </div>
         </div>
+      </div>
 
-        {/* 3. About Section (100% Dynamic from Aster API) */}
-        <div className="px-4 py-3 border-b border-color">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none pb-28 relative">
+        <div className="px-4 py-3 border-b border-color bg-secondary">
           <h3 className="text-sm font-bold text-primary mb-1.5">
             About {coinDetail?.name || baseAsset}
           </h3>
@@ -269,8 +261,7 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
           )}
         </div>
 
-        {/* 4. Stats Section (Matching Mobile App Reference) */}
-        <div className="px-4 py-3 border-b border-color">
+        <div className="px-4 py-3 border-b border-color bg-secondary">
           <h3 className="text-sm font-bold text-primary mb-2.5">Stats</h3>
           <div className="space-y-2 text-xs">
             <div className="flex items-center justify-between">
@@ -294,10 +285,8 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
           </div>
         </div>
 
-        {/* 5. Positions & Orders Directly Below (Clean Native Mobile Tabs) */}
-        <div className="mt-1 flex flex-col">
-          {/* Tab Headers */}
-          <div className="flex items-center border-b border-color px-3 bg-secondary text-xs overflow-x-auto scrollbar-none shrink-0 gap-4">
+        <div className="flex flex-col min-h-[360px]">
+          <div className="sticky top-0 z-20 flex items-center border-b border-color px-3 bg-secondary text-xs overflow-x-auto scrollbar-none shrink-0 gap-4 shadow-sm">
             <button
               onClick={() => setActiveBottomTab('positions')}
               className={`py-2.5 px-1 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
@@ -353,7 +342,6 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
             </button>
           </div>
 
-          {/* Tab Content with generous bottom padding for sticky bar */}
           <div className="p-3 min-h-[160px] pb-16">
             {activeBottomTab === 'positions' && (
               <PositionsTab signer={asterSigner} userAddr={userAddr || undefined} />
@@ -373,7 +361,7 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
                 signer={asterSigner}
                 userAddr={userAddr || ''}
                 asterSymbol={asterSymbol}
-                timeRange="1w"
+                timeRange="1m"
                 hideOtherSymbols={false}
                 hideCanceled={false}
               />
@@ -384,7 +372,7 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
                 signer={asterSigner}
                 userAddr={userAddr || ''}
                 asterSymbol={asterSymbol}
-                timeRange="1w"
+                timeRange="1m"
                 hideOtherSymbols={false}
               />
             )}
@@ -392,7 +380,6 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
         </div>
       </div>
 
-      {/* 6. Bottom Fixed Action Bar: Seamless Borderless Native App Floating Dock */}
       <div className="fixed sm:absolute bottom-0 left-0 right-0 p-3 bg-secondary/85 backdrop-blur-xl flex items-center gap-3 z-40 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <button
           type="button"
@@ -412,7 +399,6 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
         </button>
       </div>
 
-      {/* Interval Sheet */}
       <MobileIntervalSheet
         isOpen={isIntervalSheetOpen}
         onClose={() => setIsIntervalSheetOpen(false)}
@@ -420,7 +406,6 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
         onSelectInterval={setTimeframe}
       />
 
-      {/* Enhanced Native Mobile Market Selector Modal */}
       <MarketSelectorModal
         isOpen={isMarketSelectorOpen}
         onClose={() => setIsMarketSelectorOpen(false)}

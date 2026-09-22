@@ -352,7 +352,7 @@ describe('EVM Chainregistry Integration with Asset Management', () => {
     expect(testnetUsdc?.address).toBe('GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5');
 
     // Token list resolution per network
-    expect(GET_STELLAR_TOKEN_LIST_URL('mainnet')).toContain('stellar_tokens.json');
-    expect(GET_STELLAR_TOKEN_LIST_URL('testnet')).toContain('stellar_testnet_tokens.json');
+    expect(GET_STELLAR_TOKEN_LIST_URL('mainnet')).toContain('master/stellar.json');
+    expect(GET_STELLAR_TOKEN_LIST_URL('testnet')).toContain('devTestNet/stellar.json');
   });
 });

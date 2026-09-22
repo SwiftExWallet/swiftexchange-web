@@ -178,6 +178,9 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         if (type === 'evm') {
           get().authenticateEvm();
         }
+
+        const nextWallets = { ...get().connectedWallets, [type]: wallet };
+        void usePortfolioStore.getState().fetchAssets(nextWallets, get().network, true);
       } catch (error: any) {
         set(state => ({
           pairingUri: null,
@@ -253,6 +256,9 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         if (result.evm) {
           get().authenticateEvm();
         }
+
+        const nextWallets = { ...get().connectedWallets, ...walletUpdates };
+        void usePortfolioStore.getState().fetchAssets(nextWallets, get().network, true);
       } catch (error: any) {
         set(state => ({
           pairingUri: null,
@@ -370,6 +376,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           authenticatedChain: 'evm',
           linkedChains: linked,
         });
+        void usePortfolioStore.getState().fetchAssets(get().connectedWallets, get().network, true);
       } catch (error: any) {
         const msg =
           error?.message === 'USER_REJECTED' ? 'Signature rejected' : extractErrorMessage(error);
@@ -594,6 +601,10 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           isRestoringSession: false,
           session: rawSession,
         });
+
+        if (Object.keys(wallets).length > 0) {
+          void usePortfolioStore.getState().fetchAssets(wallets, get().network, false);
+        }
 
         if (wallets.evm) {
           const session = await restoreAuthSession(wallets.evm.address);

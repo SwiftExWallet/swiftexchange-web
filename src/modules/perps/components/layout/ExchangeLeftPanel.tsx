@@ -46,7 +46,7 @@ export const ExchangeChartPanel: React.FC<ExchangeChartPanelProps> = ({ hideTopB
 
 export const ExchangePositionsPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState('Positions');
-  const [historyTimeRange, setHistoryTimeRange] = useState<'1d' | '1w' | '1m' | '3m' | 'all'>('1w');
+  const [historyTimeRange, setHistoryTimeRange] = useState<'1d' | '1w' | '1m' | '3m'>('1m');
   const [hideOtherSymbols, setHideOtherSymbols] = useState(false);
   const [hideCanceled, setHideCanceled] = useState(false);
 
@@ -94,7 +94,15 @@ export const ExchangePositionsPanel: React.FC = () => {
           />
         );
       case 'Transaction History':
-        return <TransactionHistoryTab signer={asterSigner} userAddr={userAddr!} />;
+        return (
+          <TransactionHistoryTab
+            signer={asterSigner}
+            userAddr={userAddr!}
+            timeRange={historyTimeRange}
+            hideOtherSymbols={hideOtherSymbols}
+            asterSymbol={asterSymbol}
+          />
+        );
       default:
         return (
           <div className="flex-1 overflow-y-auto flex items-center justify-center h-full">
@@ -165,9 +173,12 @@ export const ExchangePositionsPanel: React.FC = () => {
         </div>
         {(activeTab === 'Open Orders' ||
           activeTab === 'Order History' ||
-          activeTab === 'Trade History') && (
+          activeTab === 'Trade History' ||
+          activeTab === 'Transaction History') && (
           <div className="flex items-center gap-3 shrink-0 text-sm">
-            {(activeTab === 'Order History' || activeTab === 'Trade History') && (
+            {(activeTab === 'Order History' ||
+              activeTab === 'Trade History' ||
+              activeTab === 'Transaction History') && (
               <div className="relative inline-flex items-center">
                 <select
                   value={historyTimeRange}
@@ -178,7 +189,6 @@ export const ExchangePositionsPanel: React.FC = () => {
                   <option value="1w">1 week</option>
                   <option value="1m">1 month</option>
                   <option value="3m">3 months</option>
-                  <option value="all">All</option>
                 </select>
                 <ChevronDown
                   size={11}

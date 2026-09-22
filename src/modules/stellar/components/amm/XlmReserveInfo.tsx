@@ -1,5 +1,5 @@
 import { AlertCircle, HelpCircle, Info, Lock, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { StellarBaseService } from '../../service/StellarBaseService';
 
@@ -31,17 +31,26 @@ export const XlmReserveInfoModal = ({
   const reserveRequired = calculateReserve(trustlineCount);
   const availableBalance = calculateAvailableBalance(balance, trustlineCount);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-40" onClick={onClose} />
+      <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]" onClick={onClose} />
 
-      <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 md:inset-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[400px] bg-secondary rounded-xl border border-color z-50 animate-fade-in">
-        <div className="flex items-center justify-between p-4 border-b border-color">
+      <div className="absolute right-0 top-full mt-2 w-80 sm:w-[380px] max-w-[calc(100vw-2rem)] bg-secondary rounded-xl border border-color shadow-2xl z-50 animate-slide-up max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-4 border-b border-color sticky top-0 bg-secondary z-10">
           <div className="flex items-center gap-2">
             <Info className="w-5 h-5 text-blue-500" />
-            <h3 className="text-lg font-semibold text-primary">XLM Reserve Info</h3>
+            <h3 className="text-base font-semibold text-primary">XLM Reserve Info</h3>
           </div>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-hover transition-colors">
             <X className="w-5 h-5 text-muted" />
@@ -146,9 +155,9 @@ export const XlmReserveButton = ({ xlmBalance, trustlineCount }: XlmReserveButto
   const reserveRequired = calculateReserve(trustlineCount);
 
   return (
-    <>
+    <div className="relative">
       <button
-        onClick={() => setIsModalOpen(true)}
+        onClick={() => setIsModalOpen(prev => !prev)}
         className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 transition-colors"
       >
         <HelpCircle className="w-3 h-3" />
@@ -161,7 +170,7 @@ export const XlmReserveButton = ({ xlmBalance, trustlineCount }: XlmReserveButto
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
       />
-    </>
+    </div>
   );
 };
 

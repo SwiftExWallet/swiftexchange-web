@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 interface MobileIntervalSheetProps {
   isOpen: boolean;
@@ -21,18 +22,19 @@ const INTERVAL_GROUPS = [
   {
     title: 'Hours',
     intervals: [
-      { label: '1H', value: '1h' },
-      { label: '4H', value: '4h' },
-      { label: '8H', value: '8h' },
-      { label: '12H', value: '12h' },
+      { label: '1h', value: '1h' },
+      { label: '2h', value: '2h' },
+      { label: '4h', value: '4h' },
+      { label: '6h', value: '6h' },
+      { label: '12h', value: '12h' },
     ],
   },
   {
-    title: 'Days and beyond',
+    title: 'Days',
     intervals: [
-      { label: '1D', value: '1d' },
-      { label: '3D', value: '3d' },
-      { label: '1W', value: '1w' },
+      { label: '1D', value: '1D' },
+      { label: '3D', value: '3D' },
+      { label: '1W', value: '1W' },
       { label: '1M', value: '1M' },
     ],
   },
@@ -55,19 +57,17 @@ export const MobileIntervalSheet: React.FC<MobileIntervalSheetProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[99999] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
       <div
         className="w-full max-w-md bg-secondary border-t border-color rounded-t-3xl p-5 shadow-2xl flex flex-col gap-5 pb-8 animate-slide-up"
         onClick={e => e.stopPropagation()}
       >
-        {/* Handle bar */}
         <div className="w-10 h-1 bg-border-color rounded-full self-center" />
 
-        {/* Title */}
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-primary">Candle intervals</h3>
           <button
@@ -78,17 +78,15 @@ export const MobileIntervalSheet: React.FC<MobileIntervalSheetProps> = ({
           </button>
         </div>
 
-        {/* Groups */}
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {INTERVAL_GROUPS.map(group => (
-            <div key={group.title} className="space-y-2">
-              <span className="text-xs font-medium text-secondary">{group.title}</span>
+            <div key={group.title} className="flex flex-col gap-2">
+              <span className="text-xs text-secondary font-medium tracking-wide">
+                {group.title}
+              </span>
               <div className="grid grid-cols-4 gap-2">
                 {group.intervals.map(item => {
-                  const isSelected =
-                    selectedInterval.toLowerCase() === item.value.toLowerCase() ||
-                    (item.value === '1M' && selectedInterval === '1M');
-
+                  const isSelected = selectedInterval === item.value;
                   return (
                     <button
                       key={item.value}
@@ -96,7 +94,7 @@ export const MobileIntervalSheet: React.FC<MobileIntervalSheetProps> = ({
                         onSelectInterval(item.value);
                         onClose();
                       }}
-                      className={`h-11 rounded-xl text-xs font-medium transition-all cursor-pointer flex items-center justify-center ${
+                      className={`py-2 px-3 rounded-xl text-xs font-mono font-medium transition-all text-center ${
                         isSelected
                           ? 'bg-brand/20 text-brand border border-brand/50 font-semibold shadow-sm'
                           : 'bg-tertiary text-secondary hover:text-primary hover:bg-hover'
@@ -111,6 +109,7 @@ export const MobileIntervalSheet: React.FC<MobileIntervalSheetProps> = ({
           ))}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

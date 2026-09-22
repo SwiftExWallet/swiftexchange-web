@@ -1262,4 +1262,35 @@
       background-position: 100% 0;
     }
   }
+
+  @keyframes shimmerEffect {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 0%,
+      rgba(255, 255, 255, 0.15) 50%,
+      rgba(255, 255, 255, 0.03) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmerEffect 1.8s ease-in-out infinite;
+  }
+
+  .animate-shimmer-brand {
+    background: linear-gradient(
+      90deg,
+      rgba(37, 99, 235, 0.08) 0%,
+      rgba(59, 130, 246, 0.28) 50%,
+      rgba(37, 99, 235, 0.08) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmerEffect 1.8s ease-in-out infinite;
+  }
 }

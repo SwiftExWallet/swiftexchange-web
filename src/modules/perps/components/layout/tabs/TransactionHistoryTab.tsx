@@ -3,11 +3,15 @@ import React, { useCallback, useRef } from 'react';
 
 import { useTransactionHistory } from '../../../adapters/aster/hooks/useTransactionHistory';
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import type { TimeRange } from './OrderHistoryTab';
 import { TabEmptyState } from './TabEmptyState';
 
 interface Props {
   signer: any;
   userAddr: string;
+  timeRange?: TimeRange;
+  hideOtherSymbols?: boolean;
+  asterSymbol?: string;
 }
 
 function formatDate(timestamp: number): string {
@@ -45,11 +49,24 @@ function formatIncomeType(type: string): string {
   }
 }
 
-export const TransactionHistoryTab: React.FC<Props> = ({ signer, userAddr }) => {
+export const TransactionHistoryTab: React.FC<Props> = ({
+  signer,
+  userAddr,
+  timeRange = '1m',
+  hideOtherSymbols = false,
+  asterSymbol,
+}) => {
   const currentExchange = useExchangeManager(state => state.currentExchange);
   const isAster = currentExchange === 'aster';
 
-  const asterHook = useTransactionHistory(isAster ? signer : null, isAster ? userAddr : '');
+  const querySymbol = hideOtherSymbols ? asterSymbol : null;
+
+  const asterHook = useTransactionHistory(
+    isAster ? signer : null,
+    isAster ? userAddr : '',
+    querySymbol,
+    timeRange
+  );
   const { income, isLoading, isLoadingMore, hasMore, loadMore } = isAster
     ? asterHook
     : { income: [], isLoading: false, isLoadingMore: false, hasMore: false, loadMore: () => {} };
