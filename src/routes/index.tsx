@@ -29,6 +29,7 @@ const StellarPortfolioUI = lazy(
 );
 const Dashboard = lazy(() => import('@/pages/dashboard'));
 const Profile = lazy(() => import('@/pages/profile'));
+const StatusPage = lazy(() => import('@/pages/status/StatusPage'));
 
 const router = createBrowserRouter([
   {
@@ -39,6 +40,14 @@ const router = createBrowserRouter([
       {
         path: ROUTES.HOME,
         element: <HomeRedirect />,
+      },
+      {
+        path: ROUTES.STATUS,
+        element: (
+          <Layout>
+            <StatusPage />
+          </Layout>
+        ),
       },
       {
         path: ROUTES.TRADING_PERPS,

@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as StellarSDK from '@stellar/stellar-sdk';
 
 import { useNotificationStore } from '../../../store/notificationStore';
+import { GET_STELLAR_TOKEN_LIST_URL } from '../../evm/utils/assetmanagement/constants';
 import { StellarSequenceTracker } from '../../stellar/utils/StellarSequenceTracker';
 import {
   buildTrustlineTransaction,
@@ -37,51 +38,7 @@ interface TestnetAsset {
   logo: string;
 }
 
-const STELLAR_TESTNET_ASSETS: TestnetAsset[] = [
-  {
-    code: 'USDC',
-    name: 'USD Coin (Testnet AMM)',
-    issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
-    faucetUrl: 'https://faucet.circle.com',
-    logo: 'https://coin-images.coingecko.com/coins/images/6319/large/usdc.png',
-  },
-  {
-    code: 'AQUA',
-    name: 'Aquarius (Testnet AMM)',
-    issuer: 'GAO2UQT2N7NGSHLNNS5AUGEEEOU3BXER6GGIYFJBF5OUNCLVONUYT3PS',
-    logo: 'https://coin-images.coingecko.com/coins/images/19830/large/AQUA.png',
-  },
-  {
-    code: 'SWIFT',
-    name: 'SwiftEx Token (Testnet AMM)',
-    issuer: 'GBVAJRR3O24B3TULTXH5HP4HGADXMORIEEOEWZAKUQFUZETT64NRF5LI',
-    logo: 'https://coin-images.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png',
-  },
-  {
-    code: 'WBTC',
-    name: 'Wrapped Bitcoin (Testnet AMM)',
-    issuer: 'GAXAMPQXMVMRZPZNZEHIAVXO5PXL5VYXOWRRB3SCERPPDLZKUKHV6ZRZ',
-    logo: 'https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png',
-  },
-  {
-    code: 'WETH',
-    name: 'Wrapped Ethereum (Testnet AMM)',
-    issuer: 'GBWDY7L6YMM4TAX4RSPX4NMDSFMIX7PQLYKYCTXZH76EIVMPSRJ2CKM4',
-    logo: 'https://coin-images.coingecko.com/coins/images/279/large/ethereum.png',
-  },
-  {
-    code: 'EURC',
-    name: 'Euro Coin (Testnet AMM)',
-    issuer: 'GACD5TONLCRLWT2EOSQLSK5D6CFJMQSWO6PIP5VF6B73UVCKRSYIMXTY',
-    logo: 'https://coin-images.coingecko.com/coins/images/26045/large/EURC.png',
-  },
-  {
-    code: 'ACME',
-    name: 'Acme Asset (Testnet AMM)',
-    issuer: 'GB75GYGNXJ566NKBMDUBMKGZQWWNLYAT3FWSMCPX3O3427JGQ3D3CC33',
-    logo: 'https://coin-images.coingecko.com/coins/images/325/large/Tether.png',
-  },
-];
+let cachedGitHubAssets: TestnetAsset[] | null = null;
 
 const EVM_TESTNET_FAUCETS = [
   {
@@ -147,6 +104,68 @@ export const FundWalletModal: React.FC<FundWalletModalProps> = ({ isOpen, onClos
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [existingTrustlines, setExistingTrustlines] = useState<Set<string>>(new Set());
   const [trustlineBalances, setTrustlineBalances] = useState<Record<string, string>>({});
+  const [stellarTestnetAssets, setStellarTestnetAssets] = useState<TestnetAsset[]>(
+    () => cachedGitHubAssets || []
+  );
+  const [isLoadingAssets, setIsLoadingAssets] = useState(!cachedGitHubAssets);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const loadTokensFromGitHub = async () => {
+      if (!cachedGitHubAssets) {
+        setIsLoadingAssets(true);
+      }
+      try {
+        const url = GET_STELLAR_TOKEN_LIST_URL('testnet');
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const text = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          const trimmed = text.trim().replace(/,\s*$/, '');
+          const repaired = trimmed.endsWith(']') ? trimmed + '}' : trimmed + '}]}';
+          data = JSON.parse(repaired);
+        }
+
+        if (Array.isArray(data?.assets)) {
+          const assets: TestnetAsset[] = data.assets
+            .filter(
+              (a: any) => a && a.code && a.issuer && a.issuer !== 'native' && a.code !== 'XLM'
+            )
+            .map((a: any) => ({
+              code: a.code,
+              name: a.name || a.code,
+              issuer: a.issuer,
+              faucetUrl: a.code.toUpperCase() === 'USDC' ? 'https://faucet.circle.com' : undefined,
+              logo:
+                a.icon ||
+                `https://raw.githubusercontent.com/sachin-swiftex/resources/refs/heads/devTestNet/stellar/${a.code}.png`,
+            }));
+
+          if (!isCancelled) {
+            cachedGitHubAssets = assets;
+            setStellarTestnetAssets(assets);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch testnet tokens from GitHub:', err);
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingAssets(false);
+        }
+      }
+    };
+
+    if (isOpen) {
+      loadTokensFromGitHub();
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen]);
 
   const targetStellarAddress = customStellarAddress.trim() || stellarWallet?.address || '';
 
@@ -423,89 +442,102 @@ export const FundWalletModal: React.FC<FundWalletModalProps> = ({ isOpen, onClos
                 testing:
               </div>
 
-              <div className="space-y-3">
-                {STELLAR_TESTNET_ASSETS.map(asset => {
-                  const hasTrustline =
-                    existingTrustlines.has(`${asset.code}:${asset.issuer}`) ||
-                    existingTrustlines.has(asset.code);
-                  const balance =
-                    trustlineBalances[`${asset.code}:${asset.issuer}`] ||
-                    trustlineBalances[asset.code];
+              {isLoadingAssets && stellarTestnetAssets.length === 0 ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-3 text-text-muted">
+                  <Loader2 size={24} className="animate-spin text-brand" />
+                  <span className="text-xs">Loading testnet tokens from GitHub...</span>
+                </div>
+              ) : stellarTestnetAssets.length === 0 ? (
+                <div className="py-10 text-center text-xs text-text-muted bg-bg-tertiary/20 rounded-xl border border-dashed border-border-color">
+                  No testnet tokens found on GitHub repository.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {stellarTestnetAssets.map(asset => {
+                    const hasTrustline =
+                      existingTrustlines.has(`${asset.code}:${asset.issuer}`) ||
+                      existingTrustlines.has(asset.code);
+                    const balance =
+                      trustlineBalances[`${asset.code}:${asset.issuer}`] ||
+                      trustlineBalances[asset.code];
 
-                  return (
-                    <div
-                      key={asset.code}
-                      className="p-4 rounded-xl bg-bg-tertiary/40 border border-border-color hover:border-brand/40 transition-all space-y-3"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={asset.logo}
-                            alt={asset.code}
-                            className="w-9 h-9 rounded-xl bg-bg-secondary p-1 border border-border-color object-contain"
-                          />
-                          <div>
-                            <div className="text-xs font-bold text-text-primary">{asset.code}</div>
-                            <div className="text-[10px] text-text-muted">{asset.name}</div>
+                    return (
+                      <div
+                        key={`${asset.code}-${asset.issuer}`}
+                        className="p-4 rounded-xl bg-bg-tertiary/40 border border-border-color hover:border-brand/40 transition-all space-y-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={asset.logo}
+                              alt={asset.code}
+                              className="w-9 h-9 rounded-xl bg-bg-secondary p-1 border border-border-color object-contain"
+                            />
+                            <div>
+                              <div className="text-xs font-bold text-text-primary">
+                                {asset.code}
+                              </div>
+                              <div className="text-[10px] text-text-muted">{asset.name}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {stellarWallet &&
+                              (hasTrustline ? (
+                                <div className="px-2.5 py-1.5 rounded-lg bg-success/10 border border-success/20 text-success text-[11px] font-bold inline-flex items-center gap-1.5 select-none">
+                                  <Check size={13} className="text-success stroke-[2.5]" />
+                                  <span>
+                                    Active{' '}
+                                    {balance && parseFloat(balance) > 0
+                                      ? `(${parseFloat(balance).toLocaleString()})`
+                                      : ''}
+                                  </span>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => handleAddTrustline(asset)}
+                                  disabled={addingTrustlineCode === asset.code}
+                                  className="px-3 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-[11px] font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 active:scale-95"
+                                >
+                                  {addingTrustlineCode === asset.code ? (
+                                    <Loader2 size={12} className="animate-spin" />
+                                  ) : null}
+                                  <span>Add Trustline</span>
+                                </button>
+                              ))}
+                            {asset.faucetUrl && (
+                              <a
+                                href={asset.faucetUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-2.5 py-1.5 rounded-lg bg-bg-secondary hover:bg-bg-hover border border-border-color text-text-primary text-[10px] font-bold inline-flex items-center gap-1 transition-colors"
+                              >
+                                Faucet <ExternalLink size={10} />
+                              </a>
+                            )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {stellarWallet &&
-                            (hasTrustline ? (
-                              <div className="px-2.5 py-1.5 rounded-lg bg-success/10 border border-success/20 text-success text-[11px] font-bold inline-flex items-center gap-1.5 select-none">
-                                <Check size={13} className="text-success stroke-[2.5]" />
-                                <span>
-                                  Active{' '}
-                                  {balance && parseFloat(balance) > 0
-                                    ? `(${parseFloat(balance).toLocaleString()})`
-                                    : ''}
-                                </span>
-                              </div>
+
+                        <div className="flex items-center justify-between bg-bg-primary p-2.5 rounded-lg border border-divider text-[10px] font-mono">
+                          <span className="text-text-muted truncate max-w-[280px]">
+                            {asset.issuer}
+                          </span>
+                          <button
+                            onClick={() => handleCopy(asset.issuer, asset.code)}
+                            className="text-text-muted hover:text-text-primary p-1 rounded transition-colors cursor-pointer"
+                            title="Copy Issuer Address"
+                          >
+                            {copiedKey === asset.code ? (
+                              <Check size={12} className="text-success" />
                             ) : (
-                              <button
-                                onClick={() => handleAddTrustline(asset)}
-                                disabled={addingTrustlineCode === asset.code}
-                                className="px-3 py-1.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-[11px] font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 active:scale-95"
-                              >
-                                {addingTrustlineCode === asset.code ? (
-                                  <Loader2 size={12} className="animate-spin" />
-                                ) : null}
-                                <span>Add Trustline</span>
-                              </button>
-                            ))}
-                          {asset.faucetUrl && (
-                            <a
-                              href={asset.faucetUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="px-2.5 py-1.5 rounded-lg bg-bg-secondary hover:bg-bg-hover border border-border-color text-text-primary text-[10px] font-bold inline-flex items-center gap-1 transition-colors"
-                            >
-                              Faucet <ExternalLink size={10} />
-                            </a>
-                          )}
+                              <Copy size={12} />
+                            )}
+                          </button>
                         </div>
                       </div>
-
-                      <div className="flex items-center justify-between bg-bg-primary p-2.5 rounded-lg border border-divider text-[10px] font-mono">
-                        <span className="text-text-muted truncate max-w-[280px]">
-                          {asset.issuer}
-                        </span>
-                        <button
-                          onClick={() => handleCopy(asset.issuer, asset.code)}
-                          className="text-text-muted hover:text-text-primary p-1 rounded transition-colors cursor-pointer"
-                          title="Copy Issuer Address"
-                        >
-                          {copiedKey === asset.code ? (
-                            <Check size={12} className="text-success" />
-                          ) : (
-                            <Copy size={12} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

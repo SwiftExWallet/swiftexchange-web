@@ -267,7 +267,11 @@ export async function fetchApiResponseFromProxy<T>(
   keepalive: boolean = false,
   signal?: AbortSignal
 ): Promise<ApiResponse<T>> {
-  if (!endpoint.startsWith('/wallet') && !endpoint.startsWith('/device')) {
+  if (
+    !endpoint.startsWith('/wallet') &&
+    !endpoint.startsWith('/device') &&
+    !endpoint.startsWith('/app-available')
+  ) {
     const token = API_CONFIG.deviceAuth;
     const walletAddress = getConnectedWalletAddress();
     if (token && walletAddress && !isWalletLinkedToDevice(walletAddress, token)) {
@@ -296,7 +300,11 @@ export async function fetchApiResponseFromServer<T>(
   body?: unknown,
   retries?: number
 ): Promise<ApiResponse<T>> {
-  if (!endpoint.startsWith('/wallet') && !endpoint.startsWith('/device')) {
+  if (
+    !endpoint.startsWith('/wallet') &&
+    !endpoint.startsWith('/device') &&
+    !endpoint.startsWith('/app-available')
+  ) {
     const token = API_CONFIG.deviceAuth;
     const walletAddress = getConnectedWalletAddress();
     if (token && walletAddress && !isWalletLinkedToDevice(walletAddress, token)) {
@@ -311,6 +319,26 @@ export async function fetchApiResponseFromServer<T>(
   );
   if (!res.ok) throw new Error(`API error: ${await parseError(res)}`);
   return { data: await parseBody<T>(res) };
+}
+
+export async function fetchAppAvailability(): Promise<
+  import('../types/availability').AppAvailabilityResponse
+> {
+  const url = `${API_CONFIG.serverUrl}/app-available`;
+  const res = await fetchWithRetry(
+    url,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+    2
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch app availability: ${res.statusText}`);
+  }
+  return parseBody<import('../types/availability').AppAvailabilityResponse>(res);
 }
 
 // Wallet Gas Info

@@ -338,56 +338,12 @@ export const STR_TESTNET = {
         'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
     },
     {
-      name: 'Euro Coin (Testnet)',
-      symbol: 'EURC',
-      address: 'GACD5TONLCRLWT2EOSQLSK5D6CFJMQSWO6PIP5VF6B73UVCKRSYIMXTY',
+      name: 'STAK Coin (Testnet)',
+      symbol: 'STAK',
+      address: 'GCVM2EPORQIRS24VBTXINTSLX2G55BBKIHOBCBG763OJBLJKIHJ7FCG2',
       chainId: 'testnet',
       decimals: 7,
-      logoURI:
-        'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c/logo.png',
-    },
-    {
-      name: 'Aqua (Testnet)',
-      symbol: 'AQUA',
-      address: 'GAO2UQT2N7NGSHLNNS5AUGEEEOU3BXER6GGIYFJBF5OUNCLVONUYT3PS',
-      chainId: 'testnet',
-      decimals: 7,
-      logoURI: 'https://aqua.network/assets/img/aqua-logo.png',
-    },
-    {
-      name: 'SwiftEx Token (Testnet)',
-      symbol: 'SWIFT',
-      address: 'GBVAJRR3O24B3TULTXH5HP4HGADXMORIEEOEWZAKUQFUZETT64NRF5LI',
-      chainId: 'testnet',
-      decimals: 7,
-      logoURI: '/logo.png',
-    },
-    {
-      name: 'Wrapped Bitcoin (Testnet)',
-      symbol: 'WBTC',
-      address: 'GAXAMPQXMVMRZPZNZEHIAVXO5PXL5VYXOWRRB3SCERPPDLZKUKHV6ZRZ',
-      chainId: 'testnet',
-      decimals: 7,
-      logoURI:
-        'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599/logo.png',
-    },
-    {
-      name: 'Wrapped Ether (Testnet)',
-      symbol: 'WETH',
-      address: 'GBWDY7L6YMM4TAX4RSPX4NMDSFMIX7PQLYKYCTXZH76EIVMPSRJ2CKM4',
-      chainId: 'testnet',
-      decimals: 7,
-      logoURI:
-        'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png',
-    },
-    {
-      name: 'ACME Token (Testnet)',
-      symbol: 'ACME',
-      address: 'GB75GYGNXJ566NKBMDUBMKGZQWWNLYAT3FWSMCPX3O3427JGQ3D3CC33',
-      chainId: 'testnet',
-      decimals: 7,
-      logoURI:
-        'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/stellar/info/logo.png',
+      logoURI: 'https://stellar.myfilebase.com/ipfs/QmSTXU2wn1USnmd5ZypA5zMze259wEPSDP3i8wivyr9qiq',
     },
   ],
 };

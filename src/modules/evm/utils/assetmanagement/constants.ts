@@ -71,8 +71,9 @@ export const RPC_URLS = {
   ],
 
   AMOY: [
-    'https://polygon-amoy-bor-rpc.publicnode.com',
+    'https://rpc-amoy.polygon.technology',
     'https://polygon-amoy.drpc.org',
+    'https://polygon-amoy-bor-rpc.publicnode.com',
     'https://rpc.ankr.com/polygon_amoy',
   ],
 
@@ -114,7 +115,7 @@ export const EXPLORER_URLS = {
   BNB: 'https://bscscan.com',
   SEPOLIA: 'https://sepolia.etherscan.io',
   BSC_TESTNET: 'https://testnet.bscscan.com',
-  AMOY: 'https://www.oklink.com/amoy',
+  AMOY: 'https://amoy.polygonscan.com',
   ARB_SEPOLIA: 'https://sepolia.arbiscan.io',
   OPT_SEPOLIA: 'https://sepolia-optimism.etherscan.io',
   BASE_SEPOLIA: 'https://sepolia.basescan.org',

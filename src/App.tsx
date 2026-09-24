@@ -14,10 +14,19 @@ import router from './routes';
 import { getValidDeviceToken, setDeviceToken } from './service/apiConfig';
 import { ensureWalletLinkedToDevice } from './service/apiService';
 import { registerDevice } from './service/deviceService';
+import { useAppAvailabilityStore } from './store/appAvailabilityStore';
 import { useGeolocationStore } from './store/geolocationStore';
 
+let hasPrintedSecurityWarning = false;
+
 const printSecurityWarning = () => {
-  if (import.meta.env.PROD) {
+  if (hasPrintedSecurityWarning) return;
+
+  const isExplicitlyDisabled = import.meta.env.VITE_ENABLE_SECURITY_WARNING === 'false';
+  const isEnabled = !isExplicitlyDisabled;
+
+  if (isEnabled) {
+    hasPrintedSecurityWarning = true;
     console.log(
       '%cStop!',
       'color: red; font-size: 60px; font-weight: bold; text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000;'
@@ -53,9 +62,11 @@ const App = () => {
   const devicePayload = session?.peer?.metadata?.userDevice;
 
   useEffect(() => {
+    printSecurityWarning();
     initWalletListener();
     initDynamicTokenLists();
     useGeolocationStore.getState().fetchLocation();
+    useAppAvailabilityStore.getState().fetchAvailability();
   }, []);
 
   useEffect(() => {

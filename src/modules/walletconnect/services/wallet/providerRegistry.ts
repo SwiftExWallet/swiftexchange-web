@@ -381,6 +381,7 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
       // ─── Signing Requests ────────────────────────────────────────────────────
       const SIGNING_METHODS = [
         'eth_sendTransaction',
+        'eth_signTransaction',
         'eth_signTypedData_v4',
         'eth_signTypedData',
         'personal_sign',

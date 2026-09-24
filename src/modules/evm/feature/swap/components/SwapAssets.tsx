@@ -53,6 +53,7 @@ import { calculateMaxSwapAmount, toPlainString } from '../utils/swapAmountUtils'
 import { isSameAsset, isStellar, matchesAddress } from '../utils/swapAssetUtils';
 import { parseSwapError } from '../utils/swapErrorHandler';
 import { ActivationModal } from './ActivationModal';
+import CctpBridgeComponent from './CctpBridgeComponent';
 import FusionQuoteScreen from './FusionQuoteScreen';
 import { QuoteCountdownBadge, SwapMiddleProgressRing } from './QuoteRefreshTimer';
 import SlippageSettingsModal from './SlippageSettingsModal';
@@ -110,6 +111,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
   const [crossChainWarning, setCrossChainWarning] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [swapTab, setSwapTab] = useState<'swap' | 'cctp'>('swap');
 
   const actionType = useMemo(
     () =>
@@ -824,15 +826,16 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
       }
 
       if (isEvmChain(newChainId)) {
-        if (isConnected && isSource) {
+        if (evmWallet && isSource) {
+          setFromChainId(newChainId);
           setIsChainSwitching(true);
           try {
             const provider = getProvider(WalletType.EVM);
-            await switchOrAddChain(provider, newChainId);
-            setFromChainId(newChainId);
+            if (provider) {
+              await switchOrAddChain(provider, newChainId);
+            }
           } catch (err: any) {
-            console.error('Failed to switch chain:', err);
-            throw err;
+            console.warn('[SwapAssets] Chain switch prompt delayed or rejected:', err);
           } finally {
             setIsChainSwitching(false);
           }
@@ -846,7 +849,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
       }
     },
     [
-      isConnected,
+      evmWallet,
       getProvider,
       fromChainId,
       toChainId,
@@ -956,15 +959,44 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
   return (
     <PageLayout
-      title="Token Swap"
-      subtitle="Swap & Bridge"
+      title={swapTab === 'cctp' ? 'Circle CCTP Bridge' : 'Token Swap'}
+      subtitle={swapTab === 'cctp' ? 'Ethereum ↔ Stellar' : 'Swap & Bridge'}
       onBack={onClose}
       showBackButton={!!onClose}
       maxWidth="lg"
       isBeta
       betaMessage="This feature is in Beta. Please double-check the network and address crypto transactions can't be reversed."
     >
-      {isLoadingExecution && executionCurrentStep !== 'preparing' ? (
+      <div className="flex items-center gap-1.5 p-1 bg-secondary/80 rounded-xl border border-divider/40 w-fit mb-4">
+        <button
+          type="button"
+          onClick={() => setSwapTab('swap')}
+          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            swapTab === 'swap' ? 'bg-brand text-white shadow-sm' : 'text-muted hover:text-primary'
+          }`}
+        >
+          Swap & Bridge
+        </button>
+        <button
+          type="button"
+          onClick={() => setSwapTab('cctp')}
+          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+            swapTab === 'cctp' ? 'bg-brand text-white shadow-sm' : 'text-muted hover:text-primary'
+          }`}
+        >
+          <span>Circle CCTP</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/20 text-white font-extrabold uppercase">
+            USDC
+          </span>
+        </button>
+      </div>
+
+      {swapTab === 'cctp' ? (
+        <CctpBridgeComponent
+          currentNetwork={currentNetwork}
+          onBackToSwap={() => setSwapTab('swap')}
+        />
+      ) : isLoadingExecution && executionCurrentStep !== 'preparing' ? (
         <SwapExecutionScreen
           actionType={actionType}
           fromChainId={fromChainId}
@@ -1104,10 +1136,10 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                       const targetChainId = isStellar(a.chainId)
                         ? stellarTargetId
                         : Number(a.chainId);
+                      setSellAssetSymbol(a.symbol);
+                      setSellAssetAddress(a.address || '');
                       try {
                         await handleChainSelectInModal(targetChainId, true);
-                        setSellAssetSymbol(a.symbol);
-                        setSellAssetAddress(a.address || '');
                       } catch (err) {
                         console.warn('[SwapAssets] Source chain switch failed or rejected:', err);
                       }
@@ -1247,16 +1279,16 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
               <button
                 onClick={() =>
                   openAssetSelector(actionType, {
-                    defaultNetwork: fromChainId,
+                    defaultNetwork: toChainId,
                     pairedChainId: fromChainId,
                     onSelect: (a: any) => {
                       const stellarTargetId = getStellarConfig(currentNetwork).chainId;
-                      handleChainSelectInModal(
-                        isStellar(a.chainId) ? stellarTargetId : Number(a.chainId),
-                        false
-                      );
+                      const targetChainId = isStellar(a.chainId)
+                        ? stellarTargetId
+                        : Number(a.chainId);
                       setBuyAssetSymbol(a.symbol);
                       setBuyAssetAddress(a.address || '');
+                      handleChainSelectInModal(targetChainId, false);
                     },
                   })
                 }

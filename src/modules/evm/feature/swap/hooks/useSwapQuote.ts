@@ -104,19 +104,6 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
 
   const fetchUnifiedQuote = useCallback(async () => {
     const isModalOpen = useTransactionModalStore.getState().isOpen;
-    console.log('[QuoteDebug]', {
-      sellAmount,
-      isChainSwitching,
-      showFusionScreen,
-      bridgeTxStatus,
-      isModalOpen,
-      sellAssetSym: sellAssetSymbol,
-      buyAssetSym: buyAssetSymbol,
-      fromChain: fromChainId,
-      toChain: toChainId,
-      hasSellAsset: !!selectedSellAsset,
-      hasBuyAsset: !!selectedBuyAsset,
-    });
     if ((bridgeTxStatus && bridgeTxStatus !== 'idle') || isModalOpen) {
       return;
     }

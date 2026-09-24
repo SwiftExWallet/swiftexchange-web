@@ -14,6 +14,7 @@ import { estimateEVMFees, sendCryptoEVMPrepare } from '../../evm/service/evmServ
 import { storeSwapOrder } from '../../evm/service/evmTransactionStatusService';
 import { fetchSingleTokenBalance, getTokensForChain } from '../../evm/service/tokenListService';
 import { CHAIN_REGISTRY, getChainById, getExplorerUrl } from '../../evm/utils/Chainregistry';
+import { parseRawChainId, switchOrAddChain } from '../../evm/utils/evmChainUtils';
 import { getEVMNetworkConfig } from '../../evm/utils/evmUtils';
 import { rpcManager } from '../../evm/utils/rpcProvider';
 import { parseSwapError } from '../../evm/utils/swapErrorHandler';
@@ -532,6 +533,16 @@ export const useSendAsset = (onBack?: () => void) => {
       let req: TransactionRequest;
 
       if (currentAsset.type === 'evm') {
+        const evmProvider = getProvider(WalletType.EVM);
+        if (evmProvider && typeof evmProvider.request === 'function') {
+          const targetChainId = Number(currentAsset.networkKey);
+          const rawChainId = await evmProvider.request({ method: 'eth_chainId' });
+          if (parseRawChainId(rawChainId) !== targetChainId) {
+            console.log(`[useSendAsset] Switching active wallet to target chain ${targetChainId}`);
+            await switchOrAddChain(evmProvider, targetChainId);
+          }
+        }
+
         console.log('[useSendAsset] Building EVM transaction request');
         let data: string | undefined = memo || undefined;
         let to = recipientAddress;

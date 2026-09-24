@@ -5,7 +5,6 @@ import { useSwapStore } from '../../../../../store/swapStore';
 import { getStellarConfig } from '../../../../walletconnect/config/chains';
 import { WalletType } from '../../../../walletconnect/constants/Wallet';
 import {
-  getChainById,
   getEvmChainsForNetwork,
   getEvmSwapEnabledChains,
   isEvmChain,
@@ -17,10 +16,10 @@ export function useSwapAssetDefaults(params: {
   connectedWallets: any;
   currentChainId: number | null;
   currentNetwork: 'mainnet' | 'testnet';
-  isConnected: boolean;
+  isConnected?: boolean;
   getProvider: (type: WalletType) => any;
 }) {
-  const { connectedWallets, currentChainId, currentNetwork, isConnected, getProvider } = params;
+  const { connectedWallets, currentChainId, currentNetwork, getProvider } = params;
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const locationState = location.state as { selectedAsset?: any; isPerp?: boolean };
@@ -204,7 +203,7 @@ export function useSwapAssetDefaults(params: {
 
   useEffect(() => {
     if (
-      isConnected &&
+      connectedWallets[WalletType.EVM] &&
       isEvmChain(fromChainId) &&
       currentChainId !== null &&
       String(currentChainId) !== String(fromChainId) &&
@@ -218,20 +217,11 @@ export function useSwapAssetDefaults(params: {
         setIsChainSwitching(true);
         try {
           const provider = getProvider(WalletType.EVM);
-          await switchOrAddChain(provider, fromChainId);
-        } catch (err) {
-          console.error('[useSwapAssetDefaults] autoSwitchChain error:', err);
-          if (active) {
-            setFromChainId(currentChainId);
-            if (fromChainId === toChainId) {
-              setToChainId(currentChainId);
-            }
-            const fallbackChain = getChainById(currentChainId);
-            if (fallbackChain?.nativeCurrency?.symbol) {
-              setSellAssetSymbol(fallbackChain.nativeCurrency.symbol);
-              setSellAssetAddress('');
-            }
+          if (provider) {
+            await switchOrAddChain(provider, fromChainId);
           }
+        } catch (err) {
+          console.warn('[useSwapAssetDefaults] autoSwitchChain delayed or rejected:', err);
         } finally {
           if (active) {
             setIsChainSwitching(false);
@@ -243,18 +233,7 @@ export function useSwapAssetDefaults(params: {
         active = false;
       };
     }
-  }, [
-    fromChainId,
-    currentChainId,
-    isConnected,
-    isChainSwitching,
-    getProvider,
-    setFromChainId,
-    setToChainId,
-    toChainId,
-    setSellAssetSymbol,
-    setSellAssetAddress,
-  ]);
+  }, [fromChainId, currentChainId, connectedWallets, isChainSwitching, getProvider]);
 
   return {
     isChainSwitching,

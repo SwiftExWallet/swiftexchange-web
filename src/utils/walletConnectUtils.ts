@@ -1,3 +1,4 @@
+import { parseRawChainId, switchOrAddChain } from '../modules/evm/utils/evmChainUtils';
 import { WALLET_METADATA_MAP } from '../modules/walletconnect/constants/Wallet';
 import { useGlobalTxStore } from '../modules/walletconnect/store/globalTxStore';
 import { sendCustomNotification } from '../service/notificationService';
@@ -244,6 +245,27 @@ export async function sendEVMTransaction(
   const fallbackId = Date.now();
   useGlobalTxStore.getState().setPending({ id: fallbackId, topic: 'injected', type: 'send' });
   try {
+    if (typeof provider.request === 'function' && numericChainId) {
+      try {
+        const rawChainId = await provider.request({ method: 'eth_chainId' });
+        const activeChainId = parseRawChainId(rawChainId);
+        if (activeChainId && activeChainId !== numericChainId) {
+          await switchOrAddChain(provider, numericChainId);
+          const postRaw = await provider.request({ method: 'eth_chainId' });
+          const postChainId = parseRawChainId(postRaw);
+          if (postChainId && postChainId !== numericChainId) {
+            throw new Error(
+              `Wallet network mismatch: active network (${postChainId}) does not match required network (${numericChainId}). Transaction aborted for safety.`
+            );
+          }
+        }
+      } catch (err: any) {
+        if (err?.message?.includes('Wallet network mismatch')) {
+          throw err;
+        }
+      }
+    }
+
     await notifyWalletSignRequest(txParams.to);
     const result = await provider.request({
       method: 'eth_sendTransaction',

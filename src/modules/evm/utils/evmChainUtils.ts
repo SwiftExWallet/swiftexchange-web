@@ -10,9 +10,12 @@ import { getChainById, isEvmChain } from './Chainregistry';
  * failures. This helper handles both formats safely.
  */
 export function parseRawChainId(raw: string | number): number {
-  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'number') return isNaN(raw) ? 0 : raw;
   const s = String(raw).trim();
-  if (s.startsWith('0x') || s.startsWith('0X')) return parseInt(s, 16);
+  if (s.startsWith('0x') || s.startsWith('0X')) {
+    const n = parseInt(s, 16);
+    return isNaN(n) ? 0 : n;
+  }
   const n = parseInt(s, 10);
   return isNaN(n) ? 0 : n;
 }

@@ -108,6 +108,7 @@ export const buildUnifiedNamespaces = (
   const evmNamespace = {
     methods: [
       'eth_sendTransaction',
+      'eth_signTransaction',
       'eth_signTypedData_v4',
       'eth_signTypedData',
       'personal_sign',

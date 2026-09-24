@@ -1,9 +1,12 @@
 import { RefreshCw } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ROUTES } from '../../constants/routes';
 import { IS_TESTNET_ENABLED } from '../../modules/walletconnect/config/chains';
 import { useWalletStore } from '../../modules/walletconnect/store/walletConnectStore';
+import router from '../../routes';
 import { API_CONFIG } from '../../service/apiConfig';
+import { useAppAvailabilityStore } from '../../store/appAvailabilityStore';
 
 type ConnectionQuality = 'optimal' | 'good' | 'fair' | 'poor' | 'offline';
 
@@ -26,6 +29,8 @@ export const NetworkMonitor: React.FC = () => {
   const evmWallet = connectedWallets.evm;
   const stellarWallet = connectedWallets.stellar;
   const isAnyConnected = Boolean(evmWallet || stellarWallet);
+
+  const overallStatus = useAppAvailabilityStore(state => state.getOverallStatus());
 
   const [stats, setStats] = useState<PingStats>({
     latency: null,
@@ -204,12 +209,40 @@ export const NetworkMonitor: React.FC = () => {
     >
       {/* Left side: System status & UTC clock & Wallet info */}
       <div className="flex items-center gap-2 sm:gap-2.5 truncate min-w-0">
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className={`w-1.5 h-1.5 rounded-full ${qualityDot}`} />
-          <span className="font-medium text-[var(--color-text-secondary)]">
-            {stats.quality === 'offline' ? 'Offline' : 'Operational'}
+        <button
+          type="button"
+          onClick={() => router.navigate(ROUTES.STATUS)}
+          className="flex items-center gap-1.5 shrink-0 hover:opacity-85 transition-opacity group cursor-pointer bg-transparent border-0 p-0 text-left"
+          title="Click to view System & Regulatory Availability"
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              stats.quality === 'offline'
+                ? 'bg-rose-500 animate-ping'
+                : overallStatus === 'down'
+                  ? 'bg-rose-500 animate-pulse'
+                  : overallStatus === 'maintenance'
+                    ? 'bg-amber-400 animate-pulse'
+                    : overallStatus === 'degraded'
+                      ? 'bg-yellow-400'
+                      : qualityDot
+            }`}
+          />
+          <span className="font-medium text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] transition-colors">
+            {stats.quality === 'offline'
+              ? 'Offline'
+              : overallStatus === 'down'
+                ? 'Outage'
+                : overallStatus === 'maintenance'
+                  ? 'Maintenance'
+                  : overallStatus === 'degraded'
+                    ? 'Degraded'
+                    : 'Operational'}
           </span>
-        </div>
+          <span className="text-[9px] px-1 py-0.2 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hidden sm:inline group-hover:bg-cyan-500/20 transition-colors">
+            Status ↗
+          </span>
+        </button>
 
         <span className="text-[var(--color-border)] opacity-40">/</span>
 
@@ -314,6 +347,18 @@ export const NetworkMonitor: React.FC = () => {
                 Updated {stats.lastChecked.toLocaleTimeString()}
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                router.navigate(ROUTES.STATUS);
+              }}
+              className="mt-2 flex items-center justify-center gap-1.5 w-full py-1.5 px-2 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/25 font-sans text-[11px] font-semibold transition-all cursor-pointer shadow-xs text-center"
+            >
+              <span>View System Status & Availability</span>
+              <span>→</span>
+            </button>
           </div>
         </div>
       )}

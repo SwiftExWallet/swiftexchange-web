@@ -30,7 +30,10 @@ export default defineConfig(({ command }) => ({
   plugins: [
     react(),
     tailwindcss(),
-    command === 'build' && removeConsole(),
+    command === 'build' &&
+      removeConsole({
+        externalValue: ['Stop!', 'Self-XSS', 'intended for developers'],
+      }),
     nodePolyfills({
       globals: { Buffer: true, global: true },
       protocolImports: true,

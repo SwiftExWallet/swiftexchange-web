@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 
 import { sendCustomNotification } from '../../../service/notificationService';
 import { sendEVMTransaction } from '../../../utils/walletConnectUtils';
+import { parseRawChainId, switchOrAddChain } from '../../evm/utils/evmChainUtils';
 import { WalletType } from '../../walletconnect/constants/Wallet';
 
 export interface TransactionRequest {
@@ -233,6 +234,25 @@ class TransactionRouter {
         typeof request.networkKey === 'number'
           ? request.networkKey
           : parseInt(String(session.chainId)) || 1;
+
+      // Pre-flight check: ensure connected wallet is on target chain before simulation/signing
+      if (typeof provider.request === 'function') {
+        try {
+          const rawChainId = await provider.request({ method: 'eth_chainId' });
+          const currentChainId = parseRawChainId(rawChainId);
+          if (currentChainId !== Number(chainId)) {
+            console.log(
+              `[Router] Chain mismatch detected. Active: ${currentChainId}, Target: ${chainId}. Requesting chain switch...`
+            );
+            await switchOrAddChain(provider, chainId);
+          }
+        } catch (switchErr: any) {
+          console.error('[Router] Chain switch before send failed:', switchErr);
+          throw new Error(
+            `Wallet is on the wrong network. Please switch your wallet to ${request.network || `Chain ID ${chainId}`} to proceed.`
+          );
+        }
+      }
 
       let txParams: any = {};
       let gasLimitBigInt: bigint = BigInt(21000);

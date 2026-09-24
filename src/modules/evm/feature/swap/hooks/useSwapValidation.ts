@@ -255,7 +255,11 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   ]);
 
   const isErrorState = useMemo(() => {
-    if (currentNetwork === 'testnet' && actionType === 'BRIDGE') {
+    if (
+      currentNetwork === 'testnet' &&
+      actionType === 'BRIDGE' &&
+      (isStellar(fromChainId) || isStellar(toChainId))
+    ) {
       return true;
     }
     if (
@@ -282,6 +286,9 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     );
   }, [
     currentNetwork,
+    actionType,
+    fromChainId,
+    toChainId,
     isWalletMissing,
     sellAmount,
     isQuoteLoading,
@@ -295,9 +302,9 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     bridgeTxStatus,
     bridgeErrorMsg,
     isSameAssetSelected,
-    actionType,
     crossChainWarning,
     currentQuote.error,
+    errorMessage,
   ]);
 
   const isLoadingExecution = useMemo(() => {
@@ -353,7 +360,11 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   ]);
 
   const isSwapDisabled = useMemo(() => {
-    if (currentNetwork === 'testnet' && actionType === 'BRIDGE') {
+    if (
+      currentNetwork === 'testnet' &&
+      actionType === 'BRIDGE' &&
+      (isStellar(fromChainId) || isStellar(toChainId))
+    ) {
       return true;
     }
 
@@ -388,6 +399,8 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   }, [
     currentNetwork,
     actionType,
+    fromChainId,
+    toChainId,
     buttonLabel,
     isWalletMissing,
     sellAmount,
