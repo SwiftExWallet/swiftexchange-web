@@ -55,9 +55,9 @@ class WalletService {
     if (!IS_MAINNET_ENABLED) return 'testnet';
     try {
       const stored = localStorage.getItem('network');
-      return stored === 'testnet' ? 'testnet' : 'mainnet';
+      return stored === 'mainnet' ? 'mainnet' : 'testnet';
     } catch {
-      return 'mainnet';
+      return 'testnet';
     }
   }
 

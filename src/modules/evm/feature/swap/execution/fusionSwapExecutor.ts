@@ -132,10 +132,16 @@ export async function execute1InchFusionSwap(
     chainId,
     onBeforeWalletSign,
     useUnlimitedApproval,
-    currentAllowance
+    currentAllowance,
+    onApprovalTxHash
   );
   if (allowance.approvalTxHash && onApprovalTxHash) {
     onApprovalTxHash(allowance.approvalTxHash);
+  }
+
+  // Allowance is now confirmed on-chain. Transition step to signing.
+  if (requiresApproval && onProgress) {
+    onProgress('signing');
   }
 
   //Pre-flight simulation
@@ -172,8 +178,8 @@ export async function execute1InchFusionSwap(
     amount: amountBN.toString(),
     walletAddress: senderAddress,
     chain: chainSymbol,
-    preset,
-    permit: '',
+    // preset,
+    // permit: '',
     toChain: isCrossChain
       ? (() => {
           const chainInfo = getChainById(toChainId);
@@ -323,7 +329,6 @@ export async function execute1InchFusionSwap(
         quoteId: resolvedQuoteId,
         extension: extension || '0x',
         signature,
-        permit: '',
         orderHash,
       };
     }

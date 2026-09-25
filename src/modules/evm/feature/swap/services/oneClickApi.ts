@@ -64,19 +64,37 @@ export const DUMMY_EVM_ADDRESS = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
 export const BLOCKCHAIN_TO_CHAIN_ID: Record<string, number> = {
   ethereum: 1,
   eth: 1,
+  mainnet: 1,
   arbitrum: 42161,
   arb: 42161,
+  arbitrumone: 42161,
+  'arbitrum-one': 42161,
+  arbitrum_one: 42161,
   polygon: 137,
   pol: 137,
   matic: 137,
+  polygonpos: 137,
+  'polygon-pos': 137,
+  polygon_pos: 137,
   bsc: 56,
   'binance-smart-chain': 56,
+  binancesmartchain: 56,
+  binance_smart_chain: 56,
   bnb: 56,
   base: 8453,
+  basemainnet: 8453,
+  'base-mainnet': 8453,
+  base_mainnet: 8453,
   optimism: 10,
   op: 10,
+  opmainnet: 10,
+  'op-mainnet': 10,
+  optimismmainnet: 10,
   avalanche: 43114,
   avax: 43114,
+  avalanchec: 43114,
+  'avalanche-c': 43114,
+  avalanche_c: 43114,
   fantom: 250,
   ftm: 250,
   gnosis: 100,
@@ -84,30 +102,46 @@ export const BLOCKCHAIN_TO_CHAIN_ID: Record<string, number> = {
   celo: 42220,
   zksync: 324,
   'zksync-era': 324,
+  zksyncera: 324,
   linea: 59144,
   scroll: 534352,
   mantle: 5000,
 };
 
 export function getEvmChainId(token: NearIntentToken): number | null {
-  const cleanBlockchain = (token.blockchain || '')
-    .toLowerCase()
+  const rawBlockchain = (token.blockchain || '').toLowerCase().trim();
+  const cleanBlockchain = rawBlockchain
     .replace(/^(evm:|mainnet:|pubnet:)/, '')
-    .split(':')[0];
+    .split(':')[0]
+    .trim();
+
+  if (!isNaN(Number(cleanBlockchain)) && Number(cleanBlockchain) > 0) {
+    return Number(cleanBlockchain);
+  }
+
+  const normalized = cleanBlockchain.replace(/[-_]/g, '');
+
   const fromField =
     BLOCKCHAIN_TO_CHAIN_ID[cleanBlockchain] ||
-    BLOCKCHAIN_TO_CHAIN_ID[token.blockchain?.toLowerCase() ?? ''];
+    BLOCKCHAIN_TO_CHAIN_ID[normalized] ||
+    BLOCKCHAIN_TO_CHAIN_ID[rawBlockchain];
   if (fromField) return fromField;
 
   const match =
-    token.assetId.match(/nep141:([a-z0-9]+)-0x/i) || token.assetId.match(/nep245:[^:]+:(\d+)_/i);
+    token.assetId.match(/nep141:([a-z0-9_-]+)-0x/i) || token.assetId.match(/nep245:[^:]+:(\d+)_/i);
   if (match) {
     const num = Number(match[1]);
     if (!isNaN(num) && num > 0) return num;
-    const fromPrefix = BLOCKCHAIN_TO_CHAIN_ID[match[1].toLowerCase()];
+    const prefix = match[1].toLowerCase().replace(/[-_]/g, '');
+    const fromPrefix =
+      BLOCKCHAIN_TO_CHAIN_ID[match[1].toLowerCase()] || BLOCKCHAIN_TO_CHAIN_ID[prefix];
     if (fromPrefix) return fromPrefix;
   }
-  return (findChain(token.blockchain, 'mainnet')?.chainId as number) ?? null;
+  return (
+    (findChain(cleanBlockchain, 'mainnet')?.chainId as number) ??
+    (findChain(normalized, 'mainnet')?.chainId as number) ??
+    null
+  );
 }
 
 export const isStellarChain = (chainId: number | string): boolean => {
@@ -142,7 +176,12 @@ export const matchNearIntentToken = (
   if (!tokens || tokens.length === 0 || (!symbol && !address)) return undefined;
   const isTargetStellar = chainId !== undefined && isStellarChain(chainId);
 
-  if (address && address !== 'native' && address !== '0x0000000000000000000000000000000000000000') {
+  if (
+    address &&
+    address !== 'native' &&
+    address !== '0x0000000000000000000000000000000000000000' &&
+    address.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  ) {
     const addrLower = address.toLowerCase();
     const addrMatch = tokens.find(t => {
       const isTokenStellar = isStellarBlockchain(t.blockchain);

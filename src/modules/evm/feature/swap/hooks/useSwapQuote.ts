@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTransactionModalStore } from '../../../../../store/transactionModalStore';
 import { AquariusService } from '../../../../stellar/service/aquariusService';
 import { SoroswapService } from '../../../../stellar/service/soroswapService';
-import { getChainById } from '../../../utils/Chainregistry';
+import { getAssetsForChain } from '../../../utils/Chainregistry';
 import { getSwapQuote } from '../services/evmSwapService';
 import { get1InchFusionQuote } from '../services/fusionOrderService';
 import {
@@ -22,7 +22,6 @@ import { parseSwapError } from '../utils/swapErrorHandler';
 
 export interface UseSwapQuoteParams {
   sellAmount: string;
-  isChainSwitching: boolean;
   showFusionScreen: boolean;
   actionType: 'SWAP' | 'BRIDGE';
   fromChainId: number | string;
@@ -52,7 +51,6 @@ export interface UseSwapQuoteParams {
 export function useSwapQuote(params: UseSwapQuoteParams) {
   const {
     sellAmount,
-    isChainSwitching,
     showFusionScreen,
     actionType,
     fromChainId,
@@ -85,30 +83,13 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
   const latestRequestId = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const getUsdValue = useCallback((amount: string, asset: any): number | null => {
-    if (!amount || !asset) return null;
-    const parsed = parseFloat(amount);
-    if (isNaN(parsed) || parsed <= 0) return null;
-    const price = parseFloat(asset.price || asset.priceUSD || '0');
-    if (price > 0) return parsed * price;
-    return null;
-  }, []);
-
-  const isBridgeSupported = useCallback((symbol: string, chainId: number | string): boolean => {
-    const chainConfig = getChainById(chainId);
-    if (!chainConfig?.bridgeSupportTokens?.length) return false;
-    return chainConfig.bridgeSupportTokens.some(
-      (t: any) => t.symbol.toUpperCase() === symbol.toUpperCase()
-    );
-  }, []);
-
   const fetchUnifiedQuote = useCallback(async () => {
     const isModalOpen = useTransactionModalStore.getState().isOpen;
     if ((bridgeTxStatus && bridgeTxStatus !== 'idle') || isModalOpen) {
       return;
     }
 
-    if (!sellAmount || parseFloat(sellAmount) <= 0 || isChainSwitching || showFusionScreen) {
+    if (!sellAmount || parseFloat(sellAmount) <= 0 || showFusionScreen) {
       setCurrentQuote({ source: null, data: null, error: null, loading: false });
       return;
     }
@@ -309,18 +290,41 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
       const fetchNearIntentQuote = async () => {
         try {
           const nearTokens = await fetchNearIntentTokens(currentNetwork);
+
+          const resolveMatchingAddress = (asset: any, symbol: string, chainId: any) => {
+            if (
+              asset?.address &&
+              asset.address !== 'native' &&
+              asset.address !== '0x0000000000000000000000000000000000000000' &&
+              asset.address.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            ) {
+              return asset.address;
+            }
+            const chainAssets = getAssetsForChain(chainId);
+            const found = chainAssets.find(
+              (a: any) => a.symbol.toUpperCase() === (symbol || '').toUpperCase()
+            );
+            if (
+              found?.address &&
+              found.address !== 'native' &&
+              found.address !== '0x0000000000000000000000000000000000000000' &&
+              found.address.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            ) {
+              return found.address;
+            }
+            return asset?.address || '';
+          };
+
+          const sellAddr = resolveMatchingAddress(selectedSellAsset, sellAssetSymbol, fromChainId);
+          const buyAddr = resolveMatchingAddress(selectedBuyAsset, buyAssetSymbol, toChainId);
+
           const nearSellAsset = matchNearIntentToken(
             nearTokens,
             sellAssetSymbol,
-            selectedSellAsset.address,
+            sellAddr,
             fromChainId
           );
-          const nearBuyAsset = matchNearIntentToken(
-            nearTokens,
-            buyAssetSymbol,
-            selectedBuyAsset.address,
-            toChainId
-          );
+          const nearBuyAsset = matchNearIntentToken(nearTokens, buyAssetSymbol, buyAddr, toChainId);
 
           if (nearSellAsset && nearBuyAsset) {
             const isStellarOrigin = isStellarBlockchain(nearSellAsset.blockchain);
@@ -431,7 +435,6 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
               tokenOut: tokenOutAddr,
               amount: safeParseUnits(sellAmount, selectedSellAsset.decimals || 18),
               walletAddress: evmAddress || '0x0000000000000000000000000000000000000000',
-              decimals: selectedSellAsset.decimals || 18,
             },
             toChainId
           );
@@ -502,11 +505,8 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     sellAmount,
     sellAssetSymbol,
     buyAssetSymbol,
-    isChainSwitching,
     userSlippageTolerance,
     showFusionScreen,
-    isBridgeSupported,
-    getUsdValue,
     ammService,
     evmAddress,
     stellarAddress,
@@ -533,7 +533,7 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     debounceTimerRef.current = setTimeout(() => {
       fetchUnifiedQuoteRef.current();
-    }, 800);
+    }, 500);
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
@@ -543,8 +543,10 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     buyAssetSymbol,
     fromChainId,
     toChainId,
+    selectedSellAsset,
+    selectedBuyAsset,
+    actionType,
     userSlippageTolerance,
-    isChainSwitching,
   ]);
 
   useEffect(() => {
@@ -556,7 +558,6 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
         // and loading-state changes that happen *after* the interval was created.
         const isModalOpen = useTransactionModalStore.getState().isOpen;
         const shouldPause =
-          isChainSwitching ||
           showFusionScreen ||
           isSameAssetSelected ||
           isQuoteLoading ||
@@ -582,7 +583,6 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     };
   }, [
     sellAmount,
-    isChainSwitching,
     showFusionScreen,
     isSameAssetSelected,
     // isQuoteLoading intentionally omitted: each loading flip was restarting the

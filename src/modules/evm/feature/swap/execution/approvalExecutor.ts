@@ -47,13 +47,100 @@ export async function readAllowance(
   return 0n;
 }
 
+export async function waitForTxConfirmation(
+  txHash: string,
+  chainId: number | string,
+  provider: any,
+  checkAllowanceFn?: () => Promise<boolean>,
+  timeoutMs: number = 60000
+): Promise<void> {
+  const start = Date.now();
+  const pollInterval = 1500;
+
+  while (Date.now() - start < timeoutMs) {
+    if (checkAllowanceFn) {
+      try {
+        const isSatisfied = await checkAllowanceFn();
+        if (isSatisfied) {
+          console.info(`[waitForTxConfirmation] Allowance confirmed on-chain for ${txHash}`);
+          return;
+        }
+      } catch {
+        // continue polling receipt
+      }
+    }
+
+    if (typeof provider?.request === 'function') {
+      try {
+        const receipt = await provider.request({
+          method: 'eth_getTransactionReceipt',
+          params: [txHash],
+        });
+        if (receipt) {
+          const status = receipt.status;
+          if (status === '0x0' || status === 0) {
+            throw new Error('Approval transaction reverted on-chain');
+          }
+          if (status === '0x1' || status === 1) {
+            console.info(
+              `[waitForTxConfirmation] Receipt confirmed via wallet provider for ${txHash}`
+            );
+            return;
+          }
+        }
+      } catch (err: any) {
+        if (err?.message?.includes('reverted')) throw err;
+      }
+    }
+
+    try {
+      const config = getEVMNetworkConfig(chainId);
+      if (config.rpcUrls?.length) {
+        const receipt = await rpcManager.fetchWithFallback(
+          chainId,
+          config.rpcUrls,
+          async rpcProvider => await rpcProvider.getTransactionReceipt(txHash)
+        );
+        if (receipt) {
+          if (receipt.status === 0) {
+            throw new Error('Approval transaction reverted on-chain');
+          }
+          if (receipt.status === 1) {
+            console.info(
+              `[waitForTxConfirmation] Receipt confirmed via RPC fallback for ${txHash}`
+            );
+            return;
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('reverted')) throw err;
+    }
+
+    await new Promise(r => setTimeout(r, pollInterval));
+  }
+
+  if (checkAllowanceFn) {
+    try {
+      const isSatisfied = await checkAllowanceFn();
+      if (isSatisfied) return;
+    } catch {
+      // ignore final check error
+    }
+  }
+
+  throw new Error('Approval transaction confirmation timed out. Please check your wallet history.');
+}
+
 export async function sendApprovalTx(
   tokenAddress: string,
   spender: string,
   walletAddress: string,
   provider: any,
+  chainId: number | string,
   amount: bigint = ethers.MaxUint256,
-  onBeforeWalletSign?: () => void
+  onBeforeWalletSign?: () => void,
+  onTxBroadcast?: (hash: string) => void
 ): Promise<string> {
   const ethersProvider = new ethers.BrowserProvider(provider);
   // Use getSigner(walletAddress) so the signer is explicitly bound to the
@@ -89,9 +176,6 @@ export async function sendApprovalTx(
 
   onBeforeWalletSign?.();
   const tx = await signer.sendTransaction({
-    // `from` is intentionally omitted — the signer already knows its address
-    // (set via getSigner(walletAddress)). Including it explicitly can cause
-    // -32000 "unknown account" in the extension wallet's provider.
     to: tokenAddress,
     data,
     value: 0n,
@@ -99,10 +183,18 @@ export async function sendApprovalTx(
     ...gasParams,
   });
 
-  console.info('[sendApprovalTx] Sent:', tx.hash);
-  const receipt = await tx.wait();
-  if (!receipt || receipt.status === 0) throw new Error('Approval transaction reverted');
-  return receipt.hash;
+  const txHash = tx.hash;
+  console.info('[sendApprovalTx] Broadcast tx:', txHash);
+  if (onTxBroadcast) {
+    onTxBroadcast(txHash);
+  }
+
+  await waitForTxConfirmation(txHash, chainId, provider, async () => {
+    const current = await readAllowance(tokenAddress, walletAddress, spender, chainId, provider);
+    return current >= amount;
+  });
+
+  return txHash;
 }
 
 export async function ensureFusionAllowance(
@@ -113,7 +205,8 @@ export async function ensureFusionAllowance(
   chainId: number | string,
   onBeforeWalletSign?: () => void,
   useUnlimitedApproval: boolean = false,
-  knownAllowance?: bigint
+  knownAllowance?: bigint,
+  onTxBroadcast?: (hash: string) => void
 ): Promise<{ approvalTxHash?: string }> {
   if (!tokenAddress || isNativeAddress(tokenAddress)) {
     return {};
@@ -144,40 +237,25 @@ export async function ensureFusionAllowance(
         LIMIT_ORDER_PROTOCOL,
         walletAddress,
         provider,
+        chainId,
         0n,
-        onBeforeWalletSign
+        onBeforeWalletSign,
+        onTxBroadcast
       );
     }
   }
 
-  // Approve either the exact swap amount or MaxUint256 based on user preference.
-  // Exact approval is the safe default; unlimited is an explicit user opt-in.
   const approvalAmount = useUnlimitedApproval ? ethers.MaxUint256 : amountBN;
   const approvalTxHash = await sendApprovalTx(
     tokenAddress,
     LIMIT_ORDER_PROTOCOL,
     walletAddress,
     provider,
+    chainId,
     approvalAmount,
-    onBeforeWalletSign
+    onBeforeWalletSign,
+    onTxBroadcast
   );
-
-  const ethersProvider = new ethers.BrowserProvider(provider);
-  let receipt = null;
-  const start = Date.now();
-  while (Date.now() - start < 120000) {
-    try {
-      receipt = await ethersProvider.getTransactionReceipt(approvalTxHash);
-      if (receipt !== null) break;
-    } catch {
-      // Network hiccup
-    }
-    await new Promise(r => setTimeout(r, 2000));
-  }
-
-  if (receipt?.status === 0) {
-    throw new Error('Fusion approval transaction failed on-chain');
-  }
 
   return { approvalTxHash };
 }

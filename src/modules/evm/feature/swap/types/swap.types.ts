@@ -150,7 +150,7 @@ export interface BuildFusionOrderRequest {
   amount: string;
   walletAddress: string;
   chain: string;
-  preset: string;
+  preset?: string;
   permit?: string;
   toChain?: string;
   secretCount?: number;

@@ -276,20 +276,43 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     if (tokenMatch) return tokenMatch;
 
     if (sellAssetSymbol) {
-      const isNative =
-        !sellAssetAddress ||
-        sellAssetAddress.toLowerCase() === 'native' ||
-        sellAssetAddress.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
-        sellAssetAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+      const chainConfig = getChainById(fromChainId);
+      const isNativeCurrency =
+        chainConfig?.nativeCurrency?.symbol.toUpperCase() === sellAssetSymbol.toUpperCase() ||
+        ['ETH', 'MATIC', 'POL', 'BNB', 'AVAX'].includes(sellAssetSymbol.toUpperCase());
+
+      const isExplicitlyNative =
+        sellAssetAddress &&
+        (sellAssetAddress.toLowerCase() === 'native' ||
+          sellAssetAddress.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+          sellAssetAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
+
+      const isNative = isExplicitlyNative || (isNativeCurrency && !sellAssetAddress);
+
+      const knownTokenAddr =
+        chainConfig?.tokens?.[sellAssetSymbol.toUpperCase()] ||
+        chainConfig?.tokens?.[sellAssetSymbol] ||
+        chainAssets.find((a: any) => a.symbol.toUpperCase() === sellAssetSymbol.toUpperCase())
+          ?.address;
+
+      const resolvedAddress = isNative
+        ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+        : sellAssetAddress && !isExplicitlyNative
+          ? sellAssetAddress
+          : knownTokenAddr || '';
+
+      const isStable = ['USDC', 'USDT'].includes(sellAssetSymbol.toUpperCase());
+      const decimals = isNative ? 18 : isStable ? 6 : 18;
+
       return {
         id: `evm-${fromChainId}-${sellAssetSymbol}`,
         symbol: sellAssetSymbol,
         name: sellAssetSymbol,
         logoURI: getGlobalAssetMetadata(sellAssetSymbol)?.logoURI,
         balance: '0',
-        decimals: 18,
+        decimals,
         isNative,
-        address: isNative ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' : sellAssetAddress || '',
+        address: resolvedAddress,
         chainId: Number(fromChainId) || fromChainId,
       };
     }
@@ -324,6 +347,20 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
         };
       }
       if (buyAssetSymbol) {
+        const isXlm = buyAssetSymbol.toUpperCase() === 'XLM';
+        const chainConfig = getChainById(toChainId);
+        const knownAddr =
+          chainConfig?.tokens?.[buyAssetSymbol.toUpperCase()] ||
+          (buyAssetSymbol.toUpperCase() === 'USDC'
+            ? 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'
+            : '');
+
+        const resolvedAddress = isXlm
+          ? 'native'
+          : buyAssetAddress && buyAssetAddress !== 'native'
+            ? buyAssetAddress
+            : knownAddr || '';
+
         return {
           id: `stellar-${toChainId}-${buyAssetSymbol}`,
           symbol: buyAssetSymbol,
@@ -331,9 +368,9 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           logoURI: getGlobalAssetMetadata(buyAssetSymbol)?.logoURI,
           balance: '0',
           decimals: 7,
-          isNative: buyAssetSymbol === 'XLM',
+          isNative: isXlm,
           chainId: toChainId,
-          address: buyAssetAddress || 'native',
+          address: resolvedAddress,
         };
       }
       return undefined;
@@ -365,25 +402,73 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     if (chainAsset) return chainAsset;
 
     if (buyAssetSymbol) {
-      const isNative =
-        !buyAssetAddress ||
-        buyAssetAddress.toLowerCase() === 'native' ||
-        buyAssetAddress.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
-        buyAssetAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+      const chainConfig = getChainById(toChainId);
+      const isNativeCurrency =
+        chainConfig?.nativeCurrency?.symbol.toUpperCase() === buyAssetSymbol.toUpperCase() ||
+        ['ETH', 'MATIC', 'POL', 'BNB', 'AVAX'].includes(buyAssetSymbol.toUpperCase());
+
+      const isExplicitlyNative =
+        buyAssetAddress &&
+        (buyAssetAddress.toLowerCase() === 'native' ||
+          buyAssetAddress.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+          buyAssetAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
+
+      const isNative = isExplicitlyNative || (isNativeCurrency && !buyAssetAddress);
+
+      const knownTokenAddr =
+        chainConfig?.tokens?.[buyAssetSymbol.toUpperCase()] ||
+        chainConfig?.tokens?.[buyAssetSymbol] ||
+        chainAssets.find((a: any) => a.symbol.toUpperCase() === buyAssetSymbol.toUpperCase())
+          ?.address;
+
+      const resolvedAddress = isNative
+        ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+        : buyAssetAddress && !isExplicitlyNative
+          ? buyAssetAddress
+          : knownTokenAddr || '';
+
+      const isStable = ['USDC', 'USDT'].includes(buyAssetSymbol.toUpperCase());
+      const decimals = isNative ? 18 : isStable ? 6 : 18;
+
       return {
         id: `evm-${toChainId}-${buyAssetSymbol}`,
         symbol: buyAssetSymbol,
         name: buyAssetSymbol,
         logoURI: getGlobalAssetMetadata(buyAssetSymbol)?.logoURI,
         balance: '0',
-        decimals: 18,
+        decimals,
         isNative,
-        address: isNative ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' : buyAssetAddress || '',
+        address: resolvedAddress,
         chainId: Number(toChainId) || toChainId,
       };
     }
     return undefined;
   }, [swapAssets, buyAssetSymbol, buyAssetAddress, stellarAssets, toChainId, fromChainId]);
+
+  // Synchronize resolved asset addresses to swapStore if they were missing or empty
+  useEffect(() => {
+    if (selectedSellAsset?.address && !sellAssetAddress) {
+      setSellAssetAddress(selectedSellAsset.address);
+    }
+    if (selectedBuyAsset?.address && !buyAssetAddress) {
+      setBuyAssetAddress(selectedBuyAsset.address);
+    }
+  }, [
+    selectedSellAsset?.address,
+    selectedBuyAsset?.address,
+    sellAssetAddress,
+    buyAssetAddress,
+    setSellAssetAddress,
+    setBuyAssetAddress,
+  ]);
+
+  // Reset any stale pending transaction status on initial mount so quote fetching is never blocked
+  useEffect(() => {
+    const status = useSwapStore.getState().pendingTxStatus;
+    if (status !== 'idle' && status !== 'preparing' && status !== 'signing') {
+      useSwapStore.getState().clearPendingTx();
+    }
+  }, []);
 
   const isSameAssetSelected = useMemo(() => {
     return (
@@ -401,7 +486,6 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
   const { currentQuote, setCurrentQuote, isQuoteLoading, fetchUnifiedQuote } = useSwapQuote({
     sellAmount,
-    isChainSwitching,
     showFusionScreen: showFusionScreenRef.current,
     actionType,
     fromChainId,
@@ -641,7 +725,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
       } else {
         let destTokens: any[] = [];
         if (isStellar(toChainId)) {
-          destTokens = stellarAssets;
+          destTokens = stellarAssets.length > 0 ? stellarAssets : getAssetsForChain(toChainId);
         } else {
           destTokens = getTokensForChain(toChainId);
         }

@@ -619,7 +619,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         setIsFusionLoading(true);
         try {
           const { get1InchFusionQuote } = await import('../services/fusionOrderService');
-
+          const { safeParseUnits } = await import('../services/oneClickApi');
           const { AGGREGATOR_NATIVE_ADDRESS } = await import('../constants/swap.constants');
 
           const normalizedTokenIn = (selectedSellAsset as any).isNative
@@ -629,14 +629,16 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
             ? AGGREGATOR_NATIVE_ADDRESS.toLowerCase()
             : (selectedBuyAsset as any).address;
 
+          const sellDecimals = (selectedSellAsset as any)?.decimals ?? 18;
+          const parsedAmount = safeParseUnits(sellAmount, sellDecimals);
+
           const fQuote = await get1InchFusionQuote(
             fromChainId,
             {
               tokenIn: normalizedTokenIn,
               tokenOut: normalizedTokenOut,
-              amount: sellAmount,
+              amount: parsedAmount,
               walletAddress: evmAddress || '0x0000000000000000000000000000000000000000',
-              decimals: (selectedSellAsset as any).decimals,
             },
             toChainId,
             abortCtrl.signal

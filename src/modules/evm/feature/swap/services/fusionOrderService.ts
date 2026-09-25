@@ -39,8 +39,11 @@ export async function get1InchFusionQuote(
         amount: request.amount,
       }
     : {
-        ...request,
         chain: getChainSymbol(chainId),
+        tokenIn: request.tokenIn,
+        tokenOut: request.tokenOut,
+        amount: request.amount,
+        walletAddress: request.walletAddress,
       };
 
   const res = await fetchApiResponseFromProxy<any>(
@@ -96,7 +99,14 @@ export async function build1InchFusionOrder(
       secretCount: request.secretCount ?? 1,
     };
   } else {
-    payload = { ...request } as Record<string, unknown>;
+    payload = {
+      quote: request.quote,
+      tokenIn: request.tokenIn,
+      tokenOut: request.tokenOut,
+      amount: request.amount,
+      walletAddress: request.walletAddress,
+      chain: request.chain,
+    };
   }
 
   const res = await fetchApiResponseFromProxy<any>(endpoint, 'POST', payload);
@@ -136,7 +146,9 @@ export async function submit1InchFusionOrder(
     };
   } else {
     endpoint = `/swap/1inch/submitOrder`;
-    payload = request;
+    const orderPayload = { ...request };
+    delete orderPayload.permit;
+    payload = orderPayload;
   }
 
   const res = await fetchApiResponseFromProxy<any>(endpoint, 'POST', payload);

@@ -57,30 +57,42 @@ const NetworkSwitch: React.FC = () => {
     );
   }
 
+  const isTestnet = network === 'testnet';
+
   return (
     <div className="relative flex items-center">
-      <select
-        value={network}
-        onChange={e => handleNetworkChange(e.target.value as NetworkType)}
-        className="bg-[var(--color-bg-tertiary)]/60 hover:bg-[var(--color-bg-tertiary)] text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded-lg px-2.5 py-1.5 cursor-pointer outline-none transition-all appearance-none pr-6 select-none"
+      <div
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+          isTestnet
+            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+        }`}
       >
-        <option
-          value="mainnet"
-          className="bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]"
+        <span
+          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+            isTestnet ? 'bg-amber-400' : 'bg-emerald-400'
+          }`}
+        />
+        <select
+          value={network}
+          onChange={e => handleNetworkChange(e.target.value as NetworkType)}
+          className="bg-transparent text-xs font-semibold cursor-pointer outline-none appearance-none pr-3.5 text-inherit select-none"
         >
-          Mainnet
-        </option>
-        <option
-          value="testnet"
-          className="bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]"
-        >
-          Testnet
-        </option>
-      </select>
-      <ChevronDown
-        size={12}
-        className="absolute right-2 text-[var(--color-text-secondary)] pointer-events-none opacity-60"
-      />
+          <option
+            value="testnet"
+            className="bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]"
+          >
+            Testnet
+          </option>
+          <option
+            value="mainnet"
+            className="bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]"
+          >
+            Mainnet
+          </option>
+        </select>
+        <ChevronDown size={11} className="pointer-events-none opacity-70 shrink-0 -ml-2.5" />
+      </div>
     </div>
   );
 };

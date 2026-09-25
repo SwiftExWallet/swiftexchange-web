@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ROUTES } from '@/constants/routes';
+import { SWIFTEX_SOCIAL_LINKS } from '@/constants/socials';
 import { useAppAvailabilityStore } from '@/store/appAvailabilityStore';
 import { useGeolocationStore } from '@/store/geolocationStore';
 import type { ServiceStatusItem, ServiceStatusType } from '@/types/availability';
@@ -408,13 +409,30 @@ const StatusPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-[var(--color-border)]/30 text-xs">
-          <span className="text-[10.5px] font-mono text-[var(--color-text-muted)]">
-            SwiftEx Multi-Chain Protocol & Sentinel Telemetry
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-[var(--color-border)]/30 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-[10.5px] font-mono text-[var(--color-text-muted)]">
+              SwiftEx Multi-Chain Protocol & Sentinel Telemetry
+            </span>
+            <div className="flex items-center gap-2">
+              {SWIFTEX_SOCIAL_LINKS.map(item => (
+                <a
+                  key={item.id}
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`text-[var(--color-text-muted)] ${item.hoverColor} transition-all hover:scale-115 p-1`}
+                  title={`Official ${item.name}`}
+                  aria-label={item.name}
+                >
+                  {item.renderIcon('w-3.5 h-3.5')}
+                </a>
+              ))}
+            </div>
+          </div>
           <Link
             to={ROUTES.DASHBOARD}
-            className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors text-xs flex items-center gap-1"
+            className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors text-xs flex items-center gap-1 shrink-0"
           >
             ← Return to Dashboard
           </Link>

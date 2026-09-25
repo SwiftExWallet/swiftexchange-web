@@ -85,12 +85,12 @@ interface WalletActions {
 const getInitialNetwork = (): NetworkType => {
   if (!IS_TESTNET_ENABLED) return 'mainnet';
   if (!IS_MAINNET_ENABLED) return 'testnet';
-  if (typeof window === 'undefined') return 'mainnet';
+  if (typeof window === 'undefined') return 'testnet';
   try {
     const stored = localStorage.getItem('network');
-    return stored === 'testnet' ? 'testnet' : 'mainnet';
+    return stored === 'mainnet' ? 'mainnet' : 'testnet';
   } catch {
-    return 'mainnet';
+    return 'testnet';
   }
 };
 

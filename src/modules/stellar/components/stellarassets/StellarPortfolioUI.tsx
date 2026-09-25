@@ -1690,6 +1690,12 @@ const StellarPortfolioUI: React.FC = () => {
         totalPnL={stellarPnlData?.totalRealized ?? stellarPnlData?.totalPnL ?? 0}
         winRate={stellarPnlData?.winRate ?? 0}
         bestTrade={stellarPnlData?.bestTrade}
+        tradeCount={
+          stellarPnlData?.tradeCount ??
+          stellarPnlData?.collapsedCount ??
+          stellarPnlData?.trades?.length ??
+          0
+        }
         timeframe={
           stellarTimeframe === 'custom' ? `${fromDate || ''} - ${toDate || ''}` : stellarTimeframe
         }
