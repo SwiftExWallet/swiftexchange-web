@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useEffect } from 'react';
 
 import { getGlobalAssetMetadata } from '../../../utils/Chainregistry';
-import { isStellar } from '../utils/swapAssetUtils';
+import { isStellar, matchesAddress } from '../utils/swapAssetUtils';
 
 export interface UseStellarAssetsParams {
   fromChainId: number | string;
@@ -10,11 +10,12 @@ export interface UseStellarAssetsParams {
   ammService: any;
   stellarAddress: string;
   sellAssetSymbol: string;
+  sellAssetAddress?: string;
   buyAssetSymbol: string;
+  buyAssetAddress?: string;
   actionType: 'SWAP' | 'BRIDGE';
   isStellarAccountActive?: boolean | null;
   bridgeTxStatus: string;
-  /** Nonce bumped from outside to force a re-fetch (e.g. after a trustline is added). */
   trustlineRefreshNonce: number;
   setSellAssetSymbol: (s: string) => void;
   setSellAssetAddress: (s: string) => void;
@@ -27,12 +28,6 @@ export interface UseStellarAssetsResult {
   isFetchingStellarAssets: boolean;
 }
 
-/**
- * Fetches Stellar account balances and maps them to the unified asset shape.
- * Also handles default sell/buy asset selection for Stellar-to-Stellar swaps.
- *
- * Previously embedded as a `useEffect` block inside `SwapAssets.tsx`.
- */
 export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAssetsResult {
   const {
     fromChainId,
@@ -40,7 +35,9 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
     ammService,
     stellarAddress,
     sellAssetSymbol,
+    sellAssetAddress,
     buyAssetSymbol,
+    buyAssetAddress,
     actionType,
     isStellarAccountActive,
     bridgeTxStatus,
@@ -73,17 +70,30 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
             if (b.code === 'XLM') {
               balanceToUse = Math.max(0, parseFloat(b.balance || '0') - reserve).toString();
             }
+            const isNative =
+              typeof b.asset?.isNative === 'function' ? b.asset.isNative() : b.code === 'XLM';
+            const address = isNative
+              ? 'native'
+              : typeof b.asset?.getIssuer === 'function'
+                ? b.asset.getIssuer()
+                : b.issuer || b.contract;
+            const contract = b.contract || (address?.startsWith('C') ? address : undefined);
+
             return {
-              id: `stellar-${fromChainId}-${b.code}`,
+              id: `stellar-${fromChainId}-${b.code}-${isNative ? 'native' : contract || address || ''}`,
               symbol: b.code,
               name: b.name || b.code,
               logoURI: b.icon || getGlobalAssetMetadata(b.code)?.logoURI,
               balance: balanceToUse,
               decimals: b.decimals || 7,
-              isNative: b.asset.isNative(),
+              isNative,
               asset: b.asset,
               chainId: fromChainId,
-              address: b.asset.isNative() ? 'native' : b.asset.getIssuer(),
+              address,
+              contract,
+              contractAddress: contract,
+              issuer: b.issuer || (!isNative && address?.startsWith('G') ? address : undefined),
+              domain: b.domain || b.homeDomain,
               hasTrustline: b.hasTrustline,
             };
           });
@@ -91,23 +101,33 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
 
           // Default asset selection for Stellar-to-Stellar swaps
           if (actionType === 'SWAP' && isStellar(fromChainId)) {
-            const currentSellInStellar = mapped.find((t: any) => t.symbol === sellAssetSymbol);
-            const currentBuyInStellar = mapped.find((t: any) => t.symbol === buyAssetSymbol);
+            const currentSellInStellar = sellAssetAddress
+              ? mapped.find((t: any) => matchesAddress(t, sellAssetAddress))
+              : mapped.find((t: any) => t.symbol === sellAssetSymbol);
+            const currentBuyInStellar = buyAssetAddress
+              ? mapped.find((t: any) => matchesAddress(t, buyAssetAddress))
+              : mapped.find((t: any) => t.symbol === buyAssetSymbol);
 
             let finalSellSymbol = sellAssetSymbol;
 
             if (!currentSellInStellar && mapped.length > 0) {
               const defaultSell = mapped.find((t: any) => t.symbol === 'XLM') || mapped[0];
+              const effAddr = defaultSell.isNative
+                ? 'native'
+                : defaultSell.contract || defaultSell.address || defaultSell.issuer || '';
               setSellAssetSymbol(defaultSell.symbol);
-              setSellAssetAddress(defaultSell.address || '');
+              setSellAssetAddress(effAddr);
               finalSellSymbol = defaultSell.symbol;
             }
 
             if ((!currentBuyInStellar || finalSellSymbol === buyAssetSymbol) && mapped.length > 1) {
               const defaultBuy = mapped.find((t: any) => t.symbol !== finalSellSymbol) || mapped[1];
               if (defaultBuy) {
+                const effAddr = defaultBuy.isNative
+                  ? 'native'
+                  : defaultBuy.contract || defaultBuy.address || defaultBuy.issuer || '';
                 setBuyAssetSymbol(defaultBuy.symbol);
-                setBuyAssetAddress(defaultBuy.address || '');
+                setBuyAssetAddress(effAddr);
               }
             }
           }
@@ -126,11 +146,13 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
     stellarAddress,
     ammService,
     sellAssetSymbol,
+    sellAssetAddress,
+    buyAssetSymbol,
+    buyAssetAddress,
     actionType,
     isStellarAccountActive,
     bridgeTxStatus,
     trustlineRefreshNonce,
-    // Setters are stable Zustand references — safe to omit from deps, but listed for clarity
     setSellAssetSymbol,
     setSellAssetAddress,
     setBuyAssetSymbol,

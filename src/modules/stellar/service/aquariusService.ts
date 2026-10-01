@@ -18,6 +18,14 @@ export const AQUARIUS_TESTNET_ROUTER =
 export const AQUARIUS_API_URL =
   import.meta.env.VITE_AQUARIUS_API_URL || 'https://amm-api.aqua.network/api/external/v2';
 
+export const SOROBAN_MAINNET_RPC_URLS = [
+  import.meta.env.VITE_SOROBAN_MAINNET_RPC_URL || 'https://mainnet.sorobanrpc.com',
+];
+
+export const SOROBAN_TESTNET_RPC_URLS = [
+  import.meta.env.VITE_SOROBAN_TESTNET_RPC_URL || 'https://soroban-testnet.stellar.org',
+];
+
 export interface AquariusFindPathResponse {
   success: boolean;
   amount?: number;
@@ -38,7 +46,7 @@ export class AquariusService {
   constructor(horizonUrl?: string, networkPassphrase?: string) {
     const isTestnet =
       getCurrentNetwork() === 'testnet' ||
-      (networkPassphrase && networkPassphrase.includes('Test SDF Network'));
+      (networkPassphrase && networkPassphrase.includes(StellarSDK.Networks.TESTNET));
     const config = getStellarConfig(isTestnet ? 'testnet' : 'mainnet');
 
     this.isTestnet = !!isTestnet;
@@ -151,9 +159,6 @@ export class AquariusService {
     };
   }
 
-  /**
-   * Build the transaction calling swap_chained on the Aquarius router contract.
-   */
   async buildSwapTransaction(
     userAddress: string,
     quote: SwapQuote,
@@ -182,29 +187,61 @@ export class AquariusService {
       .integerValue()
       .toFixed(0);
 
-    const amountInScVal = StellarSDK.nativeToScVal(BigInt(amountInSmallest), { type: 'i128' });
-    const minOutScVal = StellarSDK.nativeToScVal(BigInt(minOutSmallest), { type: 'i128' });
+    const tokenInContractId = this.getContractId(quote.fromAsset);
+    const tokenInScVal = new StellarSDK.Address(tokenInContractId).toScVal();
+    const amountInScVal = StellarSDK.nativeToScVal(BigInt(amountInSmallest), { type: 'u128' });
+    const minOutScVal = StellarSDK.nativeToScVal(BigInt(minOutSmallest), { type: 'u128' });
     const swapChainScVal = StellarSDK.xdr.ScVal.fromXDR(quote.swapChainXdr, 'base64');
 
     const op = routerContract.call(
       'swap_chained',
       userScVal,
+      swapChainScVal,
+      tokenInScVal,
       amountInScVal,
-      minOutScVal,
-      swapChainScVal
+      minOutScVal
     );
 
     const txBuilder = new StellarSDK.TransactionBuilder(account, {
-      fee: (options.fee || '100000').toString(), // 0.01 XLM standard Soroban fee headroom
+      fee: (options.fee || '100000').toString(),
       networkPassphrase: this.networkPassphrase,
     });
     txBuilder.addOperation(op);
-    txBuilder.setTimeout(options.timeout ?? 60);
+    txBuilder.setTimeout(options.timeout ?? 300);
 
-    const tx = txBuilder.build();
+    const rawTx = txBuilder.build();
+
+    const rpcUrls = this.isTestnet ? SOROBAN_TESTNET_RPC_URLS : SOROBAN_MAINNET_RPC_URLS;
+    let simResponse: any = null;
+    let simError: string | null = null;
+
+    for (const rpcUrl of rpcUrls) {
+      try {
+        const rpcServer = new StellarSDK.rpc.Server(rpcUrl);
+        const res = await rpcServer.simulateTransaction(rawTx);
+        if (StellarSDK.rpc.Api.isSimulationSuccess(res)) {
+          simResponse = res;
+          break;
+        } else {
+          simError =
+            (res as any)?.error ||
+            (res as any)?.result?.error ||
+            'Soroban simulation rejected by network';
+        }
+      } catch (err) {
+        simError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    if (!simResponse) {
+      throw new Error(simError || 'Failed to simulate Aquarius swap on Soroban RPC');
+    }
+
+    const assembledTx = StellarSDK.rpc.assembleTransaction(rawTx, simResponse).build();
+
     return {
-      xdr: tx.toXDR(),
-      transaction: tx,
+      xdr: assembledTx.toXDR(),
+      transaction: assembledTx,
       isAquarius: true,
     };
   }

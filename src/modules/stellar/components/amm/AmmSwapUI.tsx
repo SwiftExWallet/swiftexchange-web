@@ -12,6 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 
 // import InfoBanner from '../../../../components/common/InfoBanner';
 import { useTransactionModalStore } from '../../../../store/transactionModalStore';
+import { storeSwapOrder } from '../../../evm/service/evmTransactionStatusService';
 import { getTokenIcon } from '../../../evm/utils/ChainUrlHelpers';
 import { getChainById } from '../../../evm/utils/Chainregistry';
 import { useIsMobile } from '../../../perps/components/chart/hooks/useIsMobile';
@@ -188,6 +189,23 @@ const AmmSwapUI = () => {
       }
 
       const txHash = await executeSwapWithWalletConnect(tx, provider);
+
+      try {
+        await storeSwapOrder({
+          txHash,
+          walletAddress: stellarAddress,
+          provider: 'STELLAR',
+          fromChain: 'STR',
+          toChain: 'STR',
+          fromToken: fromToken.code,
+          toToken: toToken.code,
+          amountIn: fromAmount,
+          amountOut: toAmount || '0',
+          txType: 'Swap',
+        });
+      } catch (err) {
+        console.error('Failed to store stellar swap order on backend:', err);
+      }
 
       useTransactionModalStore.getState().openModal({
         status: 'success',

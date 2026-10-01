@@ -29,6 +29,8 @@ export interface ChainAsset {
   pairs?: AssetPair[];
   isNative?: boolean;
   domain?: string;
+  contract?: string;
+  issuer?: string | null;
 }
 
 export interface NativeCurrency {
@@ -109,8 +111,8 @@ const BY_SLUG = new Map<string, ChainConfig>(
   CHAIN_REGISTRY.map(c => [`${c.slug}:${c.networkType}`, c])
 );
 
-const CACHE_KEY_PREFIX = 'swift_token_cache_v2_';
-const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+const CACHE_KEY_PREFIX = 'swift_token_cache_v3_';
+const CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 
 interface TokenCache {
   timestamp: number;
@@ -120,12 +122,23 @@ interface TokenCache {
 function getCachedTokenList(chainId: number | string): ChainAsset[] | null {
   if (typeof localStorage === 'undefined') return null;
   try {
+    localStorage.removeItem(`swift_token_cache_v2_${chainId}`);
     const cached = localStorage.getItem(`${CACHE_KEY_PREFIX}${chainId}`);
     if (!cached) return null;
 
     const { timestamp, assets } = JSON.parse(cached) as TokenCache;
     if (Date.now() - timestamp > CACHE_TTL) {
-      return null; // Expired
+      return null;
+    }
+
+    const isCorrupted = assets.some(
+      a =>
+        a.symbol?.toUpperCase() !== 'XLM' &&
+        (a.isNative || a.type === 'NATIVE' || a.address === NATIVE_ADDRESS)
+    );
+    if (isCorrupted) {
+      localStorage.removeItem(`${CACHE_KEY_PREFIX}${chainId}`);
+      return null;
     }
 
     return assets;
@@ -241,7 +254,12 @@ export function getAssetByAddress(
     };
   }
 
-  const found = chain.assets.find(a => a.address.toLowerCase() === addr);
+  const found = chain.assets.find(
+    a =>
+      a.address?.toLowerCase() === addr ||
+      a.contract?.toLowerCase() === addr ||
+      a.issuer?.toLowerCase() === addr
+  );
   if (found) return found;
 
   return undefined;
@@ -381,8 +399,23 @@ export function registerDynamicAssets(
   const chain = getChainById(chainId);
   if (!chain) return;
 
-  const existingAddresses = new Set(chain.assets.map(a => a.address.toLowerCase()));
-  const assetsToAdd = newAssets.filter(a => !existingAddresses.has(a.address.toLowerCase()));
+  const existingKeys = new Set(
+    chain.assets.map(a =>
+      a.isNative || a.type === 'NATIVE'
+        ? `NATIVE:${a.symbol.toUpperCase()}`
+        : `${a.symbol.toUpperCase()}:${(a.address || a.contract || '').toLowerCase()}`
+    )
+  );
+
+  const assetsToAdd = newAssets.filter(a => {
+    const isNat = a.isNative || a.type === 'NATIVE';
+    const key = isNat
+      ? `NATIVE:${a.symbol.toUpperCase()}`
+      : `${a.symbol.toUpperCase()}:${(a.address || a.contract || '').toLowerCase()}`;
+    if (existingKeys.has(key)) return false;
+    existingKeys.add(key);
+    return true;
+  });
 
   if (assetsToAdd.length === 0 && !newTokens) return chain;
 
@@ -439,32 +472,47 @@ export async function initDynamicTokenLists() {
         }
 
         let dynamicAssets: ChainAsset[] = [];
-        if (
-          Array.isArray(tokens?.assets) &&
-          (chain.chainId === 'pubnet' || chain.chainId === 'testnet')
-        ) {
-          dynamicAssets = tokens.assets
-            .filter((asset: any) => asset && (asset.code || asset.name))
+        const stellarList = Array.isArray(tokens?.assets)
+          ? tokens.assets
+          : Array.isArray(tokens) && (chain.chainId === 'pubnet' || chain.chainId === 'testnet')
+            ? tokens
+            : null;
+
+        if (stellarList && (chain.chainId === 'pubnet' || chain.chainId === 'testnet')) {
+          dynamicAssets = stellarList
+            .filter((asset: any) => asset && (asset.code || asset.name || asset.symbol))
             .map((asset: any) => {
-              const isNative = !asset.issuer || asset.issuer === 'native' || asset.code === 'XLM';
+              const code = (asset.code || asset.symbol || '').trim();
+              const isNative =
+                code.toUpperCase() === 'XLM' && (!asset.issuer || asset.issuer === 'native');
+              const address = isNative
+                ? NATIVE_ADDRESS
+                : asset.issuer || asset.contract || NATIVE_ADDRESS;
+              const contract = asset.contract || undefined;
+              const issuer = asset.issuer || undefined;
+
               return {
-                asset: isNative ? 'XLM' : `${asset.code}-${asset.issuer}`,
+                asset: isNative ? 'XLM' : `${code}-${address}`,
                 type: isNative ? 'NATIVE' : 'STELLAR',
-                address: isNative ? NATIVE_ADDRESS : asset.issuer,
-                name: asset.name || asset.code,
-                symbol: asset.code,
+                address,
+                contract,
+                issuer,
+                name: asset.name || code,
+                symbol: code,
                 decimals: asset.decimals ?? 7,
                 logoURI:
                   asset.icon ||
-                  (asset.code
-                    ? `${chain.chainId === 'testnet' ? RESOURCE_BASE_URL_TESTNET : RESOURCE_BASE_URL_MAINNET}/stellar/${asset.code}.png`
-                    : undefined),
-                domain: asset.domain,
+                  asset.logoURI ||
+                  (code
+                    ? `${chain.chainId === 'testnet' ? RESOURCE_BASE_URL_TESTNET : RESOURCE_BASE_URL_MAINNET}/stellar/${code}.png`
+                    : ''),
+                domain: asset.domain || '',
+                isNative,
               };
             });
 
           const hasNative = dynamicAssets.some(
-            a => a.symbol.toUpperCase() === chain.nativeCurrency.symbol.toUpperCase()
+            (a: ChainAsset) => a.symbol.toUpperCase() === chain.nativeCurrency.symbol.toUpperCase()
           );
           if (!hasNative && chain.nativeToken) {
             dynamicAssets.unshift({

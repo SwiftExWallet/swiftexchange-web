@@ -162,9 +162,10 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   ]);
 
   const nativeSymbol = useMemo(() => {
+    if (isStellar(fromChainId)) return 'XLM';
     const nativeAsset = swapAssets.find(a => a.isNative);
     return nativeAsset?.symbol || 'ETH';
-  }, [swapAssets]);
+  }, [fromChainId, swapAssets]);
 
   const errorMessage = useMemo(() => {
     if (

@@ -244,9 +244,14 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
         // Tier 1: Soroswap
         if (soroswapService) {
           try {
-            swapQuote = await soroswapService.getQuote(fromToken.asset, toToken.asset, fromAmount, {
-              slippageTolerance,
-            });
+            swapQuote = await soroswapService.getQuote(
+              (fromToken as any)?.contract || fromToken.asset,
+              (toToken as any)?.contract || toToken.asset,
+              fromAmount,
+              {
+                slippageTolerance,
+              }
+            );
             if (swapQuote) swapQuote.source = 'SOROSWAP';
           } catch (err: any) {
             console.warn(
@@ -332,9 +337,14 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
       // Tier 1: Soroswap
       if (soroswapService) {
         try {
-          swapQuote = await soroswapService.getQuote(fromToken.asset, toToken.asset, fromAmount, {
-            slippageTolerance,
-          });
+          swapQuote = await soroswapService.getQuote(
+            (fromToken as any)?.contract || fromToken.asset,
+            (toToken as any)?.contract || toToken.asset,
+            fromAmount,
+            {
+              slippageTolerance,
+            }
+          );
           if (swapQuote) swapQuote.source = 'SOROSWAP';
         } catch (soroErr) {
           console.warn('[useAmmSwap] Soroswap refresh failed, checking Aquarius:', soroErr);
@@ -436,8 +446,10 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
 
     try {
       if (quote.source === 'SOROSWAP' && soroswapService && fromToken && toToken) {
-        const assetIn = soroswapService.getContractId(fromToken.asset);
-        const assetOut = soroswapService.getContractId(toToken.asset);
+        const assetIn = soroswapService.getContractId(
+          (fromToken as any)?.contract || fromToken.asset
+        );
+        const assetOut = soroswapService.getContractId((toToken as any)?.contract || toToken.asset);
         const prepared = await soroswapService.prepareSwap({
           assetIn,
           assetOut,

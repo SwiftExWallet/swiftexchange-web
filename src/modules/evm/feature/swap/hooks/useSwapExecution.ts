@@ -202,8 +202,12 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
 
       if (isSoroswap) {
         soroService = new SoroswapService(ammService.horizonUrl, ammService.networkPassphrase);
-        const assetIn = soroService.getContractId(quote.data.fromAsset);
-        const assetOut = soroService.getContractId(quote.data.toAsset);
+        const assetIn = soroService.getContractId(
+          (selectedSellAsset as any)?.contract || quote.data.fromAsset
+        );
+        const assetOut = soroService.getContractId(
+          (selectedBuyAsset as any)?.contract || quote.data.toAsset
+        );
         const prepared = await soroService.prepareSwap({
           assetIn,
           assetOut,
@@ -247,6 +251,25 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
           hash = await aquaService.executeSwap(tx.xdr, provider, stellarAddress);
         } else {
           hash = await ammService.executeSwapWithWalletConnect(tx, provider);
+        }
+
+        if (hash) {
+          try {
+            await storeSwapOrder({
+              txHash: hash,
+              walletAddress: stellarAddress,
+              provider: 'STELLAR',
+              fromChain: isSoroswap ? 'SRB' : 'STR',
+              toChain: isSoroswap ? 'SRB' : 'STR',
+              fromToken: sellAssetSymbol,
+              toToken: buyAssetSymbol,
+              amountIn: sellAmount,
+              amountOut: computedOutAmount || '0',
+              txType: 'Swap',
+            });
+          } catch (err) {
+            console.error('Failed to store stellar swap order on backend:', err);
+          }
         }
         const wasTracked = hash ? trackDydxIntent(hash, computedOutAmount) : false;
         handleReset();
@@ -521,20 +544,20 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
 
       if (hash) {
         storeSwapOrder({
-          txHash: hash, // use the actual on-chain tx hash, not the deposit address
+          txHash: liveQuote?.depositAddress || hash,
           walletAddress: evmAddress || stellarAddress,
           provider: 'NEARINTENT',
           memo: isStellarOrigin ? liveQuote.depositMemo : undefined,
           fromChain: getChainById(fromChainId)?.symbol || String(fromChainId),
-          fromAddress: isStellarOrigin ? stellarAddress : evmAddress,
           fromToken: sellAssetSymbol,
           toChain: getChainById(toChainId)?.symbol || String(toChainId),
-          toAddress: isStellarDest ? stellarAddress : evmAddress,
           toToken: buyAssetSymbol,
           amountIn: sellAmount,
           amountOut: computedOutAmount,
           txType: 'Bridge',
-        }).catch(() => {});
+        }).catch(err => {
+          console.error('Failed to store near intent bridge order on backend:', err);
+        });
       }
 
       if (isStellar(toChainId) && isStellarAccountActive === false) {
@@ -662,50 +685,22 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         return;
       }
 
-      if (!isGasless && !isStellar(fromChainId) && evmAddress) {
-        try {
-          const chainConfig = getEVMNetworkConfig(fromChainId);
-          const nativeSymbol = chainConfig.nativeCurrency.symbol;
-          const storeAssets = usePortfolioStore.getState().assets;
-          const nativeAsset = storeAssets.find(
-            (a: any) => String(a.chainId) === String(fromChainId) && a.isNative
-          );
-          const nativeBalance = parseFloat(nativeAsset?.balance?.toString() || '0');
-
-          if (nativeBalance <= 0) {
-            const errMsg = `Insufficient ${nativeSymbol} to pay gas. Please top up and try again.`;
-            setBridgeErrorMsg(errMsg);
-            setBridgeTxStatus('error');
-            showToast({
-              type: 'EVM_SWAP',
-              title: 'Insufficient Gas',
-              message: errMsg,
-              dontSave: true,
-            });
-            resetLoadingState();
-            return;
-          }
-
-          // Removed: dummy self-tx simulation (to=self, value=0, data=0x) always succeeded
-          // regardless of swap tx complexity, giving false gas-sufficiency confidence.
-          // The wallet provider's own gas estimation handles this when performSwap runs.
-        } catch (gasErr: any) {
-          // keep the outer balance-zero check above; skip simulation errors
-          void gasErr;
-        }
-      }
-
-      // --- NEW ACTIVATION & TRUSTLINE LOGIC ---
-      const isSettingTrustline =
-        !isStellar(fromChainId) &&
-        isStellar(toChainId) &&
-        isStellarAccountActive !== false &&
+      const isBuyClassic =
         selectedBuyAsset &&
         !(selectedBuyAsset as any).isNative &&
+        Boolean(
+          (selectedBuyAsset as any).issuer?.startsWith('G') ||
+          ((selectedBuyAsset as any).address?.startsWith('G') &&
+            !(selectedBuyAsset as any).address?.startsWith('C'))
+        );
+
+      const isSettingTrustline =
+        isStellar(toChainId) &&
+        isStellarAccountActive !== false &&
+        isBuyClassic &&
         !(selectedBuyAsset as any).hasTrustline;
 
       if (isSettingTrustline) {
-        // Perform Trustline Setup Only
         setExecutionCurrentStep('setting_trustline');
         setBridgeTxStatus('preparing');
         setIsWaitingForWallet(true);
@@ -714,12 +709,23 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
           const server = new Horizon.Server(stellarConfig.horizonUrl);
           const stellarProvider = getProvider(WalletType.STELLAR);
           const buyAssetIssuer =
-            (selectedBuyAsset as any)?.issuer || (selectedBuyAsset as any)?.address;
+            (selectedBuyAsset as any)?.issuer ||
+            ((selectedBuyAsset as any)?.address?.startsWith('G')
+              ? (selectedBuyAsset as any).address
+              : undefined);
+
+          if (!buyAssetIssuer) {
+            throw new Error('Missing issuer for Stellar asset trustline.');
+          }
+
+          const rawCode = buyAssetSymbol.includes('-')
+            ? buyAssetSymbol.split('-')[0]
+            : buyAssetSymbol;
 
           const xdr = await buildTrustlineTransaction({
             server,
             stellarAddress,
-            assetCode: buyAssetSymbol,
+            assetCode: rawCode,
             assetIssuer: buyAssetIssuer,
             currentNetwork,
           });
@@ -747,7 +753,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
           showToast({
             type: 'STELLAR',
             title: 'Trustline Added',
-            message: `Trustline created for ${buyAssetSymbol}. You can now execute your swap!`,
+            message: `Trustline created for ${rawCode}. You can now execute your swap!`,
           });
           openModal({
             status: 'success',
@@ -755,14 +761,41 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
             hash: trustlineResult.transactionHash,
             isStellar: true,
           });
-          return; // STOP execution here, don't execute the main swap.
+          return;
         } catch (err: any) {
           setIsWaitingForWallet(false);
           if ((err as any)?.name === 'AbortError') throw err;
           throw new Error(`Trustline setup failed: ${err.message}`);
         }
       }
-      // --- END ACTIVATION LOGIC ---
+
+      if (!isGasless && !isStellar(fromChainId) && evmAddress) {
+        try {
+          const chainConfig = getEVMNetworkConfig(fromChainId);
+          const nativeSymbol = chainConfig.nativeCurrency.symbol;
+          const storeAssets = usePortfolioStore.getState().assets;
+          const nativeAsset = storeAssets.find(
+            (a: any) => String(a.chainId) === String(fromChainId) && a.isNative
+          );
+          const nativeBalance = parseFloat(nativeAsset?.balance?.toString() || '0');
+
+          if (nativeBalance <= 0) {
+            const errMsg = `Insufficient ${nativeSymbol} to pay gas. Please top up and try again.`;
+            setBridgeErrorMsg(errMsg);
+            setBridgeTxStatus('error');
+            showToast({
+              type: 'EVM_SWAP',
+              title: 'Insufficient Gas',
+              message: errMsg,
+              dontSave: true,
+            });
+            resetLoadingState();
+            return;
+          }
+        } catch (gasErr: any) {
+          void gasErr;
+        }
+      }
 
       if (actionType === 'SWAP') {
         if (!quoteSnapshot.data) {

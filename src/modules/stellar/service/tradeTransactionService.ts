@@ -484,8 +484,9 @@ export class TradeTransactionService {
 
   async getAllOperations(
     accountId: string,
-    limit: number = 20,
-    cursor?: string
+    limit: number = 50,
+    cursor?: string,
+    category: 'ALL' | 'PAYMENTS' = 'ALL'
   ): Promise<{
     operations: any[];
     nextCursor?: string;
@@ -496,9 +497,13 @@ export class TradeTransactionService {
     }
 
     try {
-      const response = await this.server
-        .operations()
-        .forAccount(accountId)
+      const callBuilder =
+        category === 'PAYMENTS'
+          ? this.server.payments().forAccount(accountId)
+          : this.server.operations().forAccount(accountId);
+
+      const response = await callBuilder
+        .join('transactions')
         .limit(limit)
         .cursor(cursor || '')
         .order('desc')

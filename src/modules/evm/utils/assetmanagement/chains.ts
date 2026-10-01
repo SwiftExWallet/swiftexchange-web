@@ -320,16 +320,7 @@ export const STR_TESTNET = {
   subName: 'Testnet',
   bridgeSupportTokens: [
     {
-      name: 'Stellar Lumens',
-      symbol: 'XLM',
-      address: 'native',
-      chainId: 'testnet',
-      decimals: 7,
-      logoURI:
-        'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/stellar/info/logo.png',
-    },
-    {
-      name: 'USD Coin (Testnet)',
+      name: 'USD Coin',
       symbol: 'USDC',
       address: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
       chainId: 'testnet',
@@ -338,12 +329,13 @@ export const STR_TESTNET = {
         'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
     },
     {
-      name: 'STAK Coin (Testnet)',
-      symbol: 'STAK',
-      address: 'GCVM2EPORQIRS24VBTXINTSLX2G55BBKIHOBCBG763OJBLJKIHJ7FCG2',
+      name: 'Stellar',
+      symbol: 'XLM',
+      address: 'native',
       chainId: 'testnet',
       decimals: 7,
-      logoURI: 'https://stellar.myfilebase.com/ipfs/QmSTXU2wn1USnmd5ZypA5zMze259wEPSDP3i8wivyr9qiq',
+      logoURI:
+        'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/stellar/info/logo.png',
     },
   ],
 };

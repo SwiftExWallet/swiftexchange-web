@@ -198,7 +198,9 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     ammService,
     stellarAddress,
     sellAssetSymbol,
+    sellAssetAddress,
     buyAssetSymbol,
+    buyAssetAddress,
     actionType,
     isStellarAccountActive,
     bridgeTxStatus,
@@ -211,21 +213,17 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
   const selectedSellAsset = useMemo(() => {
     if (isStellar(fromChainId)) {
-      const stellarMatch = stellarAssets.find((a: any) =>
-        sellAssetAddress
-          ? matchesAddress(a, sellAssetAddress) || a.symbol === sellAssetSymbol
-          : a.symbol === sellAssetSymbol
-      );
+      const stellarMatch = sellAssetAddress
+        ? stellarAssets.find((a: any) => matchesAddress(a, sellAssetAddress))
+        : stellarAssets.find((a: any) => a.symbol === sellAssetSymbol);
       if (stellarMatch) return stellarMatch;
       const chainAssets = getAssetsForChain(fromChainId);
-      const chainAsset = chainAssets.find((a: any) =>
-        sellAssetAddress
-          ? matchesAddress(a, sellAssetAddress) || a.symbol === sellAssetSymbol
-          : a.symbol === sellAssetSymbol
-      );
+      const chainAsset = sellAssetAddress
+        ? chainAssets.find((a: any) => matchesAddress(a, sellAssetAddress))
+        : chainAssets.find((a: any) => a.symbol === sellAssetSymbol);
       if (chainAsset) {
         return {
-          id: `stellar-${fromChainId}-${chainAsset.symbol}`,
+          id: `stellar-${fromChainId}-${chainAsset.symbol}-${chainAsset.address || ''}`,
           symbol: chainAsset.symbol,
           name: chainAsset.name || chainAsset.symbol,
           logoURI: chainAsset.logoURI || getGlobalAssetMetadata(chainAsset.symbol)?.logoURI,
@@ -234,6 +232,8 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           isNative: chainAsset.isNative,
           chainId: fromChainId,
           address: chainAsset.address,
+          contract: (chainAsset as any).contract,
+          issuer: (chainAsset as any).issuer,
         };
       }
       if (sellAssetSymbol) {
@@ -277,9 +277,14 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
     if (sellAssetSymbol) {
       const chainConfig = getChainById(fromChainId);
-      const isNativeCurrency =
-        chainConfig?.nativeCurrency?.symbol.toUpperCase() === sellAssetSymbol.toUpperCase() ||
-        ['ETH', 'MATIC', 'POL', 'BNB', 'AVAX'].includes(sellAssetSymbol.toUpperCase());
+      const nativeSymbol = (
+        chainConfig?.nativeCurrency?.symbol ||
+        (chainConfig as any)?.symbol ||
+        ''
+      )?.toUpperCase();
+      const isNativeCurrency = Boolean(
+        nativeSymbol && nativeSymbol === sellAssetSymbol.toUpperCase()
+      );
 
       const isExplicitlyNative =
         sellAssetAddress &&
@@ -302,7 +307,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           : knownTokenAddr || '';
 
       const isStable = ['USDC', 'USDT'].includes(sellAssetSymbol.toUpperCase());
-      const decimals = isNative ? 18 : isStable ? 6 : 18;
+      const decimals = isNative ? (chainConfig?.nativeCurrency?.decimals ?? 18) : isStable ? 6 : 18;
 
       return {
         id: `evm-${fromChainId}-${sellAssetSymbol}`,
@@ -321,21 +326,17 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
   const selectedBuyAsset = useMemo(() => {
     if (isStellar(toChainId)) {
-      const stellarMatch = stellarAssets.find((a: any) =>
-        buyAssetAddress
-          ? matchesAddress(a, buyAssetAddress) || a.symbol === buyAssetSymbol
-          : a.symbol === buyAssetSymbol
-      );
+      const stellarMatch = buyAssetAddress
+        ? stellarAssets.find((a: any) => matchesAddress(a, buyAssetAddress))
+        : stellarAssets.find((a: any) => a.symbol === buyAssetSymbol);
       if (stellarMatch) return stellarMatch;
       const chainAssets = getAssetsForChain(toChainId);
-      const chainAsset = chainAssets.find((a: any) =>
-        buyAssetAddress
-          ? matchesAddress(a, buyAssetAddress) || a.symbol === buyAssetSymbol
-          : a.symbol === buyAssetSymbol
-      );
+      const chainAsset = buyAssetAddress
+        ? chainAssets.find((a: any) => matchesAddress(a, buyAssetAddress))
+        : chainAssets.find((a: any) => a.symbol === buyAssetSymbol);
       if (chainAsset) {
         return {
-          id: `stellar-${toChainId}-${chainAsset.symbol}`,
+          id: `stellar-${toChainId}-${chainAsset.symbol}-${chainAsset.address || ''}`,
           symbol: chainAsset.symbol,
           name: chainAsset.name || chainAsset.symbol,
           logoURI: chainAsset.logoURI || getGlobalAssetMetadata(chainAsset.symbol)?.logoURI,
@@ -344,6 +345,8 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           isNative: chainAsset.isNative,
           chainId: toChainId,
           address: chainAsset.address,
+          contract: (chainAsset as any).contract,
+          issuer: (chainAsset as any).issuer,
         };
       }
       if (buyAssetSymbol) {
@@ -403,9 +406,14 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
     if (buyAssetSymbol) {
       const chainConfig = getChainById(toChainId);
-      const isNativeCurrency =
-        chainConfig?.nativeCurrency?.symbol.toUpperCase() === buyAssetSymbol.toUpperCase() ||
-        ['ETH', 'MATIC', 'POL', 'BNB', 'AVAX'].includes(buyAssetSymbol.toUpperCase());
+      const nativeSymbol = (
+        chainConfig?.nativeCurrency?.symbol ||
+        (chainConfig as any)?.symbol ||
+        ''
+      )?.toUpperCase();
+      const isNativeCurrency = Boolean(
+        nativeSymbol && nativeSymbol === buyAssetSymbol.toUpperCase()
+      );
 
       const isExplicitlyNative =
         buyAssetAddress &&
@@ -428,7 +436,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
           : knownTokenAddr || '';
 
       const isStable = ['USDC', 'USDT'].includes(buyAssetSymbol.toUpperCase());
-      const decimals = isNative ? 18 : isStable ? 6 : 18;
+      const decimals = isNative ? (chainConfig?.nativeCurrency?.decimals ?? 18) : isStable ? 6 : 18;
 
       return {
         id: `evm-${toChainId}-${buyAssetSymbol}`,
@@ -1044,7 +1052,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   return (
     <PageLayout
       title={swapTab === 'cctp' ? 'Circle CCTP Bridge' : 'Token Swap'}
-      subtitle={swapTab === 'cctp' ? 'Ethereum ↔ Stellar' : 'Swap & Bridge'}
+      subtitle={swapTab === 'cctp' ? 'Native Cross-Chain USDC (EVM ↔ Stellar)' : 'Swap & Bridge'}
       onBack={onClose}
       showBackButton={!!onClose}
       maxWidth="lg"
@@ -1220,8 +1228,12 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                       const targetChainId = isStellar(a.chainId)
                         ? stellarTargetId
                         : Number(a.chainId);
+                      const isNat = !!a.isNative || a.symbol === 'XLM';
+                      const effAddress = isNat
+                        ? 'native'
+                        : a.contract || a.address || a.issuer || '';
                       setSellAssetSymbol(a.symbol);
-                      setSellAssetAddress(a.address || '');
+                      setSellAssetAddress(effAddress);
                       try {
                         await handleChainSelectInModal(targetChainId, true);
                       } catch (err) {
@@ -1370,8 +1382,12 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                       const targetChainId = isStellar(a.chainId)
                         ? stellarTargetId
                         : Number(a.chainId);
+                      const isNat = !!a.isNative || a.symbol === 'XLM';
+                      const effAddress = isNat
+                        ? 'native'
+                        : a.contract || a.address || a.issuer || '';
                       setBuyAssetSymbol(a.symbol);
-                      setBuyAssetAddress(a.address || '');
+                      setBuyAssetAddress(effAddress);
                       handleChainSelectInModal(targetChainId, false);
                     },
                   })

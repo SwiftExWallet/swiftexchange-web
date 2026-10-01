@@ -14,6 +14,8 @@ export interface TokenInfo {
   balance?: string;
   isNative?: boolean;
   type?: string;
+  contract?: string;
+  issuer?: string;
 }
 
 export interface ChainNativeConfig {
@@ -41,10 +43,12 @@ export function getTokensForChain(chainId: number | string): TokenInfo[] {
   if (chainId === 'pubnet' || chainId === 'testnet' || chainId === 'stellar') {
     const stellarAssets = chainConfig.assets || [];
     return stellarAssets.map(t => {
-      const isNative = isNativeAddress(t.address) || t.type === 'NATIVE' || t.symbol === 'XLM';
+      const isNative = t.symbol?.toUpperCase() === 'XLM' && (!t.issuer || t.issuer === 'native');
       return {
         chainId: (t as any).chainId || chainId,
         address: t.address,
+        contract: (t as any).contract,
+        issuer: (t as any).issuer,
         name: t.name || t.symbol,
         symbol: t.symbol,
         decimals: t.decimals || 7,

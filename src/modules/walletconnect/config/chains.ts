@@ -1,3 +1,5 @@
+import { Networks } from '@stellar/stellar-sdk';
+
 import { getEvmChainsForNetwork } from '../../evm/utils/Chainregistry';
 
 export interface EVMChainConfig {
@@ -52,7 +54,7 @@ export const getEVMChains = (network: NetworkType): EVMChainConfig[] => {
 
 export const STELLAR_CONFIG_MAINNET: StellarChainConfig = {
   network: 'PUBLIC',
-  networkPassphrase: 'Public Global Stellar Network ; September 2015',
+  networkPassphrase: Networks.PUBLIC,
   horizonUrl: 'https://horizon.stellar.org',
   chainId: 'pubnet',
   logoUrl:
@@ -61,7 +63,7 @@ export const STELLAR_CONFIG_MAINNET: StellarChainConfig = {
 
 export const STELLAR_CONFIG_TESTNET: StellarChainConfig = {
   network: 'TESTNET',
-  networkPassphrase: 'Test SDF Network ; September 2015',
+  networkPassphrase: Networks.TESTNET,
   horizonUrl: 'https://horizon-testnet.stellar.org',
   chainId: 'testnet',
   logoUrl:

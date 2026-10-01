@@ -1,7 +1,7 @@
 import { STELLAR_CHAIN_ID } from '../constants/swap.constants';
 
 export const isStellar = (id: any): boolean => {
-  return id === 'stellar' || id === STELLAR_CHAIN_ID || id === 'testnet';
+  return id === 'stellar' || id === STELLAR_CHAIN_ID || id === 'testnet' || id === 'pubnet';
 };
 
 export const isSameAsset = (a: any, b: any): boolean => {
@@ -21,7 +21,25 @@ export const isSameAsset = (a: any, b: any): boolean => {
   if (aIsNative && bIsNative) {
     return a.symbol?.toUpperCase() === b.symbol?.toUpperCase();
   }
-  return a.address?.toLowerCase() === b.address?.toLowerCase();
+
+  const aAddr = (a.address || '').toLowerCase().trim();
+  const bAddr = (b.address || '').toLowerCase().trim();
+  const aContract = (a.contract || '').toLowerCase().trim();
+  const bContract = (b.contract || '').toLowerCase().trim();
+  const aIssuer = (a.issuer || '').toLowerCase().trim();
+  const bIssuer = (b.issuer || '').toLowerCase().trim();
+
+  if (aAddr && bAddr && aAddr === bAddr) return true;
+  if (aContract && bContract && aContract === bContract) return true;
+  if (aContract && bAddr && aContract === bAddr) return true;
+  if (aAddr && bContract && aAddr === bContract) return true;
+  if (aIssuer && bIssuer && aIssuer === bIssuer) return true;
+  if (aIssuer && bAddr && aIssuer === bAddr) return true;
+  if (aAddr && bIssuer && aAddr === bIssuer) return true;
+  if (aContract && bIssuer && aContract === bIssuer) return true;
+  if (aIssuer && bContract && aIssuer === bContract) return true;
+
+  return false;
 };
 
 export const matchesAddress = (asset: any, queryAddress: string): boolean => {
@@ -33,6 +51,8 @@ export const matchesAddress = (asset: any, queryAddress: string): boolean => {
     qLower === '0x0000000000000000000000000000000000000000' ||
     qLower === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
   const aLower = (asset.address || '').toLowerCase().trim();
+  const cLower = (asset.contract || '').toLowerCase().trim();
+  const iLower = (asset.issuer || '').toLowerCase().trim();
   const assetIsNative =
     !!asset.isNative ||
     !aLower ||
@@ -41,5 +61,5 @@ export const matchesAddress = (asset: any, queryAddress: string): boolean => {
     aLower === 'native';
   if (queryIsNative && assetIsNative) return true;
   if (queryIsNative !== assetIsNative) return false;
-  return aLower === qLower;
+  return aLower === qLower || (!!cLower && cLower === qLower) || (!!iLower && iLower === qLower);
 };

@@ -16,6 +16,7 @@ export function useDynamicExchange() {
   const setNetwork = useExchangeManager(state => state.setNetwork);
   const globalAppNetwork = useWalletStore(state => state.network);
   const clientRef = useRef<PerpExchange | null>(null);
+  const isFirstRender = useRef(true);
   const [activeClient, setActiveClient] = useState<PerpExchange | null>(null);
 
   // Enforce perps network to strictly mirror global application network
@@ -34,9 +35,12 @@ export function useDynamicExchange() {
     const init = async () => {
       const exchangeLabel = currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3';
       const networkLabel = currentNetwork === 'testnet' ? 'Testnet' : 'Mainnet';
-      useExchangeManager
-        .getState()
-        .setIsSwitching(true, `Connecting to ${exchangeLabel} (${networkLabel})...`);
+
+      if (!isFirstRender.current) {
+        useExchangeManager
+          .getState()
+          .setIsSwitching(true, `Connecting to ${exchangeLabel} (${networkLabel})...`);
+      }
 
       // 1. Immediately wipe store states to prevent stale cross-exchange data contamination
       resetPerpStores();
@@ -143,12 +147,16 @@ export function useDynamicExchange() {
       }
     };
 
-    init().catch(err => {
-      if (!cancelled) {
-        console.error('[useDynamicExchange] init failed:', err);
-        useExchangeManager.getState().setIsSwitching(false);
-      }
-    });
+    init()
+      .catch(err => {
+        if (!cancelled) {
+          console.error('[useDynamicExchange] init failed:', err);
+          useExchangeManager.getState().setIsSwitching(false);
+        }
+      })
+      .finally(() => {
+        isFirstRender.current = false;
+      });
 
     return () => {
       cancelled = true;

@@ -77,15 +77,35 @@ export function useTradeTransaction({ userAddress }: UseTradeTransactionProps) {
             return true;
           });
 
-          // Retain pending optimistic offers until confirmed by Horizon
           const optimisticOffers = prev.filter(o => String(o.id).startsWith('optimistic-'));
           const pendingOptimistic = optimisticOffers.filter(opt => {
-            const matched = deduped.some(
-              r =>
-                r.selling.code === opt.selling.code &&
-                r.buying.code === opt.buying.code &&
-                Math.abs(parseFloat(r.price) - parseFloat(opt.price)) < 0.0001
-            );
+            const optPrice = parseFloat(opt.price);
+            const optAmount = parseFloat(opt.amount);
+            const optAge = Date.now() - Number(String(opt.id).replace('optimistic-', ''));
+            if (!isNaN(optAge) && optAge > 12000) return false;
+
+            const matched = deduped.some(r => {
+              const rPrice = parseFloat(r.price);
+              const rAmount = parseFloat(r.amount);
+              const sameAssets =
+                r.selling.code === opt.selling.code && r.buying.code === opt.buying.code;
+              const swappedAssets =
+                r.selling.code === opt.buying.code && r.buying.code === opt.selling.code;
+              if (!sameAssets && !swappedAssets) return false;
+
+              const priceMatch =
+                Math.abs(rPrice - optPrice) < 0.0005 ||
+                (optPrice > 0 && Math.abs(rPrice - 1 / optPrice) < 0.0005) ||
+                (rPrice > 0 && Math.abs(1 / rPrice - optPrice) < 0.0005);
+
+              const amountMatch =
+                Math.abs(rAmount - optAmount) < 0.01 ||
+                (optPrice > 0 && Math.abs(rAmount - optAmount * optPrice) < 0.05) ||
+                (rPrice > 0 && Math.abs(rAmount - optAmount / rPrice) < 0.05) ||
+                (optPrice > 0 && Math.abs(rAmount * rPrice - optAmount) < 0.05);
+
+              return priceMatch && amountMatch;
+            });
             return !matched;
           });
 
@@ -195,7 +215,9 @@ export function useTradeTransaction({ userAddress }: UseTradeTransactionProps) {
           const amount = isBuy
             ? detail.quote.total || detail.quote.amount || '0'
             : detail.quote.amount || '0';
-          const price = detail.quote.price || '0';
+          const rawPrice = detail.quote.price || '0';
+          const parsedPrice = parseFloat(rawPrice);
+          const price = isBuy && parsedPrice > 0 ? (1 / parsedPrice).toFixed(7) : rawPrice;
 
           const optimisticId = `optimistic-${Date.now()}`;
           const optimisticOffer: ActiveOffer = {

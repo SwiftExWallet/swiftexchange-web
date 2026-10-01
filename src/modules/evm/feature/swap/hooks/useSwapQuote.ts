@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import * as StellarSDK from '@stellar/stellar-sdk';
+
 import { useTransactionModalStore } from '../../../../../store/transactionModalStore';
 import { AquariusService } from '../../../../stellar/service/aquariusService';
 import { SoroswapService } from '../../../../stellar/service/soroswapService';
@@ -96,6 +98,15 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
 
     let warningError: string | null = null;
 
+    const isBuyClassic =
+      selectedBuyAsset &&
+      !selectedBuyAsset.isNative &&
+      Boolean(
+        (selectedBuyAsset as any).issuer?.startsWith('G') ||
+        ((selectedBuyAsset as any).address?.startsWith('G') &&
+          !(selectedBuyAsset as any).address?.startsWith('C'))
+      );
+
     if (
       isStellar(toChainId) &&
       isStellarAccountActive === false &&
@@ -105,9 +116,8 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     } else if (
       isStellar(toChainId) &&
       isStellarAccountActive !== false &&
-      selectedBuyAsset &&
-      !selectedBuyAsset.isNative &&
-      !selectedBuyAsset.hasTrustline
+      isBuyClassic &&
+      !selectedBuyAsset?.hasTrustline
     ) {
       warningError = 'Trustline required';
     }
@@ -131,21 +141,26 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
       if ((isStellar(fromChainId) || isStellar(toChainId)) && ammService) {
         if (!selectedSellAsset || !selectedBuyAsset) return;
         try {
-          const fromAsset = selectedSellAsset.asset;
-          const toAsset = selectedBuyAsset.asset;
-          if (!fromAsset || !toAsset) return;
+          const fromContract =
+            (selectedSellAsset as any)?.contract ||
+            (selectedSellAsset as any)?.address ||
+            selectedSellAsset.asset;
+          const toContract =
+            (selectedBuyAsset as any)?.contract ||
+            (selectedBuyAsset as any)?.address ||
+            selectedBuyAsset.asset;
+          if (!fromContract || !toContract) return;
 
           setCurrentQuote({ source: 'STELLAR_SWAP', data: null, error: null, loading: true });
 
           let sq: any = null;
 
-          // Tier 1: Soroswap
           try {
             const soroService = new SoroswapService(
               ammService.horizonUrl,
               ammService.networkPassphrase
             );
-            sq = await soroService.getQuote(fromAsset, toAsset, sellAmount, {
+            sq = await soroService.getQuote(fromContract, toContract, sellAmount, {
               slippageTolerance: userSlippageTolerance,
             });
             if (sq) {
@@ -159,14 +174,32 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
             console.warn('[useSwapQuote] Soroswap quote failed, checking Aquarius:', soroErr);
           }
 
-          // Tier 2: Aquarius AMM
-          if (!sq) {
+          const toClassicAsset = (a: any) => {
+            if (!a) return null;
+            if (a.asset && typeof a.asset.isNative === 'function') return a.asset;
+            if (a.isNative || a.symbol === 'XLM') return StellarSDK.Asset.native();
+            const issuer = a.issuer || (a.address?.startsWith('G') ? a.address : null);
+            if (issuer && issuer.startsWith('G')) {
+              try {
+                return new StellarSDK.Asset(a.symbol, issuer);
+              } catch {
+                return null;
+              }
+            }
+            return null;
+          };
+
+          const classicFrom = toClassicAsset(selectedSellAsset);
+          const classicTo = toClassicAsset(selectedBuyAsset);
+          const canUseClassicAmm = Boolean(classicFrom && classicTo);
+
+          if (!sq && canUseClassicAmm) {
             try {
               const aquaService = new AquariusService(
                 ammService.horizonUrl,
                 ammService.networkPassphrase
               );
-              sq = await aquaService.getQuote(fromAsset, toAsset, sellAmount, {
+              sq = await aquaService.getQuote(classicFrom, classicTo, sellAmount, {
                 slippageTolerance: userSlippageTolerance,
               });
               if (sq) {
@@ -181,14 +214,17 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
             }
           }
 
-          // Tier 3: Classic Horizon AMM
-          if (!sq) {
-            sq = await ammService.getSwapQuote(fromAsset, toAsset, sellAmount, {
-              slippageTolerance: userSlippageTolerance,
-            });
-            if (sq) {
-              sq.source = 'STELLAR_AMM';
-              sq.provider = 'Classic Horizon AMM';
+          if (!sq && canUseClassicAmm) {
+            try {
+              sq = await ammService.getSwapQuote(classicFrom, classicTo, sellAmount, {
+                slippageTolerance: userSlippageTolerance,
+              });
+              if (sq) {
+                sq.source = 'STELLAR_AMM';
+                sq.provider = 'Classic Horizon AMM';
+              }
+            } catch (ammErr) {
+              console.warn('[useSwapQuote] Horizon AMM quote failed:', ammErr);
             }
           }
 
@@ -197,7 +233,7 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
           setCurrentQuote({
             source: 'STELLAR_SWAP',
             data: sq,
-            error: warningError,
+            error: sq ? warningError : warningError || 'No swap route or liquidity pool found',
             loading: false,
           });
         } catch (err) {

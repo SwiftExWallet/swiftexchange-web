@@ -228,11 +228,19 @@ export function getButtonLabel(params: ButtonLabelParams): string {
     return 'ACTIVATE ACCOUNT';
   }
 
+  const isBuyClassic =
+    selectedBuyAsset &&
+    !selectedBuyAsset.isNative &&
+    Boolean(
+      (selectedBuyAsset as any).issuer?.startsWith('G') ||
+      ((selectedBuyAsset as any).address?.startsWith('G') &&
+        !(selectedBuyAsset as any).address?.startsWith('C'))
+    );
+
   if (
     isStellar(toChainId) &&
     isStellarAccountActive !== false &&
-    selectedBuyAsset &&
-    !selectedBuyAsset.isNative &&
+    isBuyClassic &&
     !selectedBuyAsset.hasTrustline
   ) {
     return isStellar(fromChainId) ? 'ADD TRUSTLINE & SWAP' : 'ADD TRUSTLINE';

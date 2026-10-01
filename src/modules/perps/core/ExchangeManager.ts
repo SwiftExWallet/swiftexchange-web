@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
 import type { ExchangeName, PerpNetwork } from './config/networks';
@@ -24,15 +25,23 @@ const getInitialNetwork = (): PerpNetwork => {
   }
 };
 
-export const useExchangeManager = create<ExchangeManagerState>(set => ({
-  currentExchange: 'aster',
-  currentNetwork: getInitialNetwork(),
-  isSwitching: false,
-  switchMessage: undefined,
-  setExchange: exchange => set({ currentExchange: exchange }),
-  setNetwork: network => set({ currentNetwork: network }),
-  setIsSwitching: (isSwitching, message) => set({ isSwitching, switchMessage: message }),
-}));
+export const useExchangeManager = create<ExchangeManagerState>()(
+  persist(
+    set => ({
+      currentExchange: 'aster',
+      currentNetwork: getInitialNetwork(),
+      isSwitching: false,
+      switchMessage: undefined,
+      setExchange: exchange => set({ currentExchange: exchange }),
+      setNetwork: network => set({ currentNetwork: network }),
+      setIsSwitching: (isSwitching, message) => set({ isSwitching, switchMessage: message }),
+    }),
+    {
+      name: 'exchange-manager-storage',
+      partialize: state => ({ currentExchange: state.currentExchange }),
+    }
+  )
+);
 
 // Automatically sync perps network whenever global wallet network changes
 useWalletStore.subscribe((state, prevState) => {

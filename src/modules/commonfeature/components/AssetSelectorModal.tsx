@@ -165,12 +165,15 @@ const AssetSelectorModal: FC = () => {
           wa.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
           wa.address.toLowerCase() === 'native';
         result.push({
-          id: `send-${wa.chainId}-${wa.symbol}-${isWANative ? 'native' : wa.address || ''}`,
+          id: `send-${wa.chainId}-${wa.symbol}-${isWANative ? 'native' : (wa as any).contract || wa.address || ''}`,
           symbol: wa.symbol,
           name: wa.name,
           image: wa.image || '',
           chainId: wa.chainId,
           address: wa.address,
+          contract: (wa as any).contract,
+          issuer: (wa as any).issuer,
+          domain: (wa as any).domain,
           decimals: wa.decimals,
           isNative: wa.isNative,
           balance: wa.balance || 0,
@@ -310,18 +313,23 @@ const AssetSelectorModal: FC = () => {
         validTokens.forEach(t => {
           const isTNative =
             !!t.isNative ||
-            !t.address ||
-            t.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
-            t.address.toLowerCase() === 'native';
+            (isStellarChainId(activeChainId)
+              ? t.symbol?.toUpperCase() === 'XLM' && (!t.issuer || t.issuer === 'native')
+              : !t.address ||
+                t.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+                t.address.toLowerCase() === 'native');
           result.push({
-            id: `${effectiveActionType.toLowerCase()}-${activeChainId}-${t.symbol}-${isTNative ? 'native' : t.address || ''}`,
+            id: `${effectiveActionType.toLowerCase()}-${activeChainId}-${t.symbol}-${isTNative ? 'native' : (t as any).contract || t.address || ''}`,
             symbol: t.symbol,
             name: t.name,
             image: t.logoURI,
             chainId: activeChainId,
             address: t.address,
+            contract: (t as any).contract,
+            issuer: (t as any).issuer,
+            domain: (t as any).domain,
             decimals: t.decimals,
-            isNative: t.isNative,
+            isNative: isTNative,
             balance:
               walletAssets.find(w => {
                 if (String(w.chainId) !== String(activeChainId)) return false;
@@ -334,14 +342,24 @@ const AssetSelectorModal: FC = () => {
                   return w.symbol.toUpperCase() === t.symbol.toUpperCase();
                 }
                 if (!wIsNative && !isTNative) {
-                  if (
-                    w.address &&
-                    t.address &&
-                    w.address.toLowerCase() === t.address.toLowerCase()
-                  ) {
-                    return true;
+                  const tAddr = (t.address || '').toLowerCase();
+                  const wAddr = (w.address || '').toLowerCase();
+                  const tContract = ((t as any).contract || '').toLowerCase();
+                  const wContract = ((w as any).contract || '').toLowerCase();
+                  const tIssuer = ((t as any).issuer || '').toLowerCase();
+                  const wIssuer = ((w as any).issuer || '').toLowerCase();
+
+                  if (tContract && wContract && tContract === wContract) return true;
+                  if (tContract && wAddr && tContract === wAddr) return true;
+                  if (tAddr && wContract && tAddr === wContract) return true;
+                  if (tIssuer && wIssuer && tIssuer === wIssuer) return true;
+                  if (tIssuer && wAddr && tIssuer === wAddr) return true;
+                  if (tAddr && wIssuer && tAddr === wIssuer) return true;
+                  if (tAddr && wAddr && tAddr === wAddr) return true;
+
+                  if (!isStellarChainId(activeChainId) && !tAddr && !wAddr) {
+                    return w.symbol.toUpperCase() === t.symbol.toUpperCase();
                   }
-                  return w.symbol.toUpperCase() === t.symbol.toUpperCase();
                 }
                 return false;
               })?.balance || 0,
@@ -366,8 +384,11 @@ const AssetSelectorModal: FC = () => {
         a =>
           a.symbol.toLowerCase().includes(q) ||
           (a.name && a.name.toLowerCase().includes(q)) ||
+          (a.domain && a.domain.toLowerCase().includes(q)) ||
           (a.address && q.length > 5 && a.address.toLowerCase().includes(q)) ||
-          (a.address && a.address.toLowerCase() === q)
+          (a.address && a.address.toLowerCase() === q) ||
+          (a.contract && q.length > 5 && a.contract.toLowerCase().includes(q)) ||
+          (a.contract && a.contract.toLowerCase() === q)
       );
     }
 
@@ -392,10 +413,16 @@ const AssetSelectorModal: FC = () => {
     (asset: any) => {
       const isAssetNative =
         !!asset.isNative ||
-        !asset.address ||
-        asset.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
-        asset.address.toLowerCase() === 'native';
-      const addressVal = isAssetNative ? 'native' : asset.address;
+        (isStellarChainId(asset.chainId)
+          ? asset.symbol?.toUpperCase() === 'XLM' && (!asset.issuer || asset.issuer === 'native')
+          : !asset.address ||
+            asset.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+            asset.address.toLowerCase() === 'native');
+      const addressVal = isAssetNative
+        ? 'native'
+        : isStellarChainId(asset.chainId)
+          ? asset.contract || asset.issuer || asset.address || ''
+          : asset.address;
 
       if (onSelect) {
         onSelect(asset);
@@ -436,8 +463,9 @@ const AssetSelectorModal: FC = () => {
 
   const handleCopyAddress = useCallback((e: React.MouseEvent, asset: any) => {
     e.stopPropagation();
-    if (!asset.address) return;
-    navigator.clipboard.writeText(asset.address);
+    const addr = asset.address || asset.contract;
+    if (!addr) return;
+    navigator.clipboard.writeText(addr);
     setCopiedId(asset.id);
     setTimeout(() => setCopiedId(null), 2000);
   }, []);
@@ -481,10 +509,11 @@ const AssetSelectorModal: FC = () => {
                     </span>
                   ) : (
                     <span className="text-[10px] bg-bg-tertiary text-text-secondary px-1.5 py-0.5 rounded-md font-bold uppercase overflow-hidden text-ellipsis whitespace-nowrap max-w-[80px]">
-                      {asset.address?.slice(0, 6)}...{asset.address?.slice(-4)}
+                      {(asset.address || asset.contract)?.slice(0, 6)}...
+                      {(asset.address || asset.contract)?.slice(-4)}
                     </span>
                   )}
-                  {asset.address && !asset.isNative && (
+                  {(asset.address || asset.contract) && !asset.isNative && (
                     <button
                       onClick={e => handleCopyAddress(e, asset)}
                       className="p-1 hover:bg-bg-tertiary rounded-md text-text-muted transition-colors"
@@ -498,7 +527,9 @@ const AssetSelectorModal: FC = () => {
                   )}
                 </div>
                 <div className="text-xs text-text-secondary truncate">
-                  {asset.name || asset.symbol}
+                  {asset.domain
+                    ? `${asset.name || asset.symbol} • ${asset.domain}`
+                    : asset.name || asset.symbol}
                 </div>
               </div>
             </div>

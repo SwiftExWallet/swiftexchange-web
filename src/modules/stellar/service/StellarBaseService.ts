@@ -158,17 +158,38 @@ export class StellarBaseService {
     const registryTokens: TokenInfo[] = chainConfig.assets
       .map(a => {
         const isNative =
-          a.type === 'NATIVE' || a.symbol === 'XLM' || a.address === 'native' || !a.address;
+          a.type === 'NATIVE' ||
+          a.symbol === 'XLM' ||
+          a.address === 'native' ||
+          (!a.address && !a.contract);
 
-        let asset: StellarSDK.Asset;
-        try {
-          asset = isNative ? StellarSDK.Asset.native() : new StellarSDK.Asset(a.symbol, a.address);
-        } catch {
+        let asset: any;
+        const effectiveIssuer = a.issuer || (a.address?.startsWith('G') ? a.address : undefined);
+        const effectiveContract =
+          a.contract || (a.address?.startsWith('C') ? a.address : undefined);
+
+        if (isNative) {
+          asset = StellarSDK.Asset.native();
+        } else if (effectiveIssuer && effectiveIssuer.startsWith('G')) {
           try {
-            asset = StellarSDK.Asset.native();
+            asset = new StellarSDK.Asset(a.symbol, effectiveIssuer);
           } catch {
-            return null as any;
+            asset = {
+              isNative: () => false,
+              getCode: () => a.symbol,
+              getIssuer: () => effectiveIssuer,
+              contractId: () => effectiveContract,
+            };
           }
+        } else {
+          // Soroban contract-only asset (no classic G... issuer)
+          asset = {
+            isNative: () => false,
+            getCode: () => a.symbol,
+            getIssuer: () => effectiveContract || a.address || '',
+            contractId: () => effectiveContract || a.address,
+            toString: () => `${a.symbol}:${effectiveContract || a.address || ''}`,
+          };
         }
 
         const balRecord = balances.find(b => this.assetsEqual(b.asset, asset));
@@ -176,15 +197,17 @@ export class StellarBaseService {
         return {
           asset,
           code: a.symbol,
-          issuer: isNative ? undefined : a.address,
+          issuer: isNative ? undefined : effectiveIssuer,
           balance: balRecord?.balance || '0',
           name: a.name,
           icon: a.logoURI,
           decimals: a.decimals,
           isPopular: true,
-          hasTrustline: isNative || !!balRecord,
+          hasTrustline:
+            isNative || !effectiveIssuer || !effectiveIssuer.startsWith('G') || !!balRecord,
           homeDomain: a.domain || (isNative ? 'stellar.org' : undefined),
           domain: a.domain || (isNative ? 'stellar.org' : undefined),
+          contract: effectiveContract,
         };
       })
       .filter(Boolean);
@@ -196,10 +219,21 @@ export class StellarBaseService {
     return { tokens: [...registryTokens, ...otherTokens], subentryCount };
   }
 
-  protected assetsEqual(a: StellarSDK.Asset, b: StellarSDK.Asset): boolean {
-    if (a.isNative() && b.isNative()) return true;
-    if (a.isNative() || b.isNative()) return false;
-    return a.getCode() === b.getCode() && a.getIssuer() === b.getIssuer();
+  protected assetsEqual(a: any, b: any): boolean {
+    if (!a || !b) return false;
+    const aIsNative =
+      typeof a.isNative === 'function' ? a.isNative() : a === 'native' || a === 'XLM';
+    const bIsNative =
+      typeof b.isNative === 'function' ? b.isNative() : b === 'native' || b === 'XLM';
+    if (aIsNative && bIsNative) return true;
+    if (aIsNative || bIsNative) return false;
+    const aCode = typeof a.getCode === 'function' ? a.getCode() : a.code || a.symbol;
+    const bCode = typeof b.getCode === 'function' ? b.getCode() : b.code || b.symbol;
+    const aIssuer =
+      typeof a.getIssuer === 'function' ? a.getIssuer() : a.issuer || a.contract || a.address;
+    const bIssuer =
+      typeof b.getIssuer === 'function' ? b.getIssuer() : b.issuer || b.contract || b.address;
+    return aCode === bCode && aIssuer === bIssuer;
   }
 
   protected ensureTrustline(

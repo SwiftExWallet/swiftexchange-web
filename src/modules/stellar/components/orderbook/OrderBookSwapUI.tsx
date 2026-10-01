@@ -11,6 +11,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 
 import { useTransactionModalStore } from '../../../../store/transactionModalStore';
+import { storeSwapOrder } from '../../../evm/service/evmTransactionStatusService';
 import { getTokenIcon } from '../../../evm/utils/ChainUrlHelpers';
 import { getChainById } from '../../../evm/utils/Chainregistry';
 import { useIsMobile } from '../../../perps/components/chart/hooks/useIsMobile';
@@ -169,6 +170,23 @@ const OrderBookSwapUI = () => {
       const provider = getProvider(WalletType.STELLAR);
       if (!provider) throw new Error('Stellar wallet provider not available');
       const txHash = await executeOrderWithWalletConnect(tx, provider);
+
+      try {
+        await storeSwapOrder({
+          txHash,
+          walletAddress: stellarAddress,
+          provider: 'STELLAR',
+          fromChain: 'STR',
+          toChain: 'STR',
+          fromToken: fromToken.code,
+          toToken: toToken.code,
+          amountIn: isBuy ? String(parseFloat(amount) * parseFloat(price)) : amount,
+          amountOut: isBuy ? amount : String(parseFloat(amount) * parseFloat(price)),
+          txType: 'Swap',
+        });
+      } catch (err) {
+        console.error('Failed to store stellar swap order on backend:', err);
+      }
 
       useTransactionModalStore.getState().openModal({
         status: 'success',
