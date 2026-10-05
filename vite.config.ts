@@ -24,6 +24,33 @@ export default defineConfig(({ command }) => ({
         target: 'https://folioapi.swiftexwallet.com',
         changeOrigin: true,
       },
+      '/api-stellar-expert': {
+        target: 'https://api.stellar.expert',
+        changeOrigin: true,
+        rewrite: path => path.replace(/^\/api-stellar-expert/, ''),
+        headers: {
+          Referer: 'https://stellar.expert',
+          Origin: 'https://stellar.expert',
+        },
+      },
+    },
+  },
+  preview: {
+    port: 8081,
+    proxy: {
+      '/pnl': {
+        target: 'https://folioapi.swiftexwallet.com',
+        changeOrigin: true,
+      },
+      '/api-stellar-expert': {
+        target: 'https://api.stellar.expert',
+        changeOrigin: true,
+        rewrite: path => path.replace(/^\/api-stellar-expert/, ''),
+        headers: {
+          Referer: 'https://stellar.expert',
+          Origin: 'https://stellar.expert',
+        },
+      },
     },
   },
 

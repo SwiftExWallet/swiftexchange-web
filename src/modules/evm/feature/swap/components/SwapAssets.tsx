@@ -106,7 +106,11 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   useEffect(() => {
     const handleRefresh = () => setTrustlineRefreshNonce(prev => prev + 1);
     window.addEventListener('stellar-trustline-added', handleRefresh);
-    return () => window.removeEventListener('stellar-trustline-added', handleRefresh);
+    window.addEventListener('stellar-balance-changed', handleRefresh);
+    return () => {
+      window.removeEventListener('stellar-trustline-added', handleRefresh);
+      window.removeEventListener('stellar-balance-changed', handleRefresh);
+    };
   }, []);
 
   const [crossChainWarning, setCrossChainWarning] = useState<string | null>(null);

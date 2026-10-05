@@ -1,10 +1,19 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
+import BigNumber from 'bignumber.js';
 
 import { getChainById } from '../../evm/utils/Chainregistry';
 import type { TokenInfo } from '../types/stellar.types';
+import { SOROSWAP_TESTNET_SUPPORTED_TOKENS, isSoroswapTestnetSupported } from './soroswapService';
 
 const accountCache = new Map<string, { data: StellarSDK.Horizon.AccountResponse; ts: number }>();
 const serverPool = new Map<string, StellarSDK.Horizon.Server>();
+
+export const getStellarExpertTestnetValueUrl = (address: string): string => {
+  if (typeof window === 'undefined') {
+    return `https://api.stellar.expert/explorer/testnet/account/${address}/value`;
+  }
+  return `/api-stellar-expert/explorer/testnet/account/${address}/value`;
+};
 
 export class StellarBaseService {
   protected server: StellarSDK.Horizon.Server;
@@ -147,15 +156,40 @@ export class StellarBaseService {
 
     let balances: TokenInfo[] = [];
     let subentryCount = 0;
-    try {
-      const accountData = await this.getAccountData(address);
-      balances = accountData.tokens;
-      subentryCount = accountData.subentryCount;
-    } catch (error) {
-      console.warn(error, 'Could not load balances, using zero balances');
+    if (address && StellarSDK.StrKey.isValidEd25519PublicKey(address)) {
+      try {
+        const accountData = await this.getAccountData(address);
+        balances = accountData.tokens;
+        subentryCount = accountData.subentryCount;
+      } catch (error) {
+        console.warn(error, 'Could not load balances, using zero balances');
+      }
     }
 
-    const registryTokens: TokenInfo[] = chainConfig.assets
+    const expertBalances = new Map<string, string>();
+    if (!isMainnet && address && StellarSDK.StrKey.isValidEd25519PublicKey(address)) {
+      try {
+        const res = await fetch(getStellarExpertTestnetValueUrl(address));
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.balances)) {
+            for (const b of data.balances) {
+              if (b?.asset && b?.balance !== undefined) {
+                const formatted = new BigNumber(b.balance).dividedBy(1e7).toString();
+                expertBalances.set(b.asset, formatted);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Could not load testnet balances from stellar.expert:', error);
+      }
+      if (expertBalances.size > 0) {
+        subentryCount = Math.max(subentryCount, expertBalances.size);
+      }
+    }
+
+    let registryTokens: TokenInfo[] = chainConfig.assets
       .map(a => {
         const isNative =
           a.type === 'NATIVE' ||
@@ -182,7 +216,6 @@ export class StellarBaseService {
             };
           }
         } else {
-          // Soroban contract-only asset (no classic G... issuer)
           asset = {
             isNative: () => false,
             getCode: () => a.symbol,
@@ -194,23 +227,108 @@ export class StellarBaseService {
 
         const balRecord = balances.find(b => this.assetsEqual(b.asset, asset));
 
+        let balance = balRecord?.balance || '0';
+        if (!isMainnet && expertBalances.size > 0) {
+          const expertBal =
+            (effectiveContract && expertBalances.get(effectiveContract)) ||
+            (a.contract && expertBalances.get(a.contract)) ||
+            (a.address && expertBalances.get(a.address)) ||
+            (effectiveIssuer && expertBalances.get(`${a.symbol}-${effectiveIssuer}`)) ||
+            (effectiveIssuer && expertBalances.get(`${a.symbol}:${effectiveIssuer}`)) ||
+            (isNative ? expertBalances.get('XLM') : undefined);
+          if (expertBal !== undefined && (balance === '0' || !balRecord)) {
+            balance = expertBal;
+          }
+        }
+
         return {
           asset,
           code: a.symbol,
           issuer: isNative ? undefined : effectiveIssuer,
-          balance: balRecord?.balance || '0',
+          balance,
           name: a.name,
           icon: a.logoURI,
           decimals: a.decimals,
           isPopular: true,
           hasTrustline:
-            isNative || !effectiveIssuer || !effectiveIssuer.startsWith('G') || !!balRecord,
+            isNative ||
+            !effectiveIssuer ||
+            !effectiveIssuer.startsWith('G') ||
+            (balRecord ? (balRecord.hasTrustline ?? true) : false) ||
+            balance !== '0' ||
+            (effectiveContract && expertBalances.has(effectiveContract)) ||
+            (a.contract && expertBalances.has(a.contract)) ||
+            (a.address && expertBalances.has(a.address)) ||
+            (effectiveIssuer && expertBalances.has(`${a.symbol}-${effectiveIssuer}`)) ||
+            (effectiveIssuer && expertBalances.has(`${a.symbol}:${effectiveIssuer}`)),
           homeDomain: a.domain || (isNative ? 'stellar.org' : undefined),
           domain: a.domain || (isNative ? 'stellar.org' : undefined),
           contract: effectiveContract,
         };
       })
       .filter(Boolean);
+
+    if (!isMainnet) {
+      for (const [sym, contractId] of Object.entries(SOROSWAP_TESTNET_SUPPORTED_TOKENS)) {
+        if (sym === 'XLM') continue;
+        const existing = registryTokens.find(
+          rt => rt.code === sym || (rt as any).contract === contractId
+        );
+        const bal = expertBalances.get(contractId) || '0';
+        if (!existing) {
+          registryTokens.push({
+            asset: {
+              isNative: () => false,
+              getCode: () => sym,
+              getIssuer: () => contractId,
+              contractId: () => contractId,
+              toString: () => `${sym}:${contractId}`,
+            } as any,
+            code: sym,
+            balance: bal,
+            name: sym === 'XTAR' ? 'Dogstar' : sym === 'USDC' ? 'USD Coin' : sym,
+            icon:
+              sym === 'XTAR'
+                ? 'https://dogstarcoin.com/logo.png'
+                : 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
+            decimals: 7,
+            isPopular: true,
+            hasTrustline: true,
+            contract: contractId,
+          });
+        } else {
+          (existing as any).contract = contractId;
+          if (bal !== '0' || existing.balance === '0') {
+            existing.balance = bal;
+          }
+          if (
+            existing.hasTrustline ||
+            expertBalances.has(contractId) ||
+            (existing.issuer && expertBalances.has(`${sym}-${existing.issuer}`)) ||
+            balances.some(b => b.code === sym)
+          ) {
+            existing.hasTrustline = true;
+          }
+        }
+      }
+
+      const xlmToken = registryTokens.find(
+        rt => rt.code === 'XLM' || (typeof rt.asset?.isNative === 'function' && rt.asset.isNative())
+      );
+      if (xlmToken && expertBalances.has('XLM')) {
+        xlmToken.balance = expertBalances.get('XLM') || xlmToken.balance;
+      }
+
+      registryTokens = registryTokens.filter(t =>
+        isSoroswapTestnetSupported({
+          symbol: t.code,
+          address: t.contract || t.issuer,
+          contract: t.contract,
+          isNative:
+            (typeof t.asset?.isNative === 'function' && t.asset.isNative()) || t.code === 'XLM',
+        })
+      );
+    }
 
     const otherTokens = balances.filter(
       b => !registryTokens.some(rt => this.assetsEqual(rt.asset, b.asset))

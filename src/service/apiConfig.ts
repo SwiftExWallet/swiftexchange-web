@@ -67,11 +67,61 @@ export function getServerUrl(): string {
   return import.meta.env.VITE_BASE_SERVER_URL_PROD || 'https://beta-v2.swiftexchange.io/api/v1';
 }
 
+type WalletAddressGetter = (chainType?: 'evm' | 'stellar' | string) => string;
+
+let activeWalletAddressGetter: WalletAddressGetter = (chainType?: string) => {
+  if (typeof window === 'undefined') return '';
+  try {
+    const raw = localStorage.getItem('wallet_sessions');
+    if (!raw) return '';
+    const data = JSON.parse(raw);
+    const evm = data.evm?.evmAddress || data.evm?.address || '';
+    const stellar = data.stellar?.stellarAddress || data.stellar?.address || '';
+    if (chainType) {
+      const trimmed = chainType.trim();
+      if (trimmed.startsWith('G') || trimmed.startsWith('C') || trimmed.startsWith('0x')) {
+        return trimmed;
+      }
+      const lower = trimmed.toLowerCase();
+      if (
+        lower === 'stellar' ||
+        lower === 'soroban' ||
+        lower.includes('/stellar') ||
+        lower.includes('/soroswap') ||
+        lower.includes('stellar') ||
+        lower.includes('soroban')
+      ) {
+        return stellar;
+      }
+      if (
+        lower === 'evm' ||
+        lower === 'eth' ||
+        lower.includes('/eth') ||
+        lower.includes('/evm') ||
+        lower.includes('eth') ||
+        lower.includes('evm')
+      ) {
+        return evm;
+      }
+    }
+    return evm || stellar || '';
+  } catch {
+    return '';
+  }
+};
+
+export function setWalletAddressGetter(getter: WalletAddressGetter): void {
+  activeWalletAddressGetter = getter;
+}
+
+export function getConnectedWalletAddress(chainType?: 'evm' | 'stellar' | string): string {
+  return activeWalletAddressGetter(chainType);
+}
+
 export const API_CONFIG = {
   get serverUrl(): string {
     return getServerUrl();
   },
-  // Backward compatibility alias for serverUrl (VITE_BASE_PROXY_URL removed, unified with serverUrl)
   get proxyUrl(): string {
     return getServerUrl();
   },
@@ -83,6 +133,12 @@ export const API_CONFIG = {
   },
   get deviceJwt(): string {
     return getValidDeviceToken() || getAccessToken() || '';
+  },
+  get walletAddress(): string {
+    return getConnectedWalletAddress();
+  },
+  getWalletAddress(chainType?: 'evm' | 'stellar' | string): string {
+    return getConnectedWalletAddress(chainType);
   },
 } as const;
 

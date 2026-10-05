@@ -35,6 +35,14 @@ export async function submitToHorizon(signedXdr: string, horizonUrl: string): Pr
   if (!res.ok) {
     const extras = json?.extras?.result_codes;
     if (extras) {
+      if (extras.transaction === 'tx_bad_seq') {
+        try {
+          const tx = new StellarSDK.Transaction(signedXdr, '');
+          return tx.hash().toString('hex');
+        } catch {
+          void 0;
+        }
+      }
       const detail = extras.operations ? ` — ${extras.operations.join(', ')}` : '';
       throw new Error(`Stellar submission failed: ${extras.transaction}${detail}`);
     }
@@ -42,6 +50,79 @@ export async function submitToHorizon(signedXdr: string, horizonUrl: string): Pr
   }
 
   return json.hash;
+}
+
+export function extractHashFromResult(res: any, fallbackHash?: string): string | undefined {
+  if (!res) return undefined;
+  if (typeof res === 'string') {
+    const trimmed = res.trim();
+    return trimmed || undefined;
+  }
+  if (typeof res === 'object') {
+    const candidate =
+      res.hash ||
+      res.txHash ||
+      res.transactionHash ||
+      res.result?.hash ||
+      res.result?.txHash ||
+      res.result?.transactionHash;
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+    if ((res.status === 'success' || res.success === true) && fallbackHash) {
+      return fallbackHash;
+    }
+  }
+  return undefined;
+}
+
+export function extractSignedXdrFromResult(res: any): string | undefined {
+  if (!res) return undefined;
+  if (typeof res === 'object') {
+    const signed =
+      res.signedXDR ||
+      res.signedTxXdr ||
+      res.signedXdr ||
+      res.xdr ||
+      res.result?.signedXDR ||
+      res.result?.signedTxXdr ||
+      res.result?.signedXdr ||
+      res.result?.xdr;
+    if (typeof signed === 'string' && signed.trim()) {
+      return signed.trim();
+    }
+  }
+  if (typeof res === 'string') {
+    const trimmed = res.trim();
+    if (trimmed.startsWith('AAAA') || trimmed.length > 200) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+export async function pollHorizonForConfirmation(
+  horizonUrl: string,
+  txHash: string,
+  timeoutMs = 60000,
+  intervalMs = 2000
+): Promise<string | null> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(`${horizonUrl}/transactions/${txHash}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.successful !== false) {
+          return txHash;
+        }
+      }
+    } catch {
+      void 0;
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return null;
 }
 
 export async function submitSorobanOrHorizon(
@@ -285,8 +366,16 @@ export const signAndSubmitTransaction = async (
         : await submitToHorizon(signedXdr, config.horizonUrl);
       if (sourceAddress)
         StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('stellar-trustline-added'));
+        window.dispatchEvent(new Event('stellar-balance-changed'));
+      }
       return { success: true, hash };
     }
+
+    const computedHash = new StellarSDK.Transaction(finalXdr, canonicalPassphrase)
+      .hash()
+      .toString('hex');
 
     if (provider?.client && provider?.session) {
       const stellarNetwork = config.chainId;
@@ -301,57 +390,55 @@ export const signAndSubmitTransaction = async (
 
       await notifyWalletSignRequest();
 
-      let result: any;
-      let methodCalled = 'stellar_signAndSubmitXDR';
-      try {
-        result = await provider.client.request({
-          topic,
-          chainId,
-          request: {
-            method: 'stellar_signAndSubmitXDR',
-            params: signParams,
-          },
-        });
-      } catch (submitErr: any) {
-        const isUnsupported =
-          submitErr?.message?.includes('Method not supported') ||
-          submitErr?.message?.includes('not found') ||
-          submitErr?.code === 5001 ||
-          submitErr?.code === -32601;
-
-        if (isUnsupported) {
-          methodCalled = 'stellar_signXDR';
-          result = await provider.client.request({
+      const reqPromise = (async () => {
+        try {
+          return await provider.client.request({
             topic,
             chainId,
             request: {
-              method: 'stellar_signXDR',
+              method: 'stellar_signAndSubmitXDR',
               params: signParams,
             },
           });
-        } else {
+        } catch (submitErr: any) {
+          const isUnsupported =
+            submitErr?.message?.includes('Method not supported') ||
+            submitErr?.message?.includes('not found') ||
+            submitErr?.code === 5001 ||
+            submitErr?.code === -32601;
+
+          if (isUnsupported) {
+            return await provider.client.request({
+              topic,
+              chainId,
+              request: {
+                method: 'stellar_signXDR',
+                params: signParams,
+              },
+            });
+          }
           throw submitErr;
         }
-      }
+      })();
+
+      const pollPromise = new Promise<string | null>(resolve => {
+        const timer = setTimeout(async () => {
+          const res = await pollHorizonForConfirmation(config.horizonUrl, computedHash);
+          resolve(res);
+        }, 2500);
+        reqPromise.finally(() => clearTimeout(timer));
+      });
+      const result = await Promise.race([
+        reqPromise,
+        pollPromise.then(confirmedHash => {
+          if (confirmedHash) return { hash: confirmedHash, status: 'success' };
+          return new Promise(() => {});
+        }),
+      ]);
 
       console.log('[StellarTransactionService] WC result:', result);
 
-      const signedXdr =
-        result?.signedXDR ||
-        result?.signedTxXdr ||
-        (typeof result === 'string' ? result : undefined);
-
-      if (result?.hash) {
-        if (sourceAddress)
-          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
-        return { success: true, hash: result.hash };
-      }
-
-      if (methodCalled === 'stellar_signAndSubmitXDR' && typeof result === 'string') {
-        if (sourceAddress)
-          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
-        return { success: true, hash: result };
-      }
+      const signedXdr = extractSignedXdrFromResult(result);
 
       if (signedXdr) {
         const hash = isSoroban
@@ -364,15 +451,32 @@ export const signAndSubmitTransaction = async (
           : await submitToHorizon(signedXdr, config.horizonUrl);
         if (sourceAddress)
           StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('stellar-trustline-added'));
+          window.dispatchEvent(new Event('stellar-balance-changed'));
+        }
         return { success: true, hash };
       }
 
-      if (result?.status === 'success') {
-        const computedHash = new StellarSDK.Transaction(finalXdr, canonicalPassphrase)
-          .hash()
-          .toString('hex');
+      const extractedHash = extractHashFromResult(result, computedHash);
+
+      if (extractedHash) {
         if (sourceAddress)
           StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('stellar-trustline-added'));
+          window.dispatchEvent(new Event('stellar-balance-changed'));
+        }
+        return { success: true, hash: extractedHash };
+      }
+
+      if (result?.status === 'success' || result?.success === true) {
+        if (sourceAddress)
+          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('stellar-trustline-added'));
+          window.dispatchEvent(new Event('stellar-balance-changed'));
+        }
         return { success: true, hash: computedHash };
       }
 
@@ -381,55 +485,57 @@ export const signAndSubmitTransaction = async (
 
     if (typeof provider?.request === 'function') {
       await notifyWalletSignRequest();
-      let result: any;
-      let methodCalled = 'stellar_signAndSubmitXDR';
-      try {
-        result = await provider.request({
-          method: 'stellar_signAndSubmitXDR',
-          params: {
-            xdr: finalXdr,
-            network: stellarNetworkEnum,
-            networkPassphrase: canonicalPassphrase,
-          },
-        });
-      } catch (reqErr: any) {
-        const isUnsupported =
-          reqErr?.message?.includes('Method not supported') ||
-          reqErr?.message?.includes('not found') ||
-          reqErr?.code === 5001 ||
-          reqErr?.code === -32601;
 
-        if (isUnsupported) {
-          methodCalled = 'stellar_signXDR';
-          result = await provider.request({
-            method: 'stellar_signXDR',
+      const reqPromise = (async () => {
+        try {
+          return await provider.request({
+            method: 'stellar_signAndSubmitXDR',
             params: {
               xdr: finalXdr,
               network: stellarNetworkEnum,
               networkPassphrase: canonicalPassphrase,
             },
           });
-        } else {
+        } catch (reqErr: any) {
+          const isUnsupported =
+            reqErr?.message?.includes('Method not supported') ||
+            reqErr?.message?.includes('not found') ||
+            reqErr?.code === 5001 ||
+            reqErr?.code === -32601;
+
+          if (isUnsupported) {
+            return await provider.request({
+              method: 'stellar_signXDR',
+              params: {
+                xdr: finalXdr,
+                network: stellarNetworkEnum,
+                networkPassphrase: canonicalPassphrase,
+              },
+            });
+          }
           throw reqErr;
         }
-      }
+      })();
+
+      const pollPromise = new Promise<string | null>(resolve => {
+        const timer = setTimeout(async () => {
+          const res = await pollHorizonForConfirmation(config.horizonUrl, computedHash);
+          resolve(res);
+        }, 2500);
+        reqPromise.finally(() => clearTimeout(timer));
+      });
+      const result = await Promise.race([
+        reqPromise,
+        pollPromise.then(confirmedHash => {
+          if (confirmedHash) return { hash: confirmedHash, status: 'success' };
+          return new Promise(() => {});
+        }),
+      ]);
 
       console.log('[StellarTransactionService] provider.request result:', result);
 
-      if (result?.hash) {
-        if (sourceAddress)
-          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
-        return { success: true, hash: result.hash };
-      }
+      const signedXdr = extractSignedXdrFromResult(result);
 
-      if (methodCalled === 'stellar_signAndSubmitXDR' && typeof result === 'string') {
-        if (sourceAddress)
-          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
-        return { success: true, hash: result };
-      }
-
-      const signedXdr =
-        result?.signedXDR || result?.signedTxXdr || (typeof result === 'string' ? result : null);
       if (signedXdr) {
         const hash = isSoroban
           ? await submitSorobanOrHorizon(
@@ -441,15 +547,32 @@ export const signAndSubmitTransaction = async (
           : await submitToHorizon(signedXdr, config.horizonUrl);
         if (sourceAddress)
           StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('stellar-trustline-added'));
+          window.dispatchEvent(new Event('stellar-balance-changed'));
+        }
         return { success: true, hash };
       }
 
-      if (result?.status === 'success') {
-        const computedHash = new StellarSDK.Transaction(finalXdr, canonicalPassphrase)
-          .hash()
-          .toString('hex');
+      const extractedHash = extractHashFromResult(result, computedHash);
+
+      if (extractedHash) {
         if (sourceAddress)
           StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('stellar-trustline-added'));
+          window.dispatchEvent(new Event('stellar-balance-changed'));
+        }
+        return { success: true, hash: extractedHash };
+      }
+
+      if (result?.status === 'success' || result?.success === true) {
+        if (sourceAddress)
+          StellarBaseService.invalidateAccountCache(sourceAddress, canonicalPassphrase);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('stellar-trustline-added'));
+          window.dispatchEvent(new Event('stellar-balance-changed'));
+        }
         return { success: true, hash: computedHash };
       }
 

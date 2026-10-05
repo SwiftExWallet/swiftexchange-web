@@ -1,7 +1,12 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { STELLAR_TESTNET_CONTRACT_MAP, SoroswapService } from '../soroswapService';
+import {
+  SOROSWAP_TESTNET_SUPPORTED_TOKENS,
+  STELLAR_TESTNET_CONTRACT_MAP,
+  SoroswapService,
+  isSoroswapTestnetSupported,
+} from '../soroswapService';
 
 describe('SoroswapService', () => {
   let originalFetch: typeof global.fetch;
@@ -29,6 +34,7 @@ describe('SoroswapService', () => {
       expect(STELLAR_TESTNET_CONTRACT_MAP.USDC).toBe(
         'CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75'
       );
+      expect(STELLAR_TESTNET_CONTRACT_MAP.XTAR).toBe(SOROSWAP_TESTNET_SUPPORTED_TOKENS.XTAR);
     });
 
     it('resolves XLM / native to testnet contract address', () => {
@@ -47,8 +53,7 @@ describe('SoroswapService', () => {
       const assetString = 'USDC-GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
       const contractId = testnetService.getContractId(assetString);
       expect(contractId).toBe('CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75');
-      expect(contractId.startsWith('C')).toBe(true);
-      expect(contractId.length).toBe(56);
+      expect(StellarSDK.StrKey.isValidContract(contractId)).toBe(true);
     });
 
     it('resolves UXIV, CYON, JAMN, VEOF, and XTAR to their respective testnet contracts', () => {
@@ -232,6 +237,112 @@ describe('SoroswapService', () => {
       expect(quote.estimatedOutput).toBe('0.5935400');
       expect(quote.minimumOutput).toBe('0.5876046');
       expect(quote.source).toBe('SOROSWAP');
+    });
+
+    it('derives SAC contract IDs and sends /quote payload on mainnet', async () => {
+      const mainnetService = new SoroswapService(
+        'https://horizon.stellar.org',
+        StellarSDK.Networks.PUBLIC
+      );
+
+      const usdcAsset = {
+        symbol: 'USDC',
+        address: 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
+        issuer: 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
+      };
+      const aquaAsset = {
+        symbol: 'AQUA',
+        address: 'GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA',
+        issuer: 'GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA',
+      };
+
+      const usdcContract = mainnetService.getContractId(usdcAsset);
+      const aquaContract = mainnetService.getContractId(aquaAsset);
+
+      expect(usdcContract).toBe('CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75');
+      expect(StellarSDK.StrKey.isValidContract(aquaContract)).toBe(true);
+
+      let capturedBody: any = null;
+      global.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+        if (url.includes('/quote')) {
+          capturedBody = JSON.parse(init.body);
+          return {
+            ok: true,
+            json: async () => ({
+              amountOut: '2720000000',
+              estimatedAmountOutFormatted: '272.0',
+              minimumAmountOutFormatted: '269.0',
+              source: 'SOROSWAP',
+            }),
+          };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+
+      const quote = await mainnetService.getQuote(usdcAsset, aquaAsset, '0.1');
+      expect(capturedBody).not.toBeNull();
+      expect(capturedBody.assetIn).toBe('CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75');
+      expect(capturedBody.assetOut).toBe(aquaContract);
+      expect(quote).toBeDefined();
+    });
+  });
+
+  describe('Testnet Supported Tokens Filtering', () => {
+    it('defines verified XLM, USDC and XTAR tokens', () => {
+      expect(SOROSWAP_TESTNET_SUPPORTED_TOKENS.XLM).toBe(
+        'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'
+      );
+      expect(SOROSWAP_TESTNET_SUPPORTED_TOKENS.USDC).toBe(
+        'CB3TLW74NBIOT3BUWOZ3TUM6RFDF6A4GVIRUQRQZABG5KPOUL4JJOV2F'
+      );
+      expect(SOROSWAP_TESTNET_SUPPORTED_TOKENS.XTAR).toBe(
+        'CCZGLAUBDKJSQK72QOZHVU7CUWKW45OZWYWCLL27AEK74U2OIBK6LXF2'
+      );
+    });
+
+    it('correctly filters supported testnet tokens by contract', () => {
+      expect(
+        isSoroswapTestnetSupported({
+          symbol: 'USDC',
+          contract: 'CB3TLW74NBIOT3BUWOZ3TUM6RFDF6A4GVIRUQRQZABG5KPOUL4JJOV2F',
+        })
+      ).toBe(true);
+
+      expect(
+        isSoroswapTestnetSupported({
+          symbol: 'XTAR',
+          contract: 'CCZGLAUBDKJSQK72QOZHVU7CUWKW45OZWYWCLL27AEK74U2OIBK6LXF2',
+        })
+      ).toBe(true);
+
+      expect(
+        isSoroswapTestnetSupported({
+          symbol: 'USDC',
+          contract: 'CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75',
+          issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        })
+      ).toBe(false);
+
+      expect(
+        isSoroswapTestnetSupported({
+          symbol: 'XLM',
+          address: 'native',
+        })
+      ).toBe(true);
+
+      expect(
+        isSoroswapTestnetSupported({
+          symbol: 'XLM',
+          isNative: true,
+        })
+      ).toBe(true);
+
+      expect(
+        isSoroswapTestnetSupported({
+          symbol: 'STAK',
+          issuer: 'GCVM2EPORQIRS24VBTXINTSLX2G55BBKIHOBCBG763OJBLJKIHJ7FCG2',
+        })
+      ).toBe(false);
     });
   });
 });

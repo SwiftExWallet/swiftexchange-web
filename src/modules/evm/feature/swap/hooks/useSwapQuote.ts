@@ -160,7 +160,7 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
               ammService.horizonUrl,
               ammService.networkPassphrase
             );
-            sq = await soroService.getQuote(fromContract, toContract, sellAmount, {
+            sq = await soroService.getQuote(selectedSellAsset, selectedBuyAsset, sellAmount, {
               slippageTolerance: userSlippageTolerance,
             });
             if (sq) {

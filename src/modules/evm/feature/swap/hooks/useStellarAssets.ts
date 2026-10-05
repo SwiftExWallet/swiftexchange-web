@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useEffect } from 'react';
 
+import { isSoroswapTestnetSupported } from '../../../../stellar/service/soroswapService';
 import { getGlobalAssetMetadata } from '../../../utils/Chainregistry';
 import { isStellar, matchesAddress } from '../utils/swapAssetUtils';
 
@@ -97,21 +98,38 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
               hasTrustline: b.hasTrustline,
             };
           });
-          setStellarAssets(mapped);
+          let finalMapped = mapped;
+          const isTestnetSwap =
+            actionType === 'SWAP' && (fromChainId === 'testnet' || toChainId === 'testnet');
+
+          if (isTestnetSwap) {
+            const seen = new Set<string>();
+            finalMapped = mapped.filter((t: any) => {
+              if (!isSoroswapTestnetSupported(t)) return false;
+              const sym = t.isNative || t.symbol === 'XLM' ? 'XLM' : t.symbol?.toUpperCase();
+              if (!sym || seen.has(sym)) return false;
+              seen.add(sym);
+              return true;
+            });
+          }
+
+          setStellarAssets(finalMapped);
 
           // Default asset selection for Stellar-to-Stellar swaps
           if (actionType === 'SWAP' && isStellar(fromChainId)) {
             const currentSellInStellar = sellAssetAddress
-              ? mapped.find((t: any) => matchesAddress(t, sellAssetAddress))
-              : mapped.find((t: any) => t.symbol === sellAssetSymbol);
+              ? finalMapped.find((t: any) => matchesAddress(t, sellAssetAddress))
+              : finalMapped.find((t: any) => t.symbol === sellAssetSymbol);
             const currentBuyInStellar = buyAssetAddress
-              ? mapped.find((t: any) => matchesAddress(t, buyAssetAddress))
-              : mapped.find((t: any) => t.symbol === buyAssetSymbol);
+              ? finalMapped.find((t: any) => matchesAddress(t, buyAssetAddress))
+              : finalMapped.find((t: any) => t.symbol === buyAssetSymbol);
 
             let finalSellSymbol = sellAssetSymbol;
 
-            if (!currentSellInStellar && mapped.length > 0) {
-              const defaultSell = mapped.find((t: any) => t.symbol === 'XLM') || mapped[0];
+            if (!currentSellInStellar && finalMapped.length > 0) {
+              const defaultSell = isTestnetSwap
+                ? finalMapped.find((t: any) => t.symbol === 'XTAR') || finalMapped[0]
+                : finalMapped.find((t: any) => t.symbol === 'XLM') || finalMapped[0];
               const effAddr = defaultSell.isNative
                 ? 'native'
                 : defaultSell.contract || defaultSell.address || defaultSell.issuer || '';
@@ -120,8 +138,17 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
               finalSellSymbol = defaultSell.symbol;
             }
 
-            if ((!currentBuyInStellar || finalSellSymbol === buyAssetSymbol) && mapped.length > 1) {
-              const defaultBuy = mapped.find((t: any) => t.symbol !== finalSellSymbol) || mapped[1];
+            if (
+              (!currentBuyInStellar || finalSellSymbol === buyAssetSymbol) &&
+              finalMapped.length > 1
+            ) {
+              const defaultBuy = isTestnetSwap
+                ? finalMapped.find(
+                    (t: any) => t.symbol === 'USDC' && t.symbol !== finalSellSymbol
+                  ) ||
+                  finalMapped.find((t: any) => t.symbol !== finalSellSymbol) ||
+                  finalMapped[1]
+                : finalMapped.find((t: any) => t.symbol !== finalSellSymbol) || finalMapped[1];
               if (defaultBuy) {
                 const effAddr = defaultBuy.isNative
                   ? 'native'

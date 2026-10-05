@@ -41,8 +41,13 @@ vi.mock('@stellar/stellar-sdk', () => {
     Horizon: {
       Server: MockServer,
     },
+    Networks: {
+      PUBLIC: 'Public Global Stellar Network ; September 2015',
+      TESTNET: 'Test SDF Network ; September 2015',
+    },
     StrKey: {
       isValidEd25519PublicKey: (addr: string) => addr.startsWith('G') && addr.length === 56,
+      isValidContract: (addr: string) => addr.startsWith('C') && addr.length === 56,
     },
   };
 });

@@ -100,7 +100,7 @@ export const SwapExecutionScreen: React.FC<SwapExecutionScreenProps> = ({
       ];
     }
 
-    if (isTrustlineOnlyRequired) {
+    if (isTrustlineOnlyRequired || currentStep === 'setting_trustline') {
       return [
         {
           title: 'Setup Trustline',

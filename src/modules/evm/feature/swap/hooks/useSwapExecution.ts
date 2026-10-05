@@ -8,6 +8,7 @@ import { useActivationStore } from '../../../../../store/activationStore';
 import { useNotificationStore } from '../../../../../store/notificationStore';
 import { useSwapStore } from '../../../../../store/swapStore';
 import { useTransactionModalStore } from '../../../../../store/transactionModalStore';
+import { StellarBaseService } from '../../../../stellar/service/StellarBaseService';
 import { AmmSwapService } from '../../../../stellar/service/ammSwapService';
 import { AquariusService } from '../../../../stellar/service/aquariusService';
 import { SoroswapService } from '../../../../stellar/service/soroswapService';
@@ -202,12 +203,8 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
 
       if (isSoroswap) {
         soroService = new SoroswapService(ammService.horizonUrl, ammService.networkPassphrase);
-        const assetIn = soroService.getContractId(
-          (selectedSellAsset as any)?.contract || quote.data.fromAsset
-        );
-        const assetOut = soroService.getContractId(
-          (selectedBuyAsset as any)?.contract || quote.data.toAsset
-        );
+        const assetIn = soroService.getContractId(selectedSellAsset || quote.data.fromAsset);
+        const assetOut = soroService.getContractId(selectedBuyAsset || quote.data.toAsset);
         const prepared = await soroService.prepareSwap({
           assetIn,
           assetOut,
@@ -272,7 +269,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
           }
         }
         const wasTracked = hash ? trackDydxIntent(hash, computedOutAmount) : false;
-        handleReset();
+        resetLoadingState();
         showToast({
           type: 'STELLAR',
           title: 'Swap Transaction Sent',
@@ -691,14 +688,19 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         Boolean(
           (selectedBuyAsset as any).issuer?.startsWith('G') ||
           ((selectedBuyAsset as any).address?.startsWith('G') &&
-            !(selectedBuyAsset as any).address?.startsWith('C'))
+            !(selectedBuyAsset as any).address?.startsWith('C')) ||
+          ((selectedBuyAsset as any).contract?.startsWith('C') &&
+            (selectedBuyAsset as any).issuer?.startsWith('G'))
         );
+
+      const isSoroswap = quoteSnapshot.data?.source === 'SOROSWAP';
 
       const isSettingTrustline =
         isStellar(toChainId) &&
         isStellarAccountActive !== false &&
         isBuyClassic &&
-        !(selectedBuyAsset as any).hasTrustline;
+        !(selectedBuyAsset as any).hasTrustline &&
+        (isSoroswap || !isStellar(fromChainId));
 
       if (isSettingTrustline) {
         setExecutionCurrentStep('setting_trustline');
@@ -744,12 +746,14 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
 
           try {
             AmmSwapService.clearAccountCache();
+            StellarBaseService.clearAccountCache();
           } catch (e) {
             console.error(e);
           }
           window.dispatchEvent(new Event('stellar-trustline-added'));
+          window.dispatchEvent(new Event('stellar-balance-changed'));
 
-          handleReset();
+          resetLoadingState();
           showToast({
             type: 'STELLAR',
             title: 'Trustline Added',

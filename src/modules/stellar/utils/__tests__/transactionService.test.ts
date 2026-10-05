@@ -72,6 +72,8 @@ vi.mock('../../../../service/notificationService', () => ({
 }));
 
 vi.mock('../../../walletconnect/config/chains', () => ({
+  IS_MAINNET_ENABLED: true,
+  IS_TESTNET_ENABLED: true,
   getStellarConfig: vi.fn((network: string) => ({
     network: network === 'public' || network === 'mainnet' ? 'PUBLIC' : 'TESTNET',
     networkPassphrase: 'Test SDF Network ; September 2015',
