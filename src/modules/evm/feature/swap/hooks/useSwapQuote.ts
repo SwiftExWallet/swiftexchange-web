@@ -154,6 +154,7 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
           setCurrentQuote({ source: 'STELLAR_SWAP', data: null, error: null, loading: true });
 
           let sq: any = null;
+          let soroQuoteError: string | null = null;
 
           try {
             const soroService = new SoroswapService(
@@ -162,6 +163,7 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
             );
             sq = await soroService.getQuote(selectedSellAsset, selectedBuyAsset, sellAmount, {
               slippageTolerance: userSlippageTolerance,
+              userAddress: stellarAddress,
             });
             if (sq) {
               sq.source = 'SOROSWAP';
@@ -172,6 +174,7 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
             }
           } catch (soroErr) {
             console.warn('[useSwapQuote] Soroswap quote failed, checking Aquarius:', soroErr);
+            soroQuoteError = parseSwapError(soroErr);
           }
 
           const toClassicAsset = (a: any) => {
@@ -233,7 +236,9 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
           setCurrentQuote({
             source: 'STELLAR_SWAP',
             data: sq,
-            error: sq ? warningError : warningError || 'No swap route or liquidity pool found',
+            error: sq
+              ? warningError
+              : warningError || soroQuoteError || 'No swap route or liquidity pool found',
             loading: false,
           });
         } catch (err) {

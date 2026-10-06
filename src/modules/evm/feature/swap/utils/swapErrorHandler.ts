@@ -112,6 +112,8 @@ export function translateErrorMessage(message: string): string {
     .replace(/^Error: /i, '')
     .replace(/^Token approval failed: /i, '')
     .replace(/^ethers-user-denied: /i, '')
+    .replace(/^Soroswap \/[a-zA-Z0-9_-]+ failed:\s*/i, '')
+    .replace(/^Soroswap failed:\s*/i, '')
     .replace(' [object Object]', '')
     .replace(/^"|"$/g, '')
     .trim();

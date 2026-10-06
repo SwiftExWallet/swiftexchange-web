@@ -30,3 +30,4 @@ dist-ssr
 .env.development
 lint-report.html
 aster-finance-futures-api-v3.md
+.env*.local
