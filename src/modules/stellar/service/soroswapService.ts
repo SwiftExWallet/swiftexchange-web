@@ -597,20 +597,26 @@ export class SoroswapService {
         }
       })();
 
-      const pollPromise = new Promise<string | null>(resolve => {
-        const timer = setTimeout(async () => {
-          const res = await pollHorizonForConfirmation(this.horizonUrl, computedHash);
-          resolve(res);
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+      const pollPromise = new Promise<{ hash: string; status: string }>(resolve => {
+        pollTimer = setTimeout(async () => {
+          try {
+            const res = await pollHorizonForConfirmation(this.horizonUrl, computedHash);
+            if (res) {
+              resolve({ hash: res, status: 'success' });
+            }
+          } catch {
+            // Polling error ignored while wallet request is pending
+          }
         }, 2500);
-        reqPromise.finally(() => clearTimeout(timer));
       });
-      const result = await Promise.race([
-        reqPromise,
-        pollPromise.then(confirmedHash => {
-          if (confirmedHash) return { hash: confirmedHash, status: 'success' };
-          return new Promise(() => {});
-        }),
-      ]);
+
+      let result: any;
+      try {
+        result = await Promise.race([reqPromise, pollPromise]);
+      } finally {
+        if (pollTimer) clearTimeout(pollTimer);
+      }
 
       const extractedHash = extractHashFromResult(result, computedHash);
       if (extractedHash) {
@@ -647,20 +653,26 @@ export class SoroswapService {
         }
       })();
 
-      const pollPromise = new Promise<string | null>(resolve => {
-        const timer = setTimeout(async () => {
-          const res = await pollHorizonForConfirmation(this.horizonUrl, computedHash);
-          resolve(res);
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+      const pollPromise = new Promise<{ hash: string; status: string }>(resolve => {
+        pollTimer = setTimeout(async () => {
+          try {
+            const res = await pollHorizonForConfirmation(this.horizonUrl, computedHash);
+            if (res) {
+              resolve({ hash: res, status: 'success' });
+            }
+          } catch {
+            // Polling error ignored while wallet request is pending
+          }
         }, 2500);
-        reqPromise.finally(() => clearTimeout(timer));
       });
-      const result = await Promise.race([
-        reqPromise,
-        pollPromise.then(confirmedHash => {
-          if (confirmedHash) return { hash: confirmedHash, status: 'success' };
-          return new Promise(() => {});
-        }),
-      ]);
+
+      let result: any;
+      try {
+        result = await Promise.race([reqPromise, pollPromise]);
+      } finally {
+        if (pollTimer) clearTimeout(pollTimer);
+      }
 
       const extractedHash = extractHashFromResult(result, computedHash);
       if (extractedHash) {

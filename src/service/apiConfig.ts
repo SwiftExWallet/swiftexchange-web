@@ -140,7 +140,14 @@ export const API_CONFIG = {
   getWalletAddress(chainType?: 'evm' | 'stellar' | string): string {
     return getConnectedWalletAddress(chainType);
   },
+  getActivateWalletUrl(address: string): string {
+    return `${getServerUrl()}/wallet/${address}/activate-wallet`;
+  },
 } as const;
+
+export function getActivateWalletUrl(address: string): string {
+  return `${getServerUrl()}/wallet/${address}/activate-wallet`;
+}
 
 if (IS_DEV) {
   const missing = (Object.entries(API_CONFIG) as [string, string][])

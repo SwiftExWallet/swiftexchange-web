@@ -49,15 +49,22 @@ export class StellarBaseService {
     isNative: boolean = false,
     sellingLiabilities: string | number = 0
   ): string {
-    const bal = parseFloat(balance?.toString() || '0') || 0;
-    const liabilities = parseFloat(sellingLiabilities?.toString() || '0') || 0;
-    if (isNative) {
-      const reserve = (2 + subentryCount) * 0.5 + 0.01;
-      const spendable = Math.max(0, bal - reserve - liabilities);
-      return spendable.toFixed(7);
+    const bal = new BigNumber(balance?.toString() || '0');
+    const liabilities = new BigNumber(sellingLiabilities?.toString() || '0');
+    if (bal.isNaN() || bal.isLessThanOrEqualTo(0)) {
+      return '0.0000000';
     }
-    const spendable = Math.max(0, bal - liabilities);
-    return spendable.toFixed(7);
+
+    if (isNative) {
+      const baseReserve = new BigNumber('0.5');
+      const buffer = new BigNumber('0.01');
+      const reserve = new BigNumber(2 + subentryCount).multipliedBy(baseReserve).plus(buffer);
+      const spendable = bal.minus(reserve).minus(liabilities);
+      return BigNumber.max(0, spendable).toFixed(7, BigNumber.ROUND_DOWN);
+    }
+
+    const spendable = bal.minus(liabilities);
+    return BigNumber.max(0, spendable).toFixed(7, BigNumber.ROUND_DOWN);
   }
 
   static clearAccountCache() {
@@ -370,12 +377,17 @@ export class StellarBaseService {
 
     if (!hasTrustline) {
       const nativeBalRecord = sourceAccount.balances.find((b: any) => b.asset_type === 'native');
-      const totalXlm = parseFloat(nativeBalRecord?.balance || '0');
+      const totalXlm = new BigNumber(nativeBalRecord?.balance || '0');
       const subentryCount = sourceAccount.subentry_count || 0;
-      const liabilities = parseFloat((nativeBalRecord as any)?.selling_liabilities || '0');
-      const requiredReserve = (2 + subentryCount + 1) * 0.5 + liabilities + 0.01;
+      const liabilities = new BigNumber((nativeBalRecord as any)?.selling_liabilities || '0');
+      const baseReserve = new BigNumber('0.5');
+      const buffer = new BigNumber('0.01');
+      const requiredReserve = new BigNumber(2 + subentryCount + 1)
+        .multipliedBy(baseReserve)
+        .plus(liabilities)
+        .plus(buffer);
 
-      if (totalXlm < requiredReserve) {
+      if (totalXlm.isLessThan(requiredReserve)) {
         throw new Error(
           `Insufficient XLM balance to establish trustline for ${asset.getCode()}. You need at least ${requiredReserve.toFixed(2)} XLM to cover Stellar minimum reserves (current balance: ${totalXlm.toFixed(2)} XLM).`
         );

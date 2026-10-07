@@ -1,29 +1,16 @@
+import BigNumber from 'bignumber.js';
 import { ethers } from 'ethers';
 
 import { getBridgeNativeFee } from './swapFeeUtils';
 
 export function toPlainString(val: string | number | null | undefined): string {
-  if (val === null || val === undefined) return '0';
-  const num = typeof val === 'number' ? val : Number.parseFloat(val);
-  if (Number.isNaN(num)) return '0';
-
-  const str = String(val);
-  if (!str.includes('e') && !str.includes('E')) {
-    return str;
-  }
-
-  const match = new RegExp(/[eE]([-+]?\d+)/).exec(str);
-  if (!match) return str;
-
-  const exp = Math.abs(Number.parseInt(match[1], 10));
-  const digits = Math.min(100, Math.max(20, exp));
+  if (val === null || val === undefined || val === '') return '0';
   try {
-    return num
-      .toFixed(digits)
-      .replace(/(\.\d*?)0+$/, '$1')
-      .replace(/\.$/, '');
+    const bn = new BigNumber(val);
+    if (!bn.isFinite()) return '0';
+    return bn.toFixed();
   } catch {
-    return str;
+    return '0';
   }
 }
 

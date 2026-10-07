@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import * as StellarSDK from '@stellar/stellar-sdk';
+import BigNumber from 'bignumber.js';
 
 import { getStellarConfig } from '../../walletconnect/config/chains';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
@@ -214,7 +215,15 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
   }, [fromToken?.code, fromToken?.issuer, toToken?.code, toToken?.issuer, currentStellarConfig]);
 
   useEffect(() => {
-    if (!service || !fromToken || !toToken || !fromAmount || parseFloat(fromAmount) <= 0) {
+    const fromAmountBN = new BigNumber(fromAmount || '0');
+    if (
+      !service ||
+      !fromToken ||
+      !toToken ||
+      !fromAmount ||
+      !fromAmountBN.isFinite() ||
+      fromAmountBN.lte(0)
+    ) {
       setQuote(null);
       setToAmount('');
       return;
@@ -412,7 +421,10 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    const canCountdown = fromAmount && parseFloat(fromAmount) > 0 && quote && !isLoading;
+    const fromAmountBN = new BigNumber(fromAmount || '0');
+    const canCountdown = Boolean(
+      fromAmount && fromAmountBN.isFinite() && fromAmountBN.gt(0) && quote && !isLoading
+    );
 
     if (canCountdown) {
       timer = setInterval(() => {
@@ -502,8 +514,6 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
 
   const executeSwapWithWalletConnect = useCallback(
     async (transaction: any, walletProvider: any) => {
-      console.log('Waletprovider [useAmmswap ------]', walletProvider);
-
       const {
         fromAmount: curFromAmount,
         toAmount: curToAmount,
@@ -533,17 +543,18 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
 
         setFromToken(prev => {
           if (!prev) return prev;
-          const newBalance = Math.max(
-            0,
-            parseFloat(prev.balance || '0') - parseFloat(curFromAmount || '0')
-          );
-          return { ...prev, balance: newBalance.toFixed(7) };
+          const prevBal = new BigNumber(prev.balance || '0');
+          const sendAmt = new BigNumber(curFromAmount || '0');
+          const newBalance = BigNumber.max(0, prevBal.minus(sendAmt));
+          return { ...prev, balance: newBalance.toFixed(7, BigNumber.ROUND_DOWN) };
         });
 
         setToToken(prev => {
           if (!prev) return prev;
-          const newBalance = parseFloat(prev.balance || '0') + parseFloat(curToAmount || '0');
-          return { ...prev, balance: newBalance.toFixed(7) };
+          const prevBal = new BigNumber(prev.balance || '0');
+          const recAmt = new BigNumber(curToAmount || '0');
+          const newBalance = prevBal.plus(recAmt);
+          return { ...prev, balance: newBalance.toFixed(7, BigNumber.ROUND_DOWN) };
         });
 
         setTimeout(() => curFetchTokens(true), 8000);
@@ -566,13 +577,14 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
       )
     : '0';
 
-  const requestedAmountNum = parseFloat(fromAmount || '0');
+  const requestedAmountBN = new BigNumber(fromAmount || '0');
+  const spendableBalanceBN = new BigNumber(spendableBalance || '0');
   const isInsufficientBalance = Boolean(
     fromToken &&
     fromAmount &&
-    !isNaN(requestedAmountNum) &&
-    requestedAmountNum > 0 &&
-    requestedAmountNum > parseFloat(spendableBalance)
+    requestedAmountBN.isFinite() &&
+    requestedAmountBN.gt(0) &&
+    requestedAmountBN.gt(spendableBalanceBN)
   );
 
   const reset = useCallback(() => {

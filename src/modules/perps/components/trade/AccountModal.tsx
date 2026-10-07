@@ -24,7 +24,7 @@ import QRCode from 'qrcode';
 
 import { useNotificationStore } from '../../../../store/notificationStore';
 import { switchOrAddChain } from '../../../evm/utils/evmChainUtils';
-import { walletService } from '../../../walletconnect/services/walletService';
+import { walletService } from '../../../walletconnect/services/wallet/walletService';
 import { useWalletStore } from '../../../walletconnect/store/walletConnectStore';
 import {
   type DepositAsset,

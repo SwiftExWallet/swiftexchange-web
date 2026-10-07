@@ -1,14 +1,14 @@
-import { Bell, Droplets, Flame, Menu } from 'lucide-react';
+import { Bell, Flame, Loader2, Menu, Zap } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { ROUTES } from '../../constants/routes';
-import { FundWalletModal } from '../../modules/commonfeature/components/FundWalletModal';
 import { ConnectWalletButton } from '../../modules/walletconnect/components/ConnectWalletButton';
 import NetworkSwitch from '../../modules/walletconnect/components/NetworkSwitch';
 import { useWalletConnect } from '../../modules/walletconnect/hooks/useWalletConnect';
 import { hasStoredAgentKey } from '../../modules/walletconnect/services/asterAgentKeyManager';
 import { useWalletStore } from '../../modules/walletconnect/store/walletConnectStore';
+import { activateWallet } from '../../service/apiService';
 import { useNotificationStore } from '../../store/notificationStore';
 import ThemeToggle from '../../utils/ThemeToggle';
 
@@ -19,14 +19,48 @@ const Topbar: React.FC = () => {
   const loc = useLocation();
   const hasRedirected = useRef(false);
 
-  const { notifications, setGlobalPanelOpen } = useNotificationStore();
+  const { notifications, setGlobalPanelOpen, showToast } = useNotificationStore();
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const isAnyWalletConnected = Object.keys(connectedWallets).length > 0;
 
   const [isMoreOpen, setIsMoreOpen] = useState(false);
-  const [isFundModalOpen, setIsFundModalOpen] = useState(false);
+  const [isActivating, setIsActivating] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  const handleActivateWallet = async () => {
+    const targetAddress = connectedWallets.stellar?.address || connectedWallets.evm?.address;
+
+    if (!targetAddress) {
+      showToast({
+        type: 'STELLAR',
+        title: 'Wallet Not Connected',
+        message: 'Please connect your Stellar wallet first to activate it.',
+        dontSave: true,
+      });
+      return;
+    }
+
+    setIsActivating(true);
+    try {
+      const res = await activateWallet(targetAddress);
+      showToast({
+        type: 'STELLAR',
+        title: 'Wallet Activated',
+        message: res.message || 'Wallet activation request completed successfully.',
+        dontSave: false,
+      });
+    } catch (err: any) {
+      showToast({
+        type: 'STELLAR',
+        title: 'Activation Failed',
+        message: err.message || 'Failed to activate wallet.',
+        dontSave: true,
+      });
+    } finally {
+      setIsActivating(false);
+    }
+  };
 
   useEffect(() => {
     const cb = (e: MouseEvent) => {
@@ -105,19 +139,26 @@ const Topbar: React.FC = () => {
             <div className="relative inline-flex p-[2px] rounded-xl overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.35)] hover:shadow-[0_0_25px_rgba(59,130,246,0.55)] transition-all duration-300 group cursor-pointer">
               <div className="absolute -inset-[200%] animate-[spin_3.5s_linear_infinite] bg-[conic-gradient(from_0deg_at_50%_50%,transparent_0%,#3b82f6_20%,#93c5fd_30%,#ffffff_35%,transparent_38%,transparent_50%,#3b82f6_70%,#93c5fd_80%,#ffffff_85%,transparent_88%)] will-change-transform opacity-95" />
               <button
-                onClick={() => setIsFundModalOpen(true)}
+                onClick={handleActivateWallet}
+                disabled={isActivating}
                 style={{
                   background: 'var(--color-bg-secondary)',
                   color: 'var(--color-text-primary)',
                 }}
-                className="relative flex items-center justify-center gap-1.5 hover:bg-[var(--color-bg-hover)] rounded-[10px] px-3 py-1.5 text-xs font-semibold transition-colors duration-200 cursor-pointer select-none"
-                title="Testnet Faucet & Liquidity"
+                className="relative flex items-center justify-center gap-1.5 hover:bg-[var(--color-bg-hover)] rounded-[10px] px-3 py-1.5 text-xs font-semibold transition-colors duration-200 cursor-pointer select-none disabled:opacity-60 disabled:cursor-not-allowed"
+                title="Active Your Wallet"
               >
-                <Droplets
-                  size={13}
-                  className="text-blue-400 group-hover:scale-110 transition-transform shrink-0"
-                />
-                <span className="hidden sm:inline font-bold tracking-wide">Fund Wallet</span>
+                {isActivating ? (
+                  <Loader2 size={13} className="text-blue-400 animate-spin shrink-0" />
+                ) : (
+                  <Zap
+                    size={13}
+                    className="text-blue-400 group-hover:scale-110 transition-transform shrink-0"
+                  />
+                )}
+                <span className="hidden sm:inline font-bold tracking-wide">
+                  {isActivating ? 'Activating...' : 'Active Your Wallet'}
+                </span>
               </button>
             </div>
           )}
@@ -142,8 +183,6 @@ const Topbar: React.FC = () => {
           )}
         </div>
       </header>
-
-      <FundWalletModal isOpen={isFundModalOpen} onClose={() => setIsFundModalOpen(false)} />
     </>
   );
 };

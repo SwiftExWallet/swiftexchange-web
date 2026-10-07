@@ -1,4 +1,5 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
+import BigNumber from 'bignumber.js';
 
 import { generateTransactionId } from '../../../utils/transactionUtils';
 import { getStellarConfig } from '../../walletconnect/config/chains';
@@ -26,12 +27,17 @@ export function ensureTrustlineOp(
 
   if (!hasTrustline) {
     const nativeBalRecord = sourceAccount.balances.find((b: any) => b.asset_type === 'native');
-    const totalXlm = parseFloat(nativeBalRecord?.balance || '0');
+    const totalXlm = new BigNumber(nativeBalRecord?.balance || '0');
     const subentryCount = sourceAccount.subentry_count || 0;
-    const liabilities = parseFloat((nativeBalRecord as any)?.selling_liabilities || '0');
-    const requiredReserve = (2 + subentryCount + 1) * 0.5 + liabilities + 0.01;
+    const liabilities = new BigNumber((nativeBalRecord as any)?.selling_liabilities || '0');
+    const baseReserve = new BigNumber('0.5');
+    const buffer = new BigNumber('0.01');
+    const requiredReserve = new BigNumber(2 + subentryCount + 1)
+      .multipliedBy(baseReserve)
+      .plus(liabilities)
+      .plus(buffer);
 
-    if (totalXlm < requiredReserve) {
+    if (totalXlm.isLessThan(requiredReserve)) {
       throw new Error(
         `Insufficient XLM balance to establish trustline for ${asset.getCode()}. You need at least ${requiredReserve.toFixed(2)} XLM to cover Stellar minimum reserves (current balance: ${totalXlm.toFixed(2)} XLM).`
       );
@@ -58,14 +64,17 @@ export async function getStellarBalance(assetType: string, from: string): Promis
     if (assetType === 'native') {
       const nativeBalanceObj = account.balances.find(b => b.asset_type === 'native');
       if (nativeBalanceObj) {
-        const nativeBalance = parseFloat(nativeBalanceObj.balance);
-        const baseReserve = 0.5; // XLM
-        const subentryCount = account.subentry_count;
-        const totalReserve = (2 + subentryCount) * baseReserve;
-        const liabilities = parseFloat((nativeBalanceObj as any).selling_liabilities || '0');
+        const nativeBalBN = new BigNumber(nativeBalanceObj.balance || '0');
+        const baseReserveBN = new BigNumber('0.5'); // XLM
+        const subentryCount = account.subentry_count || 0;
+        const totalReserveBN = new BigNumber(2 + subentryCount).times(baseReserveBN);
+        const liabilitiesBN = new BigNumber((nativeBalanceObj as any).selling_liabilities || '0');
 
-        const available = Math.max(0, nativeBalance - totalReserve - liabilities);
-        balance = available.toString();
+        const availableBN = BigNumber.max(
+          0,
+          nativeBalBN.minus(totalReserveBN).minus(liabilitiesBN)
+        );
+        balance = availableBN.toFixed(7, BigNumber.ROUND_DOWN);
       } else {
         balance = '0';
       }
@@ -160,7 +169,7 @@ export async function sendCryptoStellarBuild(
     accountResponse.sequenceNumber()
   );
   const sourceAccount = new StellarSDK.Account(from, baseSeq);
-  const stellarAmount = parseFloat(amount).toFixed(7);
+  const stellarAmount = new BigNumber(amount || '0').toFixed(7, BigNumber.ROUND_DOWN);
 
   const txBuilder = new StellarSDK.TransactionBuilder(sourceAccount, {
     fee: StellarSDK.BASE_FEE,

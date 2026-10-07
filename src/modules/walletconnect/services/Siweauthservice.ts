@@ -87,27 +87,8 @@ function removeStoredSession(address?: string): void {
 }
 
 // ============================================================================
-// JWT Helper (Standard Base64URL JWT for client-side / simulated auth)
+// Public Token & Session API
 // ============================================================================
-
-function base64UrlEncode(str: string): string {
-  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function createLocalJWT(address: string, chainId: number, expiresInSec: number): string {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const payload = {
-    sub: address.toLowerCase(),
-    chainId,
-    iat: nowSec,
-    exp: nowSec + expiresInSec,
-    iss: 'swiftexchange.io',
-    jti: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-  };
-
-  return `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(JSON.stringify(payload))}.${base64UrlEncode(`swiftex_${address.toLowerCase()}_${nowSec}`)}`;
-}
 
 // ============================================================================
 // Public Token & Session API
@@ -327,30 +308,14 @@ export async function verifySiwe(
 
       return { accessToken, expiresIn, refreshToken };
     } catch (err: any) {
-      console.error('[auth] Backend verify failed, falling back to local session:', err);
+      console.error('[auth] Backend verify failed:', err);
+      throw err instanceof Error
+        ? err
+        : new Error(String(err?.message || 'Authentication signature verification failed'));
     }
   }
 
-  const expiresIn = 7 * 24 * 60 * 60;
-  const userAddress = options?.address || '0x';
-  const chainId = options?.chainId || 1;
-  const accessToken = createLocalJWT(userAddress, chainId, expiresIn);
-  const refreshToken = `ref_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-
-  if (options?.address) {
-    saveStoredSession({
-      address: options.address,
-      accessToken,
-      refreshToken,
-      expiresAt: Date.now() + expiresIn * 1000,
-      issuedAt: Date.now(),
-      chainId,
-      message,
-      signature,
-    });
-  }
-
-  return { accessToken, expiresIn, refreshToken };
+  throw new Error('Authentication server URL is not configured');
 }
 
 // NOT IN USE: Stellar wallets no longer require verification upon connection
@@ -511,30 +476,14 @@ export async function verifyStellarChallenge(
 
       return { accessToken, expiresIn, refreshToken };
     } catch (err: any) {
-      console.error('[auth] Backend verify failed, falling back to local session:', err);
+      console.error('[auth] Backend verify failed:', err);
+      throw err instanceof Error
+        ? err
+        : new Error(String(err?.message || 'Stellar challenge verification failed'));
     }
   }
 
-  const expiresIn = 7 * 24 * 60 * 60;
-  const userAddress = options?.address || '0x';
-  const chainId = options?.chainId || 1;
-  const accessToken = createLocalJWT(userAddress, chainId, expiresIn);
-  const refreshToken = `ref_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-
-  if (options?.address) {
-    saveStoredSession({
-      address: options.address,
-      accessToken,
-      refreshToken,
-      expiresAt: Date.now() + expiresIn * 1000,
-      issuedAt: Date.now(),
-      chainId,
-      message: 'Stellar Challenge Local',
-      signature: signedXdr,
-    });
-  }
-
-  return { accessToken, expiresIn, refreshToken };
+  throw new Error('Authentication server URL is not configured');
 }
 
 // Restores active session from localStorage if not expired

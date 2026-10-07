@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
+import { useActivationStore } from '../../../store/activationStore';
+import { useSwapStore } from '../../../store/swapStore';
+import { StellarSequenceTracker } from '../../stellar/utils/StellarSequenceTracker';
 import { IS_MAINNET_ENABLED, IS_TESTNET_ENABLED, type NetworkType } from '../config/chains';
 import {
   buildSiweMessage,
@@ -632,6 +635,16 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       if (network === get().network) return;
       await walletService.setNetwork(network);
       usePortfolioStore.getState().clearAssets();
+      useSwapStore.getState().clearPendingTx();
+      useSwapStore.setState({
+        sellAssetSymbol: '',
+        sellAssetAddress: '',
+        buyAssetSymbol: '',
+        buyAssetAddress: '',
+        sellAmount: '',
+      });
+      useActivationStore.getState().clearActivation();
+      StellarSequenceTracker.resetAll();
       await get().logoutAuth();
       set({
         network,

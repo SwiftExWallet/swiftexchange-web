@@ -35,6 +35,13 @@ export interface RegisterWalletResponse {
   [key: string]: any;
 }
 
+export interface ActivateWalletResponse {
+  success?: boolean;
+  message?: string;
+  data?: any;
+  [key: string]: any;
+}
+
 const linkedWalletsCache = new Set<string>();
 const inflightWalletLinks = new Map<string, Promise<boolean>>();
 
@@ -507,6 +514,41 @@ export async function fetchAppAvailability(): Promise<
     throw new Error(`Failed to fetch app availability: ${res.statusText}`);
   }
   return parseBody<import('../types/availability').AppAvailabilityResponse>(res);
+}
+
+export async function activateWallet(
+  walletAddress?: string,
+  deviceToken?: string
+): Promise<ActivateWalletResponse> {
+  const token = deviceToken || getValidDeviceToken() || API_CONFIG.deviceAuth;
+  const address =
+    walletAddress || getConnectedWalletAddress('stellar') || getConnectedWalletAddress();
+
+  if (!address) {
+    throw new Error('Wallet address is required to activate wallet');
+  }
+
+  const url = `${API_CONFIG.serverUrl}/wallet/${encodeURIComponent(address)}/activate-wallet`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['x-auth-device-token'] = token;
+    headers['x-auth-wallet-token'] = token;
+  }
+
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers,
+  });
+
+  if (!res.ok) {
+    const errorText = await parseError(res);
+    throw new Error(errorText || `Wallet activation failed with status ${res.status}`);
+  }
+
+  return parseBody<ActivateWalletResponse>(res);
 }
 
 // Wallet Gas Info
