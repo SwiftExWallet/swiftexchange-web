@@ -99,7 +99,10 @@ export async function signSiweMessage(
   if (wcProvider?.client && wcProvider?.session?.topic) {
     const topic = wcProvider.session.topic;
     const sessionChains: string[] = wcProvider.session.namespaces?.eip155?.chains || [];
-    const targetChain = chainId ? `eip155:${chainId}` : sessionChains[0] || 'eip155:1';
+    const sessionAccounts: string[] = wcProvider.session.namespaces?.eip155?.accounts || [];
+    const accountChain = sessionAccounts[0]?.split(':')?.[1];
+    const defaultChain = sessionChains[0]?.replace('eip155:', '') || accountChain || '1';
+    const targetChain = chainId ? `eip155:${chainId}` : `eip155:${defaultChain}`;
     const requestId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
 
     console.info(
@@ -196,7 +199,148 @@ export async function signSiweMessage(
 }
 
 // ---------------------------------------------------------------------------
-// Stellar XDR challenge signing
+// Stellar off-chain payload signing (SEP-53 / Ed25519)
+//
+// Flow: GET /signing/request → payload → sign here → POST /signing/verify
+//
+// Two provider paths:
+//   Freighter extension  → @stellar/freighter-api signMessage() (raw Ed25519 sig)
+//   WalletConnect        → stellar_signTransaction (ManageData XDR) + extract raw sig
+// ---------------------------------------------------------------------------
+
+export async function signStellarPayload(
+  payload: string,
+  provider: unknown,
+  stellarAddress?: string,
+  network?: string
+): Promise<string> {
+  const prov = provider as any;
+  const isWalletConnect = Boolean(prov?.session);
+
+  const { TransactionBuilder, Account, Operation, Networks } = await import('@stellar/stellar-sdk');
+
+  const isTestnet =
+    network === 'testnet' ||
+    prov?.session?.namespaces?.stellar?.chains?.[0]?.includes('testnet') ||
+    prov?.session?.namespaces?.stellar?.accounts?.[0]?.includes('testnet');
+
+  const networkPassphrase = isTestnet ? Networks.TESTNET : Networks.PUBLIC;
+  const chainId = isTestnet ? 'stellar:testnet' : 'stellar:pubnet';
+
+  const hash = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload))
+  );
+
+  const tx = new TransactionBuilder(new Account(stellarAddress || '', '-1'), {
+    fee: '100',
+    networkPassphrase,
+    timebounds: { minTime: 0, maxTime: Math.floor(Date.now() / 1000) + 300 },
+  })
+    .addOperation(
+      Operation.manageData({
+        name: 'yourapp auth',
+        value: Buffer.from(hash),
+      })
+    )
+    .build();
+
+  const unsignedXdr = tx.toXDR();
+
+  if (!isWalletConnect) {
+    const win = typeof window !== 'undefined' ? (window as any) : {};
+    const injectedFreighter = win.freighterApi ?? win.freighter ?? prov;
+
+    if (typeof injectedFreighter?.signTransaction === 'function') {
+      try {
+        const result = await injectedFreighter.signTransaction(unsignedXdr, {
+          networkPassphrase,
+          network: isTestnet ? 'TESTNET' : 'PUBLIC',
+          accountToSign: stellarAddress,
+        });
+        const xdrResult =
+          typeof result === 'string'
+            ? result
+            : (result?.signedTxXdr ?? result?.signedXDR ?? result?.signedXdr);
+        if (xdrResult) return xdrResult;
+      } catch (err: any) {
+        if (err?.message === 'USER_REJECTED' || err?.code === -32004 || err?.code === 4001)
+          throw err;
+      }
+    }
+
+    if (typeof injectedFreighter?.signMessage === 'function') {
+      try {
+        const result = await injectedFreighter.signMessage(payload, {
+          address: stellarAddress,
+        });
+        const sig =
+          typeof result === 'string' ? result : (result?.signedMessage ?? result?.signature);
+        if (sig) return sig;
+      } catch (err: any) {
+        if (err?.message === 'USER_REJECTED' || err?.code === -32004 || err?.code === 4001)
+          throw err;
+      }
+    }
+
+    if (typeof prov?.signMessage === 'function' && prov !== injectedFreighter) {
+      const result = await prov.signMessage(payload);
+      const sig =
+        typeof result === 'string'
+          ? result
+          : ((result as any)?.signedMessage ?? (result as any)?.signature);
+      if (sig) return sig;
+    }
+
+    throw new Error('Stellar wallet does not support off-chain message signing');
+  }
+
+  try {
+    let signedXdr: string | undefined;
+
+    try {
+      const result: any = await prov.client.request({
+        topic: prov.session.topic,
+        chainId,
+        request: {
+          method: 'stellar_signXDR',
+          params: { xdr: unsignedXdr },
+        },
+      });
+      signedXdr =
+        result?.signedXDR ?? result?.signedXdr ?? (typeof result === 'string' ? result : undefined);
+      if (!signedXdr && result) {
+        console.log(result);
+      }
+    } catch (wcErr: any) {
+      if (wcErr?.message === 'USER_REJECTED' || wcErr?.code === 4001 || wcErr?.code === -32004) {
+        throw wcErr;
+      }
+      const result: any = await prov.client.request({
+        topic: prov.session.topic,
+        chainId,
+        request: {
+          method: 'stellar_signTransaction',
+          params: { xdr: unsignedXdr, networkPassphrase },
+        },
+      });
+      signedXdr =
+        result?.signedXDR ?? result?.signedXdr ?? (typeof result === 'string' ? result : undefined);
+    }
+
+    if (!signedXdr) {
+      throw new Error('Failed to obtain signed XDR from Stellar wallet');
+    }
+
+    return signedXdr;
+  } catch (err: any) {
+    if (err?.message === 'USER_REJECTED' || err?.code === 4001) throw err;
+    console.error('[Auth:Stellar] WalletConnect Stellar sign failed:', err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stellar XDR challenge signing (kept for any direct XDR use-cases)
 // ---------------------------------------------------------------------------
 
 export async function signStellarChallenge(

@@ -202,5 +202,5 @@ export function purgeAgentKey(isTestnet?: boolean): void {
 
 export async function purgeAgentKeyAndAes(isTestnet?: boolean): Promise<void> {
   purgeAgentKey(isTestnet);
-  await destroyAESKey();
+  await destroyAESKey(HL_AES_KEY_ID);
 }

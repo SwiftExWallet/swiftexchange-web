@@ -318,92 +318,57 @@ export async function verifySiwe(
   throw new Error('Authentication server URL is not configured');
 }
 
-// NOT IN USE: Stellar wallets no longer require verification upon connection
-export async function buildStellarChallenge(
-  publicKey: string
-): Promise<{ xdr: string; networkPassphrase: string }> {
+export async function buildStellarPayload(): Promise<string> {
   const API_URL = getAuthApiBaseUrl();
-  console.log(
-    '[auth] Requesting Stellar signing payload from:',
-    `${API_URL}/signing/stellar/request?account=${publicKey}`
-  );
   try {
-    const res = await fetch(`${API_URL}/signing/stellar/request?account=${publicKey}`);
+    const res = await fetch(`${API_URL}/signing/request`);
     if (!res.ok) {
-      throw new Error(`Failed to fetch Stellar signing payload, status: ${res.status}`);
+      throw new Error(`Failed to fetch signing payload, status: ${res.status}`);
     }
     const data = await res.json();
-    console.log('[auth] Received Stellar signing payload:', data);
 
-    const xdr = data.xdr || data.data?.xdr;
-    const networkPassphrase = data.networkPassphrase || data.data?.networkPassphrase;
+    if (data.payload) return data.payload;
+    if (data.data?.payload) return data.data.payload;
 
-    if (xdr && networkPassphrase) {
-      return { xdr, networkPassphrase };
-    }
-
-    throw new Error('Stellar challenge (xdr or networkPassphrase) not found in backend response');
+    throw new Error('Payload not found in backend response');
   } catch (err) {
-    console.warn(
-      '[auth] Error fetching Stellar signing payload. Falling back to mock challenge for testing.',
-      err
-    );
-    try {
-      const { Keypair, TransactionBuilder, Account, Networks, Operation } =
-        await import('@stellar/stellar-sdk');
-      const serverKeypair = Keypair.random();
-      const account = new Account(serverKeypair.publicKey(), '0');
-      const networkPassphrase = Networks.TESTNET;
-      const now = Math.floor(Date.now() / 1000);
-
-      const tx = new TransactionBuilder(account, {
-        fee: '100',
-        networkPassphrase,
-        timebounds: {
-          minTime: now,
-          maxTime: now + 300,
-        },
-      })
-        .addOperation(
-          Operation.manageData({
-            source: publicKey,
-            name: 'SwiftEx Auth',
-            value: Math.random().toString(36).substring(2, 15),
-          })
-        )
-        .build();
-
-      tx.sign(serverKeypair);
-      return { xdr: tx.toXDR(), networkPassphrase };
-    } catch (mockErr) {
-      console.error('[auth] Mock fallback generation also failed:', mockErr);
-      throw err;
-    }
+    console.error('[auth] Error fetching Stellar signing payload:', err);
+    throw err;
   }
 }
 
-// NOT IN USE: Stellar wallets no longer require verification upon connection
-export async function verifyStellarChallenge(
-  signedXdr: string,
-  networkPassphrase: string,
-  options?: SiweVerifyOptions
+export async function verifyStellarPayload(
+  payload: string,
+  signatureOrSignedXdr: string | { signedXdr?: string; signature?: string },
+  options?: SiweVerifyOptions & { stellarAddress?: string; signedXdr?: string }
 ): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> {
   const API_URL = getAuthApiBaseUrl();
 
   if (API_URL) {
     try {
-      console.log(
-        '[auth] Verifying Stellar signature on backend:',
-        `${API_URL}/signing/stellar/verify`
-      );
-      const payloadBody = {
-        signedXdr,
-        networkPassphrase,
-        address: options?.address,
+      const stellarAddress = options?.stellarAddress || options?.address || '';
+      const payloadBody: Record<string, string> = {
+        chain: 'stellar',
+        payload,
+        stellarAddress,
       };
-      console.log('[auth] Verify request body:', payloadBody);
 
-      const res = await fetch(`${API_URL}/signing/stellar/verify`, {
+      if (typeof signatureOrSignedXdr === 'object' && signatureOrSignedXdr !== null) {
+        if (signatureOrSignedXdr.signedXdr) payloadBody.signedXdr = signatureOrSignedXdr.signedXdr;
+        if (signatureOrSignedXdr.signature) payloadBody.signature = signatureOrSignedXdr.signature;
+      } else if (typeof signatureOrSignedXdr === 'string') {
+        if (signatureOrSignedXdr.startsWith('AAAA')) {
+          payloadBody.signedXdr = signatureOrSignedXdr;
+        } else {
+          payloadBody.signature = signatureOrSignedXdr;
+        }
+      }
+
+      if (options?.signedXdr) {
+        payloadBody.signedXdr = options.signedXdr;
+      }
+
+      const res = await fetch(`${API_URL}/signing/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payloadBody),
@@ -411,18 +376,19 @@ export async function verifyStellarChallenge(
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        console.error('[auth] Backend verify error response:', errData);
-        throw new Error(
+        const err: any = new Error(
           errData.message || errData.error || 'Signature verification failed on server'
         );
+        err.status = res.status;
+        throw err;
       }
 
       const data = await res.json();
-      console.log('[auth] Backend verify success response:', data);
 
-      if (data.valid === false) {
+      if (data.valid === false || data.result?.valid === false) {
         throw new Error(
           data.message ||
+            data.result?.message ||
             data.error ||
             'Signature verification failed on server (invalid signature)'
         );
@@ -432,6 +398,9 @@ export async function verifyStellarChallenge(
         data.accessToken ||
         data.jwt ||
         data.token ||
+        data.result?.jwt ||
+        data.result?.accessToken ||
+        data.result?.token ||
         data.data?.accessToken ||
         data.data?.token ||
         data.data?.jwt;
@@ -442,11 +411,9 @@ export async function verifyStellarChallenge(
         try {
           const payloadPart = accessToken.split('.')[1];
           if (payloadPart) {
-            const decodedPayload = JSON.parse(
-              atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/'))
-            );
-            if (decodedPayload.exp) {
-              parsedExpiresIn = decodedPayload.exp - Math.floor(Date.now() / 1000);
+            const decoded = JSON.parse(atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/')));
+            if (decoded.exp) {
+              parsedExpiresIn = decoded.exp - Math.floor(Date.now() / 1000);
             }
           }
         } catch (e) {
@@ -469,17 +436,20 @@ export async function verifyStellarChallenge(
           expiresAt: Date.now() + expiresIn * 1000,
           issuedAt: Date.now(),
           chainId: options.chainId,
-          message: 'Stellar Challenge',
-          signature: signedXdr,
+          message: payload,
+          signature: payloadBody.signedXdr || payloadBody.signature || '',
         });
+        if (accessToken) {
+          fireJwtSessionListeners(accessToken, options.address);
+        }
       }
 
       return { accessToken, expiresIn, refreshToken };
     } catch (err: any) {
-      console.error('[auth] Backend verify failed:', err);
+      console.error('[auth] Stellar verify failed:', err);
       throw err instanceof Error
         ? err
-        : new Error(String(err?.message || 'Stellar challenge verification failed'));
+        : new Error(String(err?.message || 'Stellar signature verification failed'));
     }
   }
 

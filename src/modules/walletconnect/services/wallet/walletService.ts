@@ -9,7 +9,7 @@ import {
   setupEIP6963Listener,
 } from './providerRegistry';
 import { clearSessionStorage, restoreSessions, saveSession } from './sessionPersistence';
-import { signSiweMessage, signStellarChallenge } from './signing';
+import { signSiweMessage, signStellarChallenge, signStellarPayload } from './signing';
 import { connectStellar } from './stellarConnect';
 import type {
   ConnectionState,
@@ -166,6 +166,15 @@ class WalletService {
     return signSiweMessage(evmAddress, provider, message, chainId);
   }
 
+  async signStellarPayload(
+    payload: string,
+    provider: unknown,
+    stellarAddress?: string,
+    network?: string
+  ): Promise<string> {
+    return signStellarPayload(payload, provider, stellarAddress, network);
+  }
+
   async signStellarChallenge(
     xdr: string,
     networkPassphrase: string,
@@ -200,13 +209,40 @@ class WalletService {
 
   async checkSessionHealth(): Promise<{ type: WalletType; valid: boolean }[]> {
     const results: { type: WalletType; valid: boolean }[] = [];
-    for (const [type] of this.ctx.sessions.entries()) {
+    for (const [type, session] of this.ctx.sessions.entries()) {
       const provider = this.ctx.providers.get(type);
-      const hasSession = !!provider?.session;
-      const notExpired = hasSession
-        ? !provider.session.expiry || Date.now() / 1000 < provider.session.expiry
-        : false;
-      const valid = hasSession && notExpired;
+      let valid = false;
+
+      const isWalletConnect =
+        session?.connectionMode === 'unified' || session?.connectionMode === 'separate';
+
+      if (isWalletConnect) {
+        const hasSession = !!provider?.session;
+        const notExpired = hasSession
+          ? !provider.session.expiry || Date.now() / 1000 < provider.session.expiry
+          : false;
+        valid = hasSession && notExpired;
+      } else if (provider) {
+        if (type === 'evm' && typeof provider.request === 'function') {
+          try {
+            const accounts = await provider.request({ method: 'eth_accounts' });
+            valid = Array.isArray(accounts) && accounts.length > 0;
+          } catch {
+            valid = false;
+          }
+        } else if (type === 'stellar') {
+          try {
+            if (typeof provider.isConnected === 'function') {
+              valid = await provider.isConnected();
+            } else if (typeof provider.getPublicKey === 'function') {
+              valid = true;
+            }
+          } catch {
+            valid = false;
+          }
+        }
+      }
+
       results.push({ type, valid });
       if (!valid) void this.disconnect(type);
     }

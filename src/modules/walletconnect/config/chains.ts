@@ -126,7 +126,7 @@ export const buildUnifiedNamespaces = (
     optionalNamespaces: {
       eip155: evmNamespace,
       stellar: {
-        methods: ['stellar_signTransaction', 'stellar_signAndSubmitXDR'],
+        methods: ['stellar_signTransaction', 'stellar_signAndSubmitXDR', 'stellar_signXDR'],
         chains: [stellarChain],
         events: ['accountsChanged'],
       },

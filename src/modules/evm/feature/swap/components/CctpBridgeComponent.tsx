@@ -12,7 +12,7 @@ import {
   RefreshCw,
   Zap,
 } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { WalletType } from '../../../../walletconnect/constants/Wallet';
 import { useWalletAssets } from '../../../../walletconnect/hooks/useWalletAssets';
@@ -42,12 +42,15 @@ export const CctpBridgeComponent: React.FC<CctpBridgeComponentProps> = ({ curren
     assets,
     loading: assetsLoading,
     isRefreshing: assetsRefreshing,
+    refetch: refetchAssets,
   } = useWalletAssets(currentNetwork);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [manualHash, setManualHash] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
+  const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
+  const hasFetchedRef = useRef(false);
 
   const {
     direction,
@@ -83,6 +86,22 @@ export const CctpBridgeComponent: React.FC<CctpBridgeComponentProps> = ({ curren
 
   const selectedChainId = selectedEvmChain[currentNetwork].chainId;
   const nativeGasSymbol = selectedEvmChain.symbol;
+
+  useEffect(() => {
+    hasFetchedRef.current = false;
+    refetchAssets().finally(() => {
+      hasFetchedRef.current = true;
+    });
+  }, [evmAddress, stellarAddress, selectedChainId, refetchAssets]);
+
+  const handleRefreshBalance = useCallback(async () => {
+    setIsRefreshingBalance(true);
+    try {
+      await refetchAssets();
+    } finally {
+      setIsRefreshingBalance(false);
+    }
+  }, [refetchAssets]);
 
   const evmUsdcBalance = useMemo(() => {
     const asset = assets.find(
@@ -122,8 +141,10 @@ export const CctpBridgeComponent: React.FC<CctpBridgeComponentProps> = ({ curren
   const sourceUsdcBalance = direction === 'EVM_TO_STELLAR' ? evmUsdcBalance : stellarUsdcBalance;
   const sourceNativeBalance = direction === 'EVM_TO_STELLAR' ? evmNativeBalance : stellarXlmBalance;
   const sourceNativeSymbol = direction === 'EVM_TO_STELLAR' ? nativeGasSymbol : 'XLM';
-  const isBalanceLoading = assetsLoading || assetsRefreshing;
-  const hasLowGas = sourceNativeBalance !== null && sourceNativeBalance < 0.001;
+  const isBalanceLoading =
+    assetsLoading || assetsRefreshing || isRefreshingBalance || !hasFetchedRef.current;
+  const hasLowGas =
+    !isBalanceLoading && sourceNativeBalance !== null && sourceNativeBalance < 0.001;
 
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -671,7 +692,19 @@ export const CctpBridgeComponent: React.FC<CctpBridgeComponentProps> = ({ curren
             <div className="mt-4 sm:mt-6 space-y-2">
               <div className="flex flex-wrap justify-between items-center gap-2 text-[10px] sm:text-[11px] font-bold">
                 <div className="flex items-center gap-1.5 sm:gap-2 text-muted">
-                  <span>Balance:</span>
+                  <button
+                    type="button"
+                    onClick={handleRefreshBalance}
+                    disabled={isBalanceLoading}
+                    className="flex items-center gap-1 hover:text-brand transition-colors disabled:opacity-50"
+                    title="Refresh balances"
+                  >
+                    <span>Balance:</span>
+                    <RefreshCw
+                      size={9}
+                      className={`shrink-0 ${isBalanceLoading ? 'animate-spin' : ''}`}
+                    />
+                  </button>
                   {isBalanceLoading ? (
                     <span className="w-20 h-3 rounded animate-shimmer-brand bg-white/10 inline-block" />
                   ) : (

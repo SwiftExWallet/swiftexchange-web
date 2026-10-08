@@ -131,6 +131,7 @@ export async function connectStellarWalletConnectSingle(
       : { namespaces };
 
   return new Promise((resolve, reject) => {
+    let sessionResolved = false;
     let modalOpened = false;
 
     const onDisplayUri = (uri: string) => {
@@ -180,9 +181,11 @@ export async function connectStellarWalletConnectSingle(
       if (state.open) {
         modalOpened = true;
       } else if (modalOpened && !state.open) {
-        cleanup();
-        provider.abortPairing?.();
-        reject(new Error('User closed the modal'));
+        if (!sessionResolved) {
+          cleanup();
+          provider.abortPairing?.();
+          reject(new Error('User closed the modal'));
+        }
       }
     });
 
@@ -191,6 +194,7 @@ export async function connectStellarWalletConnectSingle(
     provider
       .connect(connectParams as any)
       .then((session: any) => {
+        sessionResolved = true;
         cleanup();
         modal.closeModal();
 
