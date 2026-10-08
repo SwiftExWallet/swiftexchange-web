@@ -31,7 +31,7 @@ export const ConnectWalletButton: React.FC = () => {
       setCopiedAddress(address);
       setTimeout(() => setCopiedAddress(null), 2000);
     } catch (e) {
-      console.log(e, 'coptoclipbord error');
+      console.error('Failed to copy address to clipboard:', e);
     }
   };
 

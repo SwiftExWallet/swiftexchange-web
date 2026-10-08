@@ -54,7 +54,7 @@ export const getEVMChains = (network: NetworkType): EVMChainConfig[] => {
 
 export const STELLAR_CONFIG_MAINNET: StellarChainConfig = {
   network: 'PUBLIC',
-  networkPassphrase: Networks.PUBLIC,
+  networkPassphrase: Networks?.PUBLIC || 'Public Global Stellar Network ; September 2015',
   horizonUrl: 'https://horizon.stellar.org',
   chainId: 'pubnet',
   logoUrl:
@@ -63,7 +63,7 @@ export const STELLAR_CONFIG_MAINNET: StellarChainConfig = {
 
 export const STELLAR_CONFIG_TESTNET: StellarChainConfig = {
   network: 'TESTNET',
-  networkPassphrase: Networks.TESTNET,
+  networkPassphrase: Networks?.TESTNET || 'Test SDF Network ; September 2015',
   horizonUrl: 'https://horizon-testnet.stellar.org',
   chainId: 'testnet',
   logoUrl:
@@ -126,7 +126,7 @@ export const buildUnifiedNamespaces = (
     optionalNamespaces: {
       eip155: evmNamespace,
       stellar: {
-        methods: ['stellar_signTransaction', 'stellar_signAndSubmitXDR'],
+        methods: ['stellar_signTransaction', 'stellar_signAndSubmitXDR', 'stellar_signXDR'],
         chains: [stellarChain],
         events: ['accountsChanged'],
       },

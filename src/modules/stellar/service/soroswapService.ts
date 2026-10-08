@@ -326,31 +326,34 @@ export class SoroswapService {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const message = data?.message || data?.error || `HTTP ${res.status}`;
-      throw new Error(
-        `Soroswap ${path} failed: ${typeof message === 'string' ? message : JSON.stringify(message)}`
-      );
+      const cleanMsg = typeof message === 'string' ? message : JSON.stringify(message);
+      const err: any = new Error(cleanMsg);
+      err.status = res.status;
+      err.data = data;
+      throw err;
     }
     return data as T;
   }
 
-  /**
-   * Request a quote from Soroswap router.
-   */
   async getQuote(
     fromAsset: StellarSDK.Asset | string | any,
     toAsset: StellarSDK.Asset | string | any,
     amount: string,
-    options: { slippageTolerance?: number; maxHops?: number } = {}
+    options: { slippageTolerance?: number; maxHops?: number; userAddress?: string } = {}
   ): Promise<SwapQuote> {
     const assetIn = this.getContractId(fromAsset);
     const assetOut = this.getContractId(toAsset);
     const slippageTolerance = options.slippageTolerance ?? 1;
 
-    const quoteRes: any = await this.post('/quote', {
-      assetIn,
-      assetOut,
-      amount,
-    });
+    const quoteRes: any = await this.post(
+      '/quote',
+      {
+        assetIn,
+        assetOut,
+        amount,
+      },
+      options.userAddress
+    );
 
     if (!quoteRes) {
       throw new Error('Backend did not return a valid Soroswap quote');
@@ -479,7 +482,12 @@ export class SoroswapService {
     }
 
     const expectedNetworkId = this.isTestnet ? 'testnet' : 'mainnet';
-    if (prepared.network && prepared.network !== expectedNetworkId) {
+    const backendNet = (prepared.network || '').toLowerCase();
+    const isNetworkMatch = this.isTestnet
+      ? backendNet === 'testnet'
+      : backendNet === 'mainnet' || backendNet === 'public' || backendNet === 'pubnet';
+
+    if (prepared.network && !isNetworkMatch) {
       throw new Error(`Backend network is ${prepared.network}, expected ${expectedNetworkId}`);
     }
     if (prepared.networkPassphrase && prepared.networkPassphrase !== this.networkPassphrase) {
@@ -589,20 +597,26 @@ export class SoroswapService {
         }
       })();
 
-      const pollPromise = new Promise<string | null>(resolve => {
-        const timer = setTimeout(async () => {
-          const res = await pollHorizonForConfirmation(this.horizonUrl, computedHash);
-          resolve(res);
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+      const pollPromise = new Promise<{ hash: string; status: string }>(resolve => {
+        pollTimer = setTimeout(async () => {
+          try {
+            const res = await pollHorizonForConfirmation(this.horizonUrl, computedHash);
+            if (res) {
+              resolve({ hash: res, status: 'success' });
+            }
+          } catch {
+            // Polling error ignored while wallet request is pending
+          }
         }, 2500);
-        reqPromise.finally(() => clearTimeout(timer));
       });
-      const result = await Promise.race([
-        reqPromise,
-        pollPromise.then(confirmedHash => {
-          if (confirmedHash) return { hash: confirmedHash, status: 'success' };
-          return new Promise(() => {});
-        }),
-      ]);
+
+      let result: any;
+      try {
+        result = await Promise.race([reqPromise, pollPromise]);
+      } finally {
+        if (pollTimer) clearTimeout(pollTimer);
+      }
 
       const extractedHash = extractHashFromResult(result, computedHash);
       if (extractedHash) {
@@ -639,20 +653,26 @@ export class SoroswapService {
         }
       })();
 
-      const pollPromise = new Promise<string | null>(resolve => {
-        const timer = setTimeout(async () => {
-          const res = await pollHorizonForConfirmation(this.horizonUrl, computedHash);
-          resolve(res);
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+      const pollPromise = new Promise<{ hash: string; status: string }>(resolve => {
+        pollTimer = setTimeout(async () => {
+          try {
+            const res = await pollHorizonForConfirmation(this.horizonUrl, computedHash);
+            if (res) {
+              resolve({ hash: res, status: 'success' });
+            }
+          } catch {
+            // Polling error ignored while wallet request is pending
+          }
         }, 2500);
-        reqPromise.finally(() => clearTimeout(timer));
       });
-      const result = await Promise.race([
-        reqPromise,
-        pollPromise.then(confirmedHash => {
-          if (confirmedHash) return { hash: confirmedHash, status: 'success' };
-          return new Promise(() => {});
-        }),
-      ]);
+
+      let result: any;
+      try {
+        result = await Promise.race([reqPromise, pollPromise]);
+      } finally {
+        if (pollTimer) clearTimeout(pollTimer);
+      }
 
       const extractedHash = extractHashFromResult(result, computedHash);
       if (extractedHash) {

@@ -1,3 +1,5 @@
+import { getCurrentNetwork } from '../../../service/apiConfig';
+
 const STORAGE_KEY = 'swiftex_local_transactions';
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -20,6 +22,22 @@ export interface LocalTransaction {
   provider?: string;
 }
 
+export const addLocalTransaction = (tx: LocalTransaction): void => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const transactions: LocalTransaction[] = raw ? JSON.parse(raw) : [];
+    const filtered = transactions.filter(t => t.hash.toLowerCase() !== tx.hash.toLowerCase());
+    const enrichedTx: LocalTransaction = {
+      ...tx,
+      network: tx.network || getCurrentNetwork(),
+    };
+    filtered.unshift(enrichedTx);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+  } catch (error) {
+    console.error('Failed to add local transaction:', error);
+  }
+};
+
 export const getLocalTransactions = (
   walletAddresses?: string[],
   network?: string
@@ -30,6 +48,7 @@ export const getLocalTransactions = (
 
     const transactions: LocalTransaction[] = JSON.parse(stored);
     const now = Date.now();
+    const activeNetwork = network || getCurrentNetwork();
 
     const validTransactions = transactions.filter(tx => {
       const isExpired = now - tx.timestamp >= MAX_AGE_MS;
@@ -61,8 +80,10 @@ export const getLocalTransactions = (
         return tx.from && lowerAddresses.includes(tx.from.toLowerCase());
       });
     }
-    if (network) {
-      filteredTransactions = filteredTransactions.filter(tx => tx.network === network);
+    if (activeNetwork) {
+      filteredTransactions = filteredTransactions.filter(
+        tx => !tx.network || tx.network === activeNetwork
+      );
     }
 
     if (validTransactions.length !== transactions.length) {

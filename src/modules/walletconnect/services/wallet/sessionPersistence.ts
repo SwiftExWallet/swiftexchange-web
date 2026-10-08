@@ -106,7 +106,8 @@ async function restoreSession(
       console.error('Disconnect error:', err);
     }
     ctx.providers.delete(providerKey);
-    clearSessionStorage();
+    ctx.sessions.delete(type);
+    saveSession(ctx);
     return null;
   }
 
@@ -247,19 +248,7 @@ export async function refreshSessionFromProvider(
 
 export function clearSessionStorage(): void {
   try {
-    const PRESERVE_KEYS = [
-      'swiftex_local_transactions',
-      'theme-storage',
-      'network',
-      'swiftex_pending_skip_txs_v2',
-      'stellar_dydx_bridge_step',
-    ];
-
-    Object.keys(localStorage).forEach(key => {
-      if (!PRESERVE_KEYS.includes(key)) {
-        localStorage.removeItem(key);
-      }
-    });
+    localStorage.removeItem(SESSION_STORAGE_KEY);
   } catch (error) {
     console.warn('[WalletService] Session storage clear failed:', error);
   }

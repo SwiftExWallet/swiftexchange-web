@@ -514,5 +514,5 @@ export function purgeAgentKey(network?: string): void {
 
 export async function purgeAgentKeyAndAes(network?: string): Promise<void> {
   purgeAgentKey(network);
-  await destroyAESKey();
+  await destroyAESKey(ASTER_AES_KEY_ID);
 }

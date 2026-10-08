@@ -28,6 +28,7 @@ export const WalletListModal: React.FC = () => {
     isAuthenticating,
     authError,
     authenticateEvm,
+    authenticateStellar,
     pairingUri,
   } = useWalletStore();
 
@@ -69,7 +70,7 @@ export const WalletListModal: React.FC = () => {
   const evmConnected = Boolean(connectedWallets.evm?.address);
   const stellarConnected = Boolean(connectedWallets.stellar?.address);
   const anyConnected = evmConnected || stellarConnected;
-  const isSetupDone = evmConnected ? isAuthenticated : stellarConnected;
+  const isSetupDone = evmConnected ? isAuthenticated : stellarConnected ? isAuthenticated : false;
 
   const handleComplete = useCallback(() => {
     closeModal();
@@ -90,7 +91,8 @@ export const WalletListModal: React.FC = () => {
       setError(null);
       setConnectingWallet(null);
       const hasEvm = Boolean(useWalletStore.getState().connectedWallets.evm?.address);
-      if (hasEvm && !useWalletStore.getState().isAuthenticated) {
+      const hasStellar = Boolean(useWalletStore.getState().connectedWallets.stellar?.address);
+      if ((hasEvm || hasStellar) && !useWalletStore.getState().isAuthenticated) {
         setViewMode('onboarding');
       } else {
         setViewMode('wallets');
@@ -153,7 +155,11 @@ export const WalletListModal: React.FC = () => {
       if (useWalletStore.getState().isModalOpen && currentWallets.evm?.address) {
         setViewMode('onboarding');
       } else if (currentWallets.stellar?.address) {
-        handleComplete();
+        if (!useWalletStore.getState().isAuthenticated) {
+          setViewMode('onboarding');
+        } else {
+          handleComplete();
+        }
       } else {
         setViewMode('wallets');
       }
@@ -182,7 +188,11 @@ export const WalletListModal: React.FC = () => {
       if (useWalletStore.getState().isModalOpen && currentWallets.evm?.address) {
         setViewMode('onboarding');
       } else if (currentWallets.stellar?.address) {
-        handleComplete();
+        if (!useWalletStore.getState().isAuthenticated) {
+          setViewMode('onboarding');
+        } else {
+          handleComplete();
+        }
       } else {
         setViewMode('wallets');
       }
@@ -220,7 +230,11 @@ export const WalletListModal: React.FC = () => {
         if (wallet.type === 'evm' && isEvmReady) {
           setViewMode('onboarding');
         } else if (wallet.type === 'stellar' && isStellarReady) {
-          handleComplete();
+          if (!useWalletStore.getState().isAuthenticated) {
+            setViewMode('onboarding');
+          } else {
+            handleComplete();
+          }
         } else {
           setViewMode('wallets');
         }
@@ -618,9 +632,7 @@ export const WalletListModal: React.FC = () => {
               <div className="w-6 h-6 rounded-full bg-emerald-500 text-black flex items-center justify-center flex-shrink-0 shadow-sm shadow-emerald-500/20">
                 <Check className="w-3.5 h-3.5 stroke-[3]" />
               </div>
-              {activeWallet?.type !== 'stellar' && (
-                <div className="w-0.5 h-8 my-1 bg-emerald-500/40" />
-              )}
+              <div className="w-0.5 h-8 my-1 bg-emerald-500/40" />
             </div>
 
             <div className="flex-1 pb-1 min-w-0">
@@ -642,76 +654,80 @@ export const WalletListModal: React.FC = () => {
             </div>
           </div>
 
-          {activeWallet?.type !== 'stellar' && (
-            <div className="flex items-start gap-3.5">
-              <div className="flex flex-col items-center">
-                <div
-                  style={{
-                    borderColor: isAuthenticated
-                      ? '#10b981'
-                      : isAuthenticating
-                        ? 'var(--color-brand-primary)'
-                        : 'var(--color-border)',
-                    background: isAuthenticated
-                      ? '#10b981'
-                      : isAuthenticating
-                        ? 'color-mix(in srgb, var(--color-brand-primary) 15%, transparent)'
-                        : 'transparent',
-                  }}
-                  className="w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors"
-                >
-                  {isAuthenticated ? (
-                    <Check className="w-3.5 h-3.5 text-black stroke-[3]" />
-                  ) : isAuthenticating ? (
-                    <div className="w-3 h-3 border-2 border-[var(--color-brand-primary)] border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <ShieldCheck className="w-3 h-3 text-[var(--color-text-muted)]" />
-                  )}
-                </div>
-              </div>
-
-              <div className="flex-1 pb-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span
-                    style={{
-                      color: isAuthenticated ? '#10b981' : 'var(--color-text-primary)',
-                    }}
-                    className="text-xs font-semibold"
-                  >
-                    2. Sign In to SwiftEx
-                  </span>
-                  {!isAuthenticated && (
-                    <div>
-                      {isAuthenticating ? (
-                        <span className="text-[11px] font-medium text-[var(--color-brand-primary)] animate-pulse flex items-center gap-1">
-                          Signing in wallet...
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => authenticateEvm()}
-                          disabled={isAnyActionInProgress}
-                          style={{ color: 'var(--color-brand-primary)' }}
-                          className="text-xs font-semibold hover:underline"
-                        >
-                          {authError ? 'Retry Sign' : 'Sign In'}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <p style={{ color: 'var(--color-text-muted)' }} className="text-xs mt-0.5">
-                  {isAuthenticated
-                    ? 'Wallet ownership verified.'
-                    : 'Confirm the signature request in your wallet to verify ownership.'}
-                </p>
-                {authError && !isAuthenticated && (
-                  <div className="mt-1.5 p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px]">
-                    {authError}
-                  </div>
+          <div className="flex items-start gap-3.5">
+            <div className="flex flex-col items-center">
+              <div
+                style={{
+                  borderColor: isAuthenticated
+                    ? '#10b981'
+                    : isAuthenticating
+                      ? 'var(--color-brand-primary)'
+                      : 'var(--color-border)',
+                  background: isAuthenticated
+                    ? '#10b981'
+                    : isAuthenticating
+                      ? 'color-mix(in srgb, var(--color-brand-primary) 15%, transparent)'
+                      : 'transparent',
+                }}
+                className="w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors"
+              >
+                {isAuthenticated ? (
+                  <Check className="w-3.5 h-3.5 text-black stroke-[3]" />
+                ) : isAuthenticating ? (
+                  <div className="w-3 h-3 border-2 border-[var(--color-brand-primary)] border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <ShieldCheck className="w-3 h-3 text-[var(--color-text-muted)]" />
                 )}
               </div>
             </div>
-          )}
+
+            <div className="flex-1 pb-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  style={{
+                    color: isAuthenticated ? '#10b981' : 'var(--color-text-primary)',
+                  }}
+                  className="text-xs font-semibold"
+                >
+                  2. Sign In to SwiftEx
+                </span>
+                {!isAuthenticated && (
+                  <div>
+                    {isAuthenticating ? (
+                      <span className="text-[11px] font-medium text-[var(--color-brand-primary)] animate-pulse flex items-center gap-1">
+                        Signing in wallet...
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          activeWallet?.type === 'stellar'
+                            ? authenticateStellar()
+                            : authenticateEvm()
+                        }
+                        disabled={isAnyActionInProgress}
+                        style={{ color: 'var(--color-brand-primary)' }}
+                        className="text-xs font-semibold hover:underline"
+                      >
+                        {authError ? 'Retry Sign' : 'Sign In'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <p style={{ color: 'var(--color-text-muted)' }} className="text-xs mt-0.5">
+                {isAuthenticated
+                  ? 'Wallet ownership verified.'
+                  : activeWallet?.type === 'stellar'
+                    ? 'This is only a login signature. No fee, no payment.'
+                    : 'Confirm the signature request in your wallet to verify ownership.'}
+              </p>
+              {authError && !isAuthenticated && (
+                <div className="mt-1.5 p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[11px]">
+                  {authError}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {isSetupDone ? (

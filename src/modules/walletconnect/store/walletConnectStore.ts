@@ -1,17 +1,20 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
+import { useActivationStore } from '../../../store/activationStore';
+import { useSwapStore } from '../../../store/swapStore';
+import { StellarSequenceTracker } from '../../stellar/utils/StellarSequenceTracker';
 import { IS_MAINNET_ENABLED, IS_TESTNET_ENABLED, type NetworkType } from '../config/chains';
 import {
   buildSiweMessage,
-  buildStellarChallenge,
+  buildStellarPayload,
   clearAccessToken,
   getCurrentTokenInfo,
   logoutServer,
   restoreAuthSession,
   setAccessToken,
   verifySiwe,
-  verifyStellarChallenge,
+  verifyStellarPayload,
 } from '../services/Siweauthservice';
 import { walletService } from '../services/walletService';
 import { usePortfolioStore } from '../store/portfolioStore';
@@ -78,7 +81,7 @@ interface WalletActions {
 
   authenticateEvm: () => Promise<void>;
   authenticateStellar: () => Promise<void>;
-  logoutAuth: () => Promise<void>;
+  logoutAuth: (address?: string) => Promise<void>;
   setTradingAuthEnabled: (value: boolean) => void;
 }
 
@@ -176,7 +179,21 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         }));
 
         if (type === 'evm') {
-          get().authenticateEvm();
+          if (!get().isAuthenticated || !getCurrentTokenInfo()) {
+            get().authenticateEvm();
+          } else {
+            set(state => ({
+              linkedChains: Array.from(new Set([...state.linkedChains, 'evm'])),
+            }));
+          }
+        } else if (type === 'stellar') {
+          if (!get().isAuthenticated || !getCurrentTokenInfo()) {
+            get().authenticateStellar();
+          } else {
+            set(state => ({
+              linkedChains: Array.from(new Set([...state.linkedChains, 'stellar'])),
+            }));
+          }
         }
 
         const nextWallets = { ...get().connectedWallets, [type]: wallet };
@@ -255,6 +272,8 @@ export const useWalletStore = create<WalletState & WalletActions>()(
 
         if (result.evm) {
           get().authenticateEvm();
+        } else if (result.stellar && !result.evm) {
+          get().authenticateStellar();
         }
 
         const nextWallets = { ...get().connectedWallets, ...walletUpdates };
@@ -300,7 +319,19 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       set({ isAuthenticating: true, authError: null });
 
       try {
-        // 1. Check if we already have a valid session in DB/storage for this address
+        const currentToken = getCurrentTokenInfo();
+        if (currentToken && currentToken.expiresAt > Date.now() + 60_000 && state.isAuthenticated) {
+          const hasStellar = Boolean(get().connectedWallets.stellar);
+          const linked: ('evm' | 'stellar')[] = hasStellar ? ['evm', 'stellar'] : ['evm'];
+          set({
+            isAuthenticated: true,
+            isAuthenticating: false,
+            authError: null,
+            linkedChains: linked,
+          });
+          return;
+        }
+
         console.info('[Auth:EVM] Checking for existing auth session...');
         const existingSession = await restoreAuthSession(evm.address);
         if (existingSession) {
@@ -389,7 +420,6 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       }
     },
 
-    // NOT IN USE: Stellar wallets no longer require verification upon connection
     authenticateStellar: async () => {
       const state = get();
       if (state.isAuthenticating) return;
@@ -399,14 +429,22 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       try {
         const stellar = state.connectedWallets.stellar;
 
-        // 1. If already have an active valid session for this address, skip
         const currentToken = getCurrentTokenInfo();
-        if (
-          currentToken &&
-          stellar &&
-          currentToken.address?.toLowerCase() === stellar.address.toLowerCase()
-        ) {
+        if (currentToken && currentToken.expiresAt > Date.now() + 60_000 && state.isAuthenticated) {
           const hasEvm = Boolean(state.connectedWallets.evm);
+          const linked: ('evm' | 'stellar')[] = hasEvm ? ['evm', 'stellar'] : ['stellar'];
+          set({
+            isAuthenticated: true,
+            isAuthenticating: false,
+            authError: null,
+            linkedChains: linked,
+          });
+          return;
+        }
+
+        const existingSession = stellar ? await restoreAuthSession(stellar.address) : null;
+        if (existingSession) {
+          const hasEvm = Boolean(get().connectedWallets.evm);
           const linked: ('evm' | 'stellar')[] = hasEvm ? ['evm', 'stellar'] : ['stellar'];
           set({
             isAuthenticated: true,
@@ -427,21 +465,43 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           throw new Error('Stellar provider not found');
         }
 
-        const { xdr, networkPassphrase } = await buildStellarChallenge(stellar.address);
-        const signedXdr = await walletService.signStellarChallenge(
-          xdr,
-          networkPassphrase,
-          provider
+        let payload = await buildStellarPayload();
+        let authResult = await walletService.signStellarPayload(
+          payload,
+          provider,
+          stellar.address,
+          get().network
         );
 
-        const { accessToken, expiresIn, refreshToken } = await verifyStellarChallenge(
-          signedXdr,
-          networkPassphrase,
-          {
+        let verifyRes;
+        try {
+          verifyRes = await verifyStellarPayload(payload, authResult, {
             address: stellar.address,
-            chainId: stellar.chainId ? Number(stellar.chainId) : undefined,
+            stellarAddress: stellar.address,
+          });
+        } catch (verifyErr: any) {
+          if (
+            verifyErr?.status === 401 ||
+            verifyErr?.message?.toLowerCase?.()?.includes('expired') ||
+            verifyErr?.message?.toLowerCase?.()?.includes('nonce')
+          ) {
+            payload = await buildStellarPayload();
+            authResult = await walletService.signStellarPayload(
+              payload,
+              provider,
+              stellar.address,
+              get().network
+            );
+            verifyRes = await verifyStellarPayload(payload, authResult, {
+              address: stellar.address,
+              stellarAddress: stellar.address,
+            });
+          } else {
+            throw verifyErr;
           }
-        );
+        }
+
+        const { accessToken, expiresIn, refreshToken } = verifyRes;
 
         await setAccessToken(
           {
@@ -449,7 +509,6 @@ export const useWalletStore = create<WalletState & WalletActions>()(
             expiresAt: Date.now() + expiresIn * 1000,
             refreshToken,
             address: stellar.address,
-            chainId: stellar.chainId ? Number(stellar.chainId) : undefined,
           },
           stellar.address
         );
@@ -474,11 +533,14 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       }
     },
 
-    logoutAuth: async () => {
-      const evmAddr = get().connectedWallets.evm?.address;
-      await clearAccessToken(evmAddr);
-      await logoutServer(evmAddr);
-      set({ isAuthenticated: false, authenticatedChain: null, linkedChains: [] });
+    logoutAuth: async (address?: string) => {
+      const targetAddr =
+        address || get().connectedWallets.evm?.address || get().connectedWallets.stellar?.address;
+      await clearAccessToken(targetAddr);
+      if (targetAddr) {
+        await logoutServer(targetAddr);
+      }
+      set({ isAuthenticated: false, authenticatedChain: null, linkedChains: [], authError: null });
     },
 
     setTradingAuthEnabled: (value: boolean) => {
@@ -492,44 +554,89 @@ export const useWalletStore = create<WalletState & WalletActions>()(
 
     disconnect: async type => {
       set({ isDisconnecting: true, isAuthenticating: false, authError: null });
+      const disconnectedWallet = get().connectedWallets[type];
+      const disconnectedAddress = disconnectedWallet?.address;
+      const wasPrimaryAuth = get().authenticatedChain === type;
+
       try {
         await walletService.disconnect(type);
       } finally {
         set({ isDisconnecting: false });
       }
 
-      set(state => {
-        const remainingWallets = { ...state.connectedWallets };
-        delete remainingWallets[type];
-        const remainingStatus = { ...state.connectionStatus };
-        delete remainingStatus[type];
-        const remainingPings = { ...state.sessionLastPingAt };
-        delete remainingPings[type];
+      const remainingWallets = { ...get().connectedWallets };
+      delete remainingWallets[type];
+      const remainingStatus = { ...get().connectionStatus };
+      delete remainingStatus[type];
+      const remainingPings = { ...get().sessionLastPingAt };
+      delete remainingPings[type];
 
-        const hasWallets = Object.keys(remainingWallets).length > 0;
-        const nextRawSession = hasWallets
-          ? walletService.getProvider('evm')?.session ||
-            walletService.getProvider('stellar')?.session ||
-            null
-          : null;
-        return {
-          connectedWallets: remainingWallets,
-          connectionStatus: remainingStatus,
-          sessionLastPingAt: remainingPings,
-          session: nextRawSession,
-        };
+      const hasWallets = Object.keys(remainingWallets).length > 0;
+      const nextRawSession = hasWallets
+        ? walletService.getProvider('evm')?.session ||
+          walletService.getProvider('stellar')?.session ||
+          null
+        : null;
+
+      set({
+        connectedWallets: remainingWallets,
+        connectionStatus: remainingStatus,
+        sessionLastPingAt: remainingPings,
+        session: nextRawSession,
       });
 
-      if (type === 'evm') {
-        await get().logoutAuth();
-      } else if (type === 'stellar') {
+      const otherType: WalletType = type === 'evm' ? 'stellar' : 'evm';
+      const remainingOtherWallet = remainingWallets[otherType];
+
+      if (wasPrimaryAuth) {
+        if (disconnectedAddress) {
+          await clearAccessToken(disconnectedAddress);
+          if (type === 'evm') {
+            await logoutServer(disconnectedAddress);
+          }
+        }
+
+        if (remainingOtherWallet) {
+          const storedSession = await restoreAuthSession(remainingOtherWallet.address);
+          if (storedSession) {
+            set({
+              isAuthenticated: true,
+              authenticatedChain: otherType,
+              linkedChains: [otherType],
+              authError: null,
+            });
+          } else {
+            set({
+              isAuthenticated: false,
+              authenticatedChain: null,
+              linkedChains: [otherType],
+              authError: null,
+            });
+            if (otherType === 'evm') {
+              void get().authenticateEvm();
+            } else if (otherType === 'stellar') {
+              void get().authenticateStellar();
+            }
+          }
+        } else {
+          set({
+            isAuthenticated: false,
+            authenticatedChain: null,
+            linkedChains: [],
+            authError: null,
+          });
+        }
+      } else {
+        if (disconnectedAddress) {
+          void clearAccessToken(disconnectedAddress);
+        }
         set(state => ({
-          linkedChains: state.linkedChains.filter(c => c !== 'stellar'),
+          linkedChains: state.linkedChains.filter(c => c !== type),
         }));
       }
 
       const portfolio = usePortfolioStore.getState();
-      if (Object.keys(get().connectedWallets).length === 0) {
+      if (Object.keys(remainingWallets).length === 0) {
         portfolio.clearAssets();
       } else {
         if (type === 'evm') {
@@ -568,7 +675,22 @@ export const useWalletStore = create<WalletState & WalletActions>()(
 
         if (!sessions.length) {
           set({ isRestoringSession: false });
-          await get().disconnectAll();
+          const hadConnectedWallets =
+            Object.keys(get().connectedWallets).length > 0 ||
+            Boolean(localStorage.getItem('wallet_sessions'));
+          if (hadConnectedWallets) {
+            set({
+              connectedWallets: {},
+              connectionStatus: {},
+              sessionLastPingAt: {},
+              session: null,
+              isAuthenticated: false,
+              authenticatedChain: null,
+              linkedChains: [],
+            });
+            localStorage.removeItem('wallet_sessions');
+            usePortfolioStore.getState().clearAssets();
+          }
           return;
         }
 
@@ -615,6 +737,28 @@ export const useWalletStore = create<WalletState & WalletActions>()(
               authenticatedChain: 'evm',
               linkedChains: linked,
             });
+          } else if (wallets.stellar) {
+            const stellarSession = await restoreAuthSession(wallets.stellar.address);
+            if (stellarSession) {
+              set({
+                isAuthenticated: true,
+                authenticatedChain: 'stellar',
+                linkedChains: ['stellar', 'evm'],
+              });
+            } else {
+              set({ isAuthenticated: false, authenticatedChain: null, linkedChains: [] });
+            }
+          } else {
+            set({ isAuthenticated: false, authenticatedChain: null, linkedChains: [] });
+          }
+        } else if (wallets.stellar) {
+          const session = await restoreAuthSession(wallets.stellar.address);
+          if (session) {
+            set({
+              isAuthenticated: true,
+              authenticatedChain: 'stellar',
+              linkedChains: ['stellar'],
+            });
           } else {
             set({ isAuthenticated: false, authenticatedChain: null, linkedChains: [] });
           }
@@ -632,6 +776,16 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       if (network === get().network) return;
       await walletService.setNetwork(network);
       usePortfolioStore.getState().clearAssets();
+      useSwapStore.getState().clearPendingTx();
+      useSwapStore.setState({
+        sellAssetSymbol: '',
+        sellAssetAddress: '',
+        buyAssetSymbol: '',
+        buyAssetAddress: '',
+        sellAmount: '',
+      });
+      useActivationStore.getState().clearActivation();
+      StellarSequenceTracker.resetAll();
       await get().logoutAuth();
       set({
         network,
@@ -775,6 +929,11 @@ export const initWalletListener = async () => {
             peerRedirect: session.peerRedirect,
           };
 
+          const currentStore = useWalletStore.getState();
+          const prevWallet = currentStore.connectedWallets[type];
+          const isAddressChanged =
+            prevWallet?.address && prevWallet.address.toLowerCase() !== address.toLowerCase();
+
           const pingAt = walletService.getLastPingAt(type);
           const rawSession = walletService.getProvider(type)?.session || null;
 
@@ -782,10 +941,25 @@ export const initWalletListener = async () => {
             connectedWallets: { ...prev.connectedWallets, [type]: updatedWallet },
             connectionStatus: { ...prev.connectionStatus, [type]: { state: 'connected' } },
             session: rawSession,
+            ...(isAddressChanged && prev.authenticatedChain === type
+              ? { isAuthenticated: false, authenticatedChain: null, authError: null }
+              : {}),
             ...(pingAt !== null
               ? { sessionLastPingAt: { ...prev.sessionLastPingAt, [type]: pingAt } }
               : {}),
           }));
+
+          if (isAddressChanged && currentStore.authenticatedChain === type) {
+            void clearAccessToken(prevWallet.address);
+            if (type === 'evm') {
+              void useWalletStore.getState().authenticateEvm();
+            } else if (type === 'stellar') {
+              const hasEvm = Boolean(useWalletStore.getState().connectedWallets.evm?.address);
+              if (!hasEvm) {
+                void useWalletStore.getState().authenticateStellar();
+              }
+            }
+          }
         }
       } catch (error: any) {
         console.error(error);

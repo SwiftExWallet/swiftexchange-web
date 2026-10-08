@@ -9,6 +9,7 @@ import {
   getStellarConfig,
 } from '../../config/chains';
 import { WALLET_METADATA_MAP } from '../../constants/Wallet';
+import { setupWalletConnectListeners } from './eventListeners';
 import { getOrCreateProvider } from './providerRegistry';
 import type { UnifiedConnectionResult, WalletServiceContext, WalletSession } from './types';
 
@@ -28,6 +29,7 @@ export async function connectUnified(
   walletId: string
 ): Promise<UnifiedConnectionResult> {
   ctx.emitState('evm', 'connecting');
+  ctx.emitState('stellar', 'connecting');
 
   let provider: any;
   let modal: WalletConnectModal | undefined;
@@ -206,6 +208,13 @@ export async function connectUnified(
         : 'none',
     });
 
+    if (result.evm) {
+      setupWalletConnectListeners(ctx, provider, 'evm');
+    }
+    if (result.stellar) {
+      setupWalletConnectListeners(ctx, provider, 'stellar');
+    }
+
     ctx.saveSession();
     return result;
   } catch (error: any) {
@@ -214,6 +223,7 @@ export async function connectUnified(
       ctx.providers.delete('unified');
     }
     ctx.emitState('evm', 'failed');
+    ctx.emitState('stellar', 'failed');
     throw error;
   }
 }

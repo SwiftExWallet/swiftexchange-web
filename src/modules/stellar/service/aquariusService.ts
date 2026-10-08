@@ -122,18 +122,21 @@ export class AquariusService {
       throw new Error('Aquarius found no viable swap route for this pair');
     }
 
-    const estimatedOutput = new BigNumber(data.amount).shiftedBy(-7).toFixed(7);
+    const estimatedOutput = new BigNumber(data.amount)
+      .shiftedBy(-7)
+      .toFixed(7, BigNumber.ROUND_DOWN);
     const minimumOutput = new BigNumber(data.amount_with_fee ?? data.amount)
       .shiftedBy(-7)
-      .toFixed(7);
+      .toFixed(7, BigNumber.ROUND_DOWN);
 
-    // Compute price impact if available
-    const estimatedOutputNum = parseFloat(estimatedOutput);
-    const inputAmountNum = parseFloat(amount);
+    // Compute price impact if provided by Aquarius API
     let priceImpact = 0;
-    if (inputAmountNum > 0 && estimatedOutputNum > 0) {
-      const minMultiplier = 1 - slippageTolerance / 100;
-      priceImpact = Math.max(0, parseFloat(((1 - minMultiplier) * 100).toFixed(2)));
+    const rawPriceImpact = data.price_impact ?? data.priceImpact;
+    if (rawPriceImpact !== undefined && rawPriceImpact !== null) {
+      const piBN = new BigNumber(rawPriceImpact);
+      if (piBN.isFinite() && piBN.gte(0)) {
+        priceImpact = piBN.toNumber();
+      }
     }
 
     return {

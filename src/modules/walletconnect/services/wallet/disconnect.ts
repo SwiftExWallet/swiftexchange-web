@@ -117,34 +117,21 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function clearAppData(): Promise<void> {
-  const PRESERVE_KEYS = [
-    'swiftex_local_transactions',
-    'theme-storage',
-    'network',
-    'swiftex_pending_skip_txs_v2',
-    'stellar_dydx_bridge_step',
-  ];
-
-  Object.keys(localStorage).forEach(key => {
-    if (
-      !PRESERVE_KEYS.includes(key) &&
-      !key.startsWith('swiftex_unified') &&
-      !key.startsWith('swiftex_evm') &&
-      !key.startsWith('swiftex_stellar') &&
-      !key.startsWith('wc@2')
-    ) {
-      localStorage.removeItem(key);
-    }
-  });
+  try {
+    localStorage.removeItem('wallet_sessions');
+    localStorage.removeItem('_sx_active_auth_addr');
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('_sx_auth_')) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch (error) {
+    console.warn('[WalletService] Storage clear failed:', error);
+  }
 
   try {
-    if (typeof indexedDB !== 'undefined' && indexedDB.databases) {
-      const dbs = await indexedDB.databases();
-      for (const db of dbs) {
-        if (db.name && db.name !== 'WALLET_CONNECT_V2_INDEXED_DB') {
-          indexedDB.deleteDatabase(db.name);
-        }
-      }
+    if (typeof indexedDB !== 'undefined') {
+      indexedDB.deleteDatabase('_sx_v4_kv_28f3');
     }
   } catch (error) {
     console.error('[WalletService] Failed to clear IndexedDB:', error);

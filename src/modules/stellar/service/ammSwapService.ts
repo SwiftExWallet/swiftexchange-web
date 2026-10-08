@@ -173,7 +173,9 @@ export class AmmSwapService extends StellarBaseService {
       }
     }
 
-    return paths.sort((a, b) => parseFloat(b.estimatedOutput) - parseFloat(a.estimatedOutput));
+    return paths.sort((a, b) =>
+      new BigNumber(b.estimatedOutput).minus(a.estimatedOutput).toNumber()
+    );
   }
 
   async getSwapQuote(
@@ -182,7 +184,8 @@ export class AmmSwapService extends StellarBaseService {
     amount: string,
     options: SwapOptions = {}
   ): Promise<SwapQuote> {
-    if (parseFloat(amount) <= 0) {
+    const inputBN = new BigNumber(amount || '0');
+    if (!inputBN.isFinite() || inputBN.lte(0)) {
       throw new Error('Amount must be positive');
     }
 
@@ -202,10 +205,12 @@ export class AmmSwapService extends StellarBaseService {
 
     const bestPath = paths[0];
     const slippageTolerance = options.slippageTolerance || 1;
-    const minOutput = (
-      parseFloat(bestPath.estimatedOutput) *
-      (1 - slippageTolerance / 100)
-    ).toFixed(7);
+    const slippageMultiplier = new BigNumber(1).minus(
+      new BigNumber(slippageTolerance).dividedBy(100)
+    );
+    const minOutput = new BigNumber(bestPath.estimatedOutput)
+      .times(slippageMultiplier)
+      .toFixed(7, BigNumber.ROUND_DOWN);
 
     return {
       fromAsset,

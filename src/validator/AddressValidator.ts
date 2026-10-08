@@ -13,7 +13,7 @@ export const validateAddress = (
     if (!type) {
       if (address.startsWith('0x') && address.length === 42) {
         type = 'evm';
-      } else if (address.length === 56 && address.startsWith('G')) {
+      } else if (address.length === 56 && (address.startsWith('G') || address.startsWith('C'))) {
         type = 'stellar';
       } else if (/^(cosmos|osmo|dydx)1[a-z0-9]{38,58}$/.test(address)) {
         type = 'cosmos';
@@ -25,7 +25,7 @@ export const validateAddress = (
       return isAddress(address);
     }
     if (type === 'stellar') {
-      return StrKey.isValidEd25519PublicKey(address);
+      return StrKey.isValidEd25519PublicKey(address) || StrKey.isValidContract(address);
     }
 
     if (type === 'cosmos') {

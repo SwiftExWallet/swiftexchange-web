@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import * as StellarSDK from '@stellar/stellar-sdk';
+import BigNumber from 'bignumber.js';
 
 import { getStellarConfig } from '../../walletconnect/config/chains';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
@@ -426,10 +427,15 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
       return;
     }
 
-    const numAmount = parseFloat(amount || '0');
-    const numPrice = parseFloat(price || '0');
+    const numAmountBN = new BigNumber(amount || '0');
+    const numPriceBN = new BigNumber(price || '0');
 
-    if (isNaN(numAmount) || isNaN(numPrice) || numAmount <= 0 || numPrice <= 0) {
+    if (
+      !numAmountBN.isFinite() ||
+      !numPriceBN.isFinite() ||
+      numAmountBN.lte(0) ||
+      numPriceBN.lte(0)
+    ) {
       setTotal('0');
       setQuote(null);
       return;
@@ -463,25 +469,24 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
       }
 
       const isNative = activePayingToken.code === 'XLM' || activePayingToken.asset?.isNative();
-      const availableBalance = parseFloat(
-        StellarBaseService.calculateSpendableBalance(
-          activePayingToken.balance || '0',
-          subentryCount,
-          isNative
-        )
+      const spendableStr = StellarBaseService.calculateSpendableBalance(
+        activePayingToken.balance || '0',
+        subentryCount,
+        isNative
       );
-      const allocatedPayingAmount = (availableBalance * percentage) / 100;
+      const availableBalanceBN = new BigNumber(spendableStr || '0');
+      const allocatedPayingBN = availableBalanceBN.times(percentage).dividedBy(100);
 
       if (isBuy) {
-        const numPrice = parseFloat(price);
-        if (!numPrice || numPrice <= 0) {
+        const priceBN = new BigNumber(price || '0');
+        if (!priceBN.isFinite() || priceBN.lte(0)) {
           setError('Please enter a valid price first');
           return;
         }
-        const baseAmount = allocatedPayingAmount / numPrice;
-        setAmount(baseAmount.toFixed(7));
+        const baseAmountBN = allocatedPayingBN.dividedBy(priceBN);
+        setAmount(baseAmountBN.toFixed(7, BigNumber.ROUND_DOWN));
       } else {
-        setAmount(allocatedPayingAmount.toFixed(7));
+        setAmount(allocatedPayingBN.toFixed(7, BigNumber.ROUND_DOWN));
       }
       setError(null);
     },
@@ -511,9 +516,9 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
       if (!fromToken || !toToken) throw new Error('Please select both tokens');
 
       const payingToken = isBuy ? toToken : fromToken;
-      const requiredAmount = isBuy ? parseFloat(quote.total) : parseFloat(quote.amount);
+      const requiredBN = new BigNumber(isBuy ? quote.total : quote.amount);
       const isPayingNative = payingToken.code === 'XLM' || payingToken.asset?.isNative() || false;
-      const spendable = parseFloat(
+      const spendableBN = new BigNumber(
         StellarBaseService.calculateSpendableBalance(
           payingToken.balance || '0',
           subentryCount,
@@ -521,11 +526,12 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
         )
       );
 
-      if (requiredAmount > spendable) {
+      if (requiredBN.gt(spendableBN)) {
         throw new Error(
-          `Insufficient ${payingToken.code} spendable balance. Required: ${requiredAmount.toFixed(
-            7
-          )}, Spendable: ${spendable.toFixed(7)}`
+          `Insufficient ${payingToken.code} spendable balance. Required: ${requiredBN.toFixed(
+            7,
+            BigNumber.ROUND_DOWN
+          )}, Spendable: ${spendableBN.toFixed(7, BigNumber.ROUND_DOWN)}`
         );
       }
 
@@ -569,20 +575,18 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
 
         setFromToken(prev => {
           if (!prev || !quote) return prev;
-          const usedAmount = isBuy
-            ? parseFloat(quote.total || '0')
-            : parseFloat(quote.amount || '0');
-          const newBalance = Math.max(0, parseFloat(prev.balance || '0') - usedAmount);
-          return { ...prev, balance: newBalance.toFixed(7) };
+          const usedBN = new BigNumber(isBuy ? quote.total || '0' : quote.amount || '0');
+          const prevBalBN = new BigNumber(prev.balance || '0');
+          const newBalBN = BigNumber.max(0, prevBalBN.minus(usedBN));
+          return { ...prev, balance: newBalBN.toFixed(7, BigNumber.ROUND_DOWN) };
         });
 
         setToToken(prev => {
           if (!prev || !quote) return prev;
-          const receivedAmount = isBuy
-            ? parseFloat(quote.amount || '0')
-            : parseFloat(quote.total || '0');
-          const newBalance = parseFloat(prev.balance || '0') + receivedAmount;
-          return { ...prev, balance: newBalance.toFixed(7) };
+          const recBN = new BigNumber(isBuy ? quote.amount || '0' : quote.total || '0');
+          const prevBalBN = new BigNumber(prev.balance || '0');
+          const newBalBN = prevBalBN.plus(recBN);
+          return { ...prev, balance: newBalBN.toFixed(7, BigNumber.ROUND_DOWN) };
         });
 
         setTimeout(() => fetchBalances(true), 8000);
@@ -662,9 +666,13 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
       )
     : '0';
 
-  const requiredAmount = isBuy ? parseFloat(total || '0') : parseFloat(amount || '0');
+  const requiredAmountBN = new BigNumber(isBuy ? total || '0' : amount || '0');
+  const spendableBalanceBN = new BigNumber(spendableBalance || '0');
   const isInsufficientBalance = Boolean(
-    payingToken && requiredAmount > 0 && requiredAmount > parseFloat(spendableBalance)
+    payingToken &&
+    requiredAmountBN.isFinite() &&
+    requiredAmountBN.gt(0) &&
+    requiredAmountBN.gt(spendableBalanceBN)
   );
 
   return {

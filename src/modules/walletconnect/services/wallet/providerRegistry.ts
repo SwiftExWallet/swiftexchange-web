@@ -227,6 +227,8 @@ async function loadUniversalProvider(): Promise<typeof UniversalProviderType> {
   return UniversalProviderType;
 }
 
+const pendingProviderInits = new Map<string, Promise<any>>();
+
 export async function getOrCreateProvider(ctx: WalletServiceContext, key: string): Promise<any> {
   const existing = ctx.providers.get(key);
   if (existing && (existing as any).__providerKey === key) {
@@ -250,42 +252,59 @@ export async function getOrCreateProvider(ctx: WalletServiceContext, key: string
         return existing;
       }
     } else {
-      // Reuse existing provider instance awaiting connection
       return existing;
     }
   }
 
-  const ProviderClass = await loadUniversalProvider();
+  if (pendingProviderInits.has(key)) {
+    return pendingProviderInits.get(key);
+  }
 
-  const core = new Core({
-    projectId: WALLETCONNECT_PROJECT_ID,
-    customStoragePrefix: `swiftex_${key}`,
-  });
+  const initPromise = (async () => {
+    try {
+      const ProviderClass = await loadUniversalProvider();
 
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Provider init timeout')), 20000)
-  );
+      const core = new Core({
+        projectId: WALLETCONNECT_PROJECT_ID,
+        customStoragePrefix: `swiftex_${key}`,
+      });
 
-  const provider = await Promise.race([
-    ProviderClass.init({
-      projectId: WALLETCONNECT_PROJECT_ID,
-      metadata: {
-        ...WALLETCONNECT_METADATA,
-        name: `${WALLETCONNECT_METADATA.name} (${key})`,
-      },
-      core,
-    }),
-    timeoutPromise,
-  ]);
+      let timeoutId: any;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Provider init timeout')), 20000);
+      });
 
-  wrapProviderRequests(ctx, provider);
+      try {
+        const provider = await Promise.race([
+          ProviderClass.init({
+            projectId: WALLETCONNECT_PROJECT_ID,
+            metadata: {
+              ...WALLETCONNECT_METADATA,
+              name: `${WALLETCONNECT_METADATA.name} (${key})`,
+            },
+            core,
+          }),
+          timeoutPromise,
+        ]);
 
-  const debugProviderId = crypto.randomUUID();
-  (provider as any).__debugProviderId = debugProviderId;
-  (provider as any).__providerKey = key;
+        wrapProviderRequests(ctx, provider);
 
-  ctx.providers.set(key, provider);
-  return provider;
+        const debugProviderId = crypto.randomUUID();
+        (provider as any).__debugProviderId = debugProviderId;
+        (provider as any).__providerKey = key;
+
+        ctx.providers.set(key, provider);
+        return provider;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } finally {
+      pendingProviderInits.delete(key);
+    }
+  })();
+
+  pendingProviderInits.set(key, initPromise);
+  return initPromise;
 }
 
 // ---------------------------------------------------------------------------
@@ -454,19 +473,24 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
             console.error('[WalletService] Auto-redirect error:', e);
           }
 
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('SIGNATURE_TIMEOUT')), 120_000)
-          );
+          let timerId: any;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timerId = setTimeout(() => reject(new Error('SIGNATURE_TIMEOUT')), 120_000);
+          });
 
           if (provider?.client) {
             provider.client.__parentCalling = true;
           }
 
-          const result = await Promise.race([originalRequest.apply(this, args), timeoutPromise]);
-          console.info(
-            `[WalletRequest:${networkTag}] ✓ '${method}' confirmed on ${chainIdentifier}`
-          );
-          return result;
+          try {
+            const result = await Promise.race([originalRequest.apply(this, args), timeoutPromise]);
+            console.info(
+              `[WalletRequest:${networkTag}] ✓ '${method}' confirmed on ${chainIdentifier}`
+            );
+            return result;
+          } finally {
+            clearTimeout(timerId);
+          }
         } catch (error: any) {
           if (isUserRejection(error)) {
             console.warn(
