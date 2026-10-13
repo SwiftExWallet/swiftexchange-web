@@ -9,6 +9,7 @@ import {
   QrCode,
   Repeat2,
   SendHorizontal,
+  Shield,
   User,
   X,
 } from 'lucide-react';
@@ -208,10 +209,7 @@ const Sidebar: FC = () => {
 
     const content = (
       <>
-        {/* Restricted overlay icon */}
         {item.isRestricted && <X className="w-3.5 h-3.5 absolute top-1 right-1 text-rose-400" />}
-
-        {/* Micro badge or Hot Flame */}
         {item.isHot && !item.isRestricted ? (
           <span className="absolute top-1 right-1 leading-none text-orange-500 drop-shadow-[0_0_6px_rgba(249,115,22,0.8)] animate-pulse">
             <Flame className="w-3.5 h-3.5 fill-orange-500 text-orange-500" />
@@ -281,7 +279,6 @@ const Sidebar: FC = () => {
           ${isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        {/* Exchange Logo Branding */}
         <div className="h-14 shrink-0 flex flex-col items-center justify-center border-b border-[var(--color-border)]/40 relative">
           <Link
             to={ROUTES.DASHBOARD}
@@ -292,7 +289,6 @@ const Sidebar: FC = () => {
           </Link>
         </div>
 
-        {/* Navigation list with clean exchange groupings */}
         <nav className="flex-1 px-1.5 py-2 space-y-1.5 overflow-y-auto hide-scrollbar">
           {navSections.map((section, idx) => (
             <div key={idx} className="space-y-0.5">
@@ -301,9 +297,16 @@ const Sidebar: FC = () => {
             </div>
           ))}
         </nav>
+
+        <div className="shrink-0 p-1.5 border-t border-[var(--color-border)]/40">
+          {renderItem({
+            href: ROUTES.RECOVERY,
+            label: 'Recovery',
+            icon: <Shield className="w-[17px] h-[17px]" />,
+          })}
+        </div>
       </aside>
 
-      {/* Desktop spacer */}
       <div className="hidden lg:block shrink-0 w-16" />
     </>
   );

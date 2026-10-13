@@ -8,12 +8,12 @@ export const ROUTES = {
   TRANSACTIONS: '/transactions',
   TRADING_EVM_SWAP: '/trading/swap',
   TRADING_EVM_FIAT: '/trading/evm/fiat',
-  // TRADING_DYDX_FUTURES: '/trade/perpetuals',
   TRADING_PERPS: '/trade/perpetuals',
   MARKETS: '/markets',
   PORTFOLIO: '/stellar/portfolio',
   SETTINGS: '/settings',
   STATUS: '/status',
+  RECOVERY: '/recovery',
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;
