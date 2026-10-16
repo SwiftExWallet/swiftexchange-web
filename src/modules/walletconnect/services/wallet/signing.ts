@@ -231,6 +231,7 @@ export async function signStellarPayload(
     await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload))
   );
 
+  // Backend expects XDR built with new Account(..., '-1') which produces tx.sequence = "0"
   const tx = new TransactionBuilder(new Account(stellarAddress || '', '-1'), {
     fee: '100',
     networkPassphrase,
@@ -250,6 +251,7 @@ export async function signStellarPayload(
     const win = typeof window !== 'undefined' ? (window as any) : {};
     const injectedFreighter = win.freighterApi ?? win.freighter ?? prov;
 
+    // Backend /signing/verify expects signedXdr envelope matching 'yourapp auth'
     if (typeof injectedFreighter?.signTransaction === 'function') {
       try {
         const result = await injectedFreighter.signTransaction(unsignedXdr, {
@@ -283,12 +285,17 @@ export async function signStellarPayload(
     }
 
     if (typeof prov?.signMessage === 'function' && prov !== injectedFreighter) {
-      const result = await prov.signMessage(payload);
-      const sig =
-        typeof result === 'string'
-          ? result
-          : ((result as any)?.signedMessage ?? (result as any)?.signature);
-      if (sig) return sig;
+      try {
+        const result = await prov.signMessage(payload);
+        const sig =
+          typeof result === 'string'
+            ? result
+            : ((result as any)?.signedMessage ?? (result as any)?.signature);
+        if (sig) return sig;
+      } catch (err: any) {
+        if (err?.message === 'USER_REJECTED' || err?.code === -32004 || err?.code === 4001)
+          throw err;
+      }
     }
 
     throw new Error('Stellar wallet does not support off-chain message signing');
@@ -297,13 +304,19 @@ export async function signStellarPayload(
   try {
     let signedXdr: string | undefined;
 
+    const signParams = {
+      xdr: unsignedXdr,
+      network: isTestnet ? 'TESTNET' : 'PUBLIC',
+      networkPassphrase,
+    };
+
     try {
       const result: any = await prov.client.request({
         topic: prov.session.topic,
         chainId,
         request: {
           method: 'stellar_signXDR',
-          params: { xdr: unsignedXdr },
+          params: signParams,
         },
       });
       signedXdr =
@@ -315,16 +328,29 @@ export async function signStellarPayload(
       if (wcErr?.message === 'USER_REJECTED' || wcErr?.code === 4001 || wcErr?.code === -32004) {
         throw wcErr;
       }
-      const result: any = await prov.client.request({
-        topic: prov.session.topic,
-        chainId,
-        request: {
-          method: 'stellar_signTransaction',
-          params: { xdr: unsignedXdr, networkPassphrase },
-        },
-      });
-      signedXdr =
-        result?.signedXDR ?? result?.signedXdr ?? (typeof result === 'string' ? result : undefined);
+
+      const supportedMethods: string[] = prov?.session?.namespaces?.stellar?.methods || [];
+
+      if (supportedMethods.includes('stellar_signTransaction')) {
+        try {
+          const result: any = await prov.client.request({
+            topic: prov.session.topic,
+            chainId,
+            request: {
+              method: 'stellar_signTransaction',
+              params: signParams,
+            },
+          });
+          signedXdr =
+            result?.signedXDR ??
+            result?.signedXdr ??
+            (typeof result === 'string' ? result : undefined);
+        } catch {
+          throw wcErr;
+        }
+      } else {
+        throw wcErr;
+      }
     }
 
     if (!signedXdr) {
@@ -335,6 +361,16 @@ export async function signStellarPayload(
   } catch (err: any) {
     if (err?.message === 'USER_REJECTED' || err?.code === 4001) throw err;
     console.error('[Auth:Stellar] WalletConnect Stellar sign failed:', err);
+    if (
+      isTestnet &&
+      String(err?.message || '')
+        .toLowerCase()
+        .includes('something went wrong')
+    ) {
+      throw new Error(
+        'Connected wallet does not support Stellar Testnet (e.g. LOBSTR only supports Mainnet). Please use a testnet-compatible wallet like Freighter or switch to Mainnet.'
+      );
+    }
     throw err;
   }
 }

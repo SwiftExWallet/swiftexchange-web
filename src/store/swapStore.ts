@@ -11,6 +11,7 @@ export interface SwapState {
   sellAmount: string;
   isGasless: boolean;
   userSlippageTolerance: number;
+  isDynamicSlippage: boolean;
   feePayType: 'native' | 'stablecoin';
   useUnlimitedApproval: boolean;
 
@@ -49,6 +50,7 @@ export interface SwapState {
   setSellAmount: (amount: string) => void;
   setIsGasless: (enabled: boolean) => void;
   setUserSlippageTolerance: (slippage: number) => void;
+  setIsDynamicSlippage: (enabled: boolean) => void;
   setFeePayType: (type: 'native' | 'stablecoin') => void;
   setUseUnlimitedApproval: (val: boolean) => void;
   resetInputs: () => void;
@@ -90,6 +92,7 @@ export const useSwapStore = create<SwapState>()(
       sellAmount: '',
       isGasless: false,
       userSlippageTolerance: 1.0,
+      isDynamicSlippage: false,
       feePayType: 'stablecoin',
       useUnlimitedApproval: false,
 
@@ -114,6 +117,7 @@ export const useSwapStore = create<SwapState>()(
       setSellAmount: amount => set({ sellAmount: amount }),
       setIsGasless: enabled => set({ isGasless: enabled }),
       setUserSlippageTolerance: slippage => set({ userSlippageTolerance: slippage }),
+      setIsDynamicSlippage: enabled => set({ isDynamicSlippage: enabled }),
       setFeePayType: type => set({ feePayType: type }),
       setUseUnlimitedApproval: val => set({ useUnlimitedApproval: val }),
       resetInputs: () =>

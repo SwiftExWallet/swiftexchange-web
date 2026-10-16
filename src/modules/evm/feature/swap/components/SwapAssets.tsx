@@ -94,6 +94,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   const setIsGasless = useSwapStore(s => s.setIsGasless);
   const userSlippageTolerance = useSwapStore(s => s.userSlippageTolerance);
   const setUserSlippageTolerance = useSwapStore(s => s.setUserSlippageTolerance);
+  const isDynamicSlippage = useSwapStore(s => s.isDynamicSlippage);
   const feePayType = useSwapStore(s => s.feePayType);
   const setFeePayType = useSwapStore(s => s.setFeePayType);
   const resetInputs = useSwapStore(s => s.resetInputs);
@@ -1572,9 +1573,21 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
                             {(currentQuote.source === 'STELLAR_SWAP' || isStellar(fromChainId)) && (
                               <img
-                                src="https://cryptologos.cc/logos/stellar-xlm-logo.png"
-                                className="w-4 h-4 rounded-full"
-                                alt="Stellar"
+                                src={
+                                  currentQuote.data?.source === 'SOROSWAP'
+                                    ? '/soroswap.png'
+                                    : currentQuote.data?.source === 'AQUARIUS'
+                                      ? '/aqua-logo.png'
+                                      : 'https://cryptologos.cc/logos/stellar-xlm-logo.png'
+                                }
+                                className="w-4 h-4 rounded-full object-contain"
+                                alt={
+                                  currentQuote.data?.source === 'SOROSWAP'
+                                    ? 'Soroswap'
+                                    : currentQuote.data?.source === 'AQUARIUS'
+                                      ? 'Aquarius'
+                                      : 'Stellar'
+                                }
                               />
                             )}
 
@@ -1659,7 +1672,9 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                                 title="Open swap settings"
                               >
                                 <span className="text-[11px] font-black text-primary">
-                                  {userSlippageTolerance}%
+                                  {isDynamicSlippage
+                                    ? `Auto (${userSlippageTolerance}%)`
+                                    : `${userSlippageTolerance}%`}
                                 </span>
                                 <Settings
                                   size={11}
@@ -1698,7 +1713,9 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                                 >
                                   {isGasless && showFusionScreen
                                     ? 'None'
-                                    : `${userSlippageTolerance}%`}
+                                    : isDynamicSlippage
+                                      ? `Auto (${userSlippageTolerance}%)`
+                                      : `${userSlippageTolerance}%`}
                                 </span>
                                 <Settings
                                   size={11}
@@ -2153,6 +2170,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
         onClose={() => setIsSettingsOpen(false)}
         userSlippageTolerance={userSlippageTolerance}
         setUserSlippageTolerance={setUserSlippageTolerance}
+        isStellar={isStellar(fromChainId) || isStellar(toChainId)}
       />
       <ActivationModal />
     </PageLayout>

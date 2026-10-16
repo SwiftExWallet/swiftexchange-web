@@ -196,13 +196,16 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
           const classicTo = toClassicAsset(selectedBuyAsset);
           const canUseClassicAmm = Boolean(classicFrom && classicTo);
 
-          if (!sq && canUseClassicAmm) {
+          const aquaFrom = classicFrom || selectedSellAsset;
+          const aquaTo = classicTo || selectedBuyAsset;
+
+          if (!sq && aquaFrom && aquaTo) {
             try {
               const aquaService = new AquariusService(
                 ammService.horizonUrl,
                 ammService.networkPassphrase
               );
-              sq = await aquaService.getQuote(classicFrom, classicTo, sellAmount, {
+              sq = await aquaService.getQuote(aquaFrom, aquaTo, sellAmount, {
                 slippageTolerance: userSlippageTolerance,
               });
               if (sq) {

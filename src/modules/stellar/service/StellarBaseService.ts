@@ -257,7 +257,7 @@ export class StellarBaseService {
           icon: a.logoURI,
           decimals: a.decimals,
           isPopular: true,
-          hasTrustline:
+          hasTrustline: Boolean(
             isNative ||
             !effectiveIssuer ||
             !effectiveIssuer.startsWith('G') ||
@@ -267,7 +267,8 @@ export class StellarBaseService {
             (a.contract && expertBalances.has(a.contract)) ||
             (a.address && expertBalances.has(a.address)) ||
             (effectiveIssuer && expertBalances.has(`${a.symbol}-${effectiveIssuer}`)) ||
-            (effectiveIssuer && expertBalances.has(`${a.symbol}:${effectiveIssuer}`)),
+            (effectiveIssuer && expertBalances.has(`${a.symbol}:${effectiveIssuer}`))
+          ),
           homeDomain: a.domain || (isNative ? 'stellar.org' : undefined),
           domain: a.domain || (isNative ? 'stellar.org' : undefined),
           contract: effectiveContract,
@@ -337,11 +338,64 @@ export class StellarBaseService {
       );
     }
 
-    const otherTokens = balances.filter(
-      b => !registryTokens.some(rt => this.assetsEqual(rt.asset, b.asset))
-    );
+    const otherTokens = balances.filter(b => {
+      if (!isMainnet) {
+        const existing = registryTokens.find(rt => rt.code.toUpperCase() === b.code.toUpperCase());
+        if (existing) {
+          if ((!existing.balance || existing.balance === '0') && b.balance && b.balance !== '0') {
+            existing.balance = b.balance;
+          }
+          return false;
+        }
+        return isSoroswapTestnetSupported({
+          symbol: b.code,
+          address: b.contract || b.issuer,
+          contract: b.contract,
+          isNative:
+            (typeof b.asset?.isNative === 'function' && b.asset.isNative()) || b.code === 'XLM',
+        });
+      }
+      return !registryTokens.some(rt => this.assetsEqual(rt.asset, b.asset));
+    });
 
-    return { tokens: [...registryTokens, ...otherTokens], subentryCount };
+    const allTokens = [...registryTokens, ...otherTokens];
+    const seen = new Set<string>();
+    const deduplicatedTokens: TokenInfo[] = [];
+
+    for (const token of allTokens) {
+      const isNative =
+        token.code === 'XLM' ||
+        (typeof token.asset?.isNative === 'function' && token.asset.isNative());
+      const key = isNative
+        ? 'XLM'
+        : !isMainnet
+          ? token.code.toUpperCase()
+          : `${token.code.toUpperCase()}:${token.issuer || token.contract || ''}`;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicatedTokens.push(token);
+      } else {
+        const existing = deduplicatedTokens.find(t =>
+          isNative
+            ? t.code === 'XLM' || (typeof t.asset?.isNative === 'function' && t.asset.isNative())
+            : !isMainnet
+              ? t.code.toUpperCase() === token.code.toUpperCase()
+              : t.code.toUpperCase() === token.code.toUpperCase() &&
+                (t.issuer === token.issuer || t.contract === token.contract)
+        );
+        if (
+          existing &&
+          (!existing.balance || existing.balance === '0') &&
+          token.balance &&
+          token.balance !== '0'
+        ) {
+          existing.balance = token.balance;
+        }
+      }
+    }
+
+    return { tokens: deduplicatedTokens, subentryCount };
   }
 
   protected assetsEqual(a: any, b: any): boolean {

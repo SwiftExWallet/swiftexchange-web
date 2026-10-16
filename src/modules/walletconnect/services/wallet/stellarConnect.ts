@@ -106,7 +106,12 @@ export async function connectStellarWalletConnectSingle(
 
   const namespaces = {
     stellar: {
-      methods: ['stellar_signXDR', 'stellar_signAndSubmitXDR', 'stellar_signTransaction'],
+      methods: [
+        'stellar_signMessage',
+        'stellar_signXDR',
+        'stellar_signAndSubmitXDR',
+        'stellar_signTransaction',
+      ],
       chains: [stellarChain],
       events: ['accountsChanged'],
     },

@@ -118,23 +118,6 @@ export const STELLAR_WALLETS: WalletConfig[] = [
   },
 ];
 
-export const CHAIN_METHODS = {
-  evm: [
-    'eth_sendTransaction',
-    'eth_signTransaction',
-    'eth_sign',
-    'personal_sign',
-    'eth_signTypedData',
-    'eth_signTypedData_v4',
-  ],
-  stellar: ['stellar_signTransaction', 'stellar_signAndSubmitXDR'],
-};
-
-export const CHAIN_EVENTS = {
-  evm: ['chainChanged', 'accountsChanged'],
-  stellar: ['accountsChanged'],
-};
-
 export interface WalletMetadata {
   name: string;
   icon: string;

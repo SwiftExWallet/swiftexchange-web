@@ -109,13 +109,14 @@ export const TokenSelector: React.FC<TokenSelectorProps> = memo(
 
 interface SettingsPanelProps {
   slippage: number;
-  onSlippageChange: (slippage: number) => void;
+  onSlippageChange: (slippage: number, dynamic?: boolean) => void;
   isOpen: boolean;
   onClose: () => void;
+  isDynamic?: boolean;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = memo(
-  ({ slippage, onSlippageChange, isOpen, onClose }: SettingsPanelProps) => {
+  ({ slippage, onSlippageChange, isOpen, onClose, isDynamic }: SettingsPanelProps) => {
     const presets = [0.1, 0.5, 1, 2, 5];
     const [custom, setCustom] = useState('');
 
@@ -129,16 +130,27 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = memo(
 
           <div className="mb-4">
             <label className="text-small text-muted mb-2 block">Slippage Tolerance</label>
-            <div className="grid grid-cols-5 gap-2 mb-2">
+            <div className="grid grid-cols-6 gap-1.5 mb-2">
+              <button
+                onClick={() => {
+                  onSlippageChange(0.5, true);
+                  setCustom('');
+                }}
+                className={`btn btn-secondary btn-sm text-xs font-bold ${
+                  isDynamic ? 'bg-brand-primary text-text-inverse ring-1 ring-brand-primary' : ''
+                }`}
+              >
+                Auto
+              </button>
               {presets.map(preset => (
                 <button
                   key={preset}
                   onClick={() => {
-                    onSlippageChange(preset);
+                    onSlippageChange(preset, false);
                     setCustom('');
                   }}
                   className={`btn btn-secondary btn-sm ${
-                    slippage === preset ? 'bg-brand-primary text-text-inverse' : ''
+                    !isDynamic && slippage === preset ? 'bg-brand-primary text-text-inverse' : ''
                   }`}
                 >
                   {preset}%
@@ -153,21 +165,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = memo(
                 setCustom(e.target.value);
                 const val = parseFloat(e.target.value);
                 if (!isNaN(val) && val > 0) {
-                  onSlippageChange(val);
+                  onSlippageChange(val, false);
                 }
               }}
               className="input input-primary w-full text-sm"
             />
           </div>
 
-          {slippage > 5 && (
+          {isDynamic ? (
+            <div className="flex items-center gap-2 p-2.5 bg-brand-primary/10 border border-brand-primary/20 rounded-lg text-xs text-brand-primary">
+              <Info className="w-4 h-4 shrink-0" />
+              <span>Dynamic auto-slippage active (optimizes based on market conditions).</span>
+            </div>
+          ) : slippage > 5 ? (
             <div className="flex items-start gap-2 p-3 bg-warning-light border border-warning rounded-lg animate-fade-in">
               <AlertCircle className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
               <p className="text-xs text-warning">
                 High slippage tolerance may result in unfavorable rates
               </p>
             </div>
-          )}
+          ) : null}
         </div>
       </>
     );
@@ -181,25 +198,25 @@ interface SwapDetailsProps {
 
 export const SwapDetails: React.FC<SwapDetailsProps> = memo(
   ({ quote, isLoading }: SwapDetailsProps) => {
-    const [showDetails, setShowDetails] = useState(false);
-
     if (!quote) {
       if (isLoading) {
         return (
-          <div className="card card-glass p-4 space-y-3 animate-fade-in border border-white/5">
-            <div className="flex justify-between items-center py-1">
-              <div className="w-24 h-3 rounded bg-white/5 animate-shimmer" />
-              <div className="w-4 h-4 rounded bg-white/5 animate-shimmer" />
+          <div className="pt-4 border-t border-dotted border-white/10 space-y-2 animate-fade-in">
+            <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+              <div className="w-16 h-3 rounded bg-white/5 animate-shimmer" />
+              <div className="w-28 h-4 rounded-md animate-shimmer-brand" />
             </div>
-            <div className="space-y-2.5 pt-2 border-t border-color">
-              <div className="flex justify-between items-center py-1">
-                <div className="w-24 h-3 rounded bg-white/5 animate-shimmer" />
-                <div className="w-28 h-4 rounded-md animate-shimmer-brand" />
-              </div>
-              <div className="flex justify-between items-center py-1">
-                <div className="w-14 h-3 rounded bg-white/5 animate-shimmer" />
-                <div className="w-32 h-3.5 rounded-md animate-shimmer" />
-              </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+              <div className="w-12 h-3 rounded bg-white/5 animate-shimmer" />
+              <div className="w-36 h-3.5 rounded-md animate-shimmer" />
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+              <div className="w-20 h-3 rounded bg-white/5 animate-shimmer" />
+              <div className="w-24 h-3.5 rounded-md animate-shimmer" />
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <div className="w-20 h-3 rounded bg-white/5 animate-shimmer" />
+              <div className="w-24 h-3.5 rounded-md animate-shimmer-brand" />
             </div>
           </div>
         );
@@ -215,81 +232,107 @@ export const SwapDetails: React.FC<SwapDetailsProps> = memo(
         : (outputNum / inputNum).toFixed(6);
 
     const priceImpactColor =
-      quote.priceImpact > 5 ? 'price-down' : quote.priceImpact > 2 ? 'text-warning' : 'price-up';
+      quote.priceImpact > 5
+        ? 'text-red-500'
+        : quote.priceImpact > 2
+          ? 'text-amber-500'
+          : 'text-[#00E08B]';
 
     const providerName =
       quote.source === 'SOROSWAP'
         ? quote.platform?.toLowerCase() === 'sdex'
           ? 'Soroswap Router (SDEX)'
-          : 'Soroswap Router (AMM)'
+          : 'Soroswap Router'
         : quote.source === 'AQUARIUS'
           ? 'Aquarius Router'
           : 'Classic Horizon AMM';
 
+    const providerLogo =
+      quote.source === 'SOROSWAP'
+        ? '/soroswap.png'
+        : quote.source === 'AQUARIUS'
+          ? '/aqua-logo.png'
+          : 'https://cryptologos.cc/logos/stellar-xlm-logo.png';
+
+    const fromCode = quote.path.path[0]?.code || 'Asset';
+    const toCode = quote.path.path[quote.path.path.length - 1]?.code || 'Asset';
+    const hops = quote.path.hops || 1;
+
     return (
-      <div className="card card-glass p-4 space-y-3 animate-fade-in">
-        <button
-          onClick={() => setShowDetails(!showDetails)}
-          className="w-full flex items-center justify-between text-small text-muted hover:text-text-primary transition-colors"
-        >
-          <span>Swap Details</span>
-          <ChevronDown
-            className={`w-4 h-4 transition-transform ${showDetails ? 'rotate-180' : ''}`}
-          />
-        </button>
-
-        {showDetails && (
-          <div className="space-y-2 pt-2 border-t border-color">
-            <div className="flex justify-between items-center text-small gap-2">
-              <span className="text-muted shrink-0">Routing Provider</span>
-              <span className="text-text-primary font-medium text-right">
-                <span className="px-2 py-0.5 rounded-md bg-brand/10 text-brand text-xs font-bold">
-                  {providerName}
-                </span>
-              </span>
-            </div>
-
-            <div className="flex justify-between text-small">
-              <span className="text-muted">Rate</span>
-              <span className="text-text-primary font-medium">
-                1 {quote.path.path[0].code} ≈ {rate} {quote.path.path[1].code}
-              </span>
-            </div>
-
-            <div className="flex justify-between text-small">
-              <span className="text-muted flex items-center gap-1">
-                Price Impact
-                <Info className="w-3 h-3" />
-              </span>
-              <span className={`font-medium ${priceImpactColor}`}>
-                {quote.priceImpact.toFixed(2)}%
-              </span>
-            </div>
-
-            <div className="flex justify-between text-small">
-              <span className="text-muted">Minimum Received</span>
-              <span className="text-text-primary font-medium">
-                {(() => {
-                  const minNum = parseFloat(quote.minimumOutput) || 0;
-                  return minNum < 1 && minNum > 0 ? minNum.toFixed(6) : minNum.toFixed(4);
-                })()}{' '}
-                {quote.path.path[1].code}
-              </span>
-            </div>
-
-            <div className="flex justify-between text-small">
-              <span className="text-muted">Route</span>
-              <span className="text-text-primary font-medium">
-                {quote.path.path.map(t => t.code).join(' → ')}
-              </span>
-            </div>
-
-            <div className="flex justify-between text-small">
-              <span className="text-muted">Network Fee</span>
-              <span className="text-text-primary font-medium">~0.00001 XLM</span>
-            </div>
+      <div className="pt-4 border-t border-dotted border-white/10 space-y-1 animate-fade-in">
+        {/* Routing Provider */}
+        <div className="flex items-center justify-between py-2 border-b border-white/5">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted">
+            Provider
+          </span>
+          <div className="flex items-center gap-1.5">
+            <img
+              src={providerLogo}
+              className="w-4 h-4 rounded-full object-contain"
+              alt={providerName}
+              onError={e => {
+                (e.target as HTMLImageElement).src =
+                  'https://cryptologos.cc/logos/stellar-xlm-logo.png';
+              }}
+            />
+            <span className="text-[11px] font-black text-brand uppercase tracking-wider">
+              {providerName}
+            </span>
           </div>
-        )}
+        </div>
+
+        {/* Rate */}
+        <div className="flex items-center justify-between py-2 border-b border-white/5">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted">Rate</span>
+          <span className="text-[11px] font-black text-primary truncate ml-2 flex-1 w-0 text-right min-w-0">
+            1 {fromCode} ≈ {rate} {toCode}
+          </span>
+        </div>
+
+        {/* Route */}
+        <div className="flex items-center justify-between py-2 border-b border-white/5">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted">Route</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-black text-primary">
+              {quote.path.path.map(t => t.code).join(' → ')}
+            </span>
+            <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-white/5 text-muted border border-white/10">
+              {hops === 1 ? 'Direct' : `${hops} hops`}
+            </span>
+          </div>
+        </div>
+
+        {/* Price Impact */}
+        <div className="flex items-center justify-between py-2 border-b border-white/5">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted">
+            Price Impact
+          </span>
+          <span className={`text-[11px] font-black ${priceImpactColor}`}>
+            {quote.priceImpact.toFixed(2)}%
+          </span>
+        </div>
+
+        {/* Minimum Received */}
+        <div className="flex items-center justify-between py-2 border-b border-white/5">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted">
+            Min. Received
+          </span>
+          <span className="text-[11px] font-black text-primary">
+            {(() => {
+              const minNum = parseFloat(quote.minimumOutput) || 0;
+              return minNum < 1 && minNum > 0 ? minNum.toFixed(6) : minNum.toFixed(4);
+            })()}{' '}
+            {toCode}
+          </span>
+        </div>
+
+        {/* Network Fee */}
+        <div className="flex items-center justify-between py-2">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted">
+            Network Fee
+          </span>
+          <span className="text-[11px] font-black text-primary">~0.00001 XLM</span>
+        </div>
       </div>
     );
   }

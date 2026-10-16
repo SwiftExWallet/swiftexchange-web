@@ -274,7 +274,7 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
         // Tier 2: Aquarius AMM
         if (!swapQuote && aquariusService) {
           try {
-            swapQuote = await aquariusService.getQuote(fromToken.asset, toToken.asset, fromAmount, {
+            swapQuote = await aquariusService.getQuote(fromToken, toToken, fromAmount, {
               slippageTolerance,
             });
             if (swapQuote) swapQuote.source = 'AQUARIUS';
@@ -363,7 +363,7 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
       // Tier 2: Aquarius AMM
       if (!swapQuote && aquariusService) {
         try {
-          swapQuote = await aquariusService.getQuote(fromToken.asset, toToken.asset, fromAmount, {
+          swapQuote = await aquariusService.getQuote(fromToken, toToken, fromAmount, {
             slippageTolerance,
           });
           if (swapQuote) swapQuote.source = 'AQUARIUS';

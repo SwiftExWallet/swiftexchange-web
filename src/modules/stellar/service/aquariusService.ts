@@ -15,8 +15,16 @@ export const AQUARIUS_TESTNET_ROUTER =
   import.meta.env.VITE_AQUARIUS_TESTNET_ROUTER ||
   'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD';
 
-export const AQUARIUS_API_URL =
-  import.meta.env.VITE_AQUARIUS_API_URL || 'https://amm-api.aqua.network/api/external/v2';
+export const AQUARIUS_MAINNET_API_URL =
+  import.meta.env.VITE_AQUARIUS_MAINNET_API_URL ||
+  import.meta.env.VITE_AQUARIUS_API_URL ||
+  'https://amm-api.aqua.network/api/external/v2';
+
+export const AQUARIUS_TESTNET_API_URL =
+  import.meta.env.VITE_AQUARIUS_TESTNET_API_URL ||
+  'https://amm-api-testnet.aqua.network/api/external/v2';
+
+export const AQUARIUS_API_URL = AQUARIUS_MAINNET_API_URL;
 
 export const SOROBAN_MAINNET_RPC_URLS = [
   import.meta.env.VITE_SOROBAN_MAINNET_RPC_URL || 'https://mainnet.sorobanrpc.com',
@@ -44,21 +52,31 @@ export class AquariusService {
   private routerContractId: string;
 
   constructor(horizonUrl?: string, networkPassphrase?: string) {
-    const isTestnet =
-      getCurrentNetwork() === 'testnet' ||
-      (networkPassphrase && networkPassphrase.includes(StellarSDK.Networks.TESTNET));
+    let isTestnet: boolean;
+    if (typeof networkPassphrase === 'string') {
+      isTestnet =
+        networkPassphrase.includes('Test SDF') ||
+        networkPassphrase.toLowerCase().includes('testnet');
+    } else {
+      isTestnet = getCurrentNetwork() === 'testnet';
+    }
     const config = getStellarConfig(isTestnet ? 'testnet' : 'mainnet');
 
-    this.isTestnet = !!isTestnet;
+    this.isTestnet = isTestnet;
     this.networkPassphrase = networkPassphrase || config.networkPassphrase;
     this.horizonUrl = horizonUrl || config.horizonUrl;
     this.routerContractId = this.isTestnet ? AQUARIUS_TESTNET_ROUTER : AQUARIUS_MAINNET_ROUTER;
   }
 
-  public getContractId(
-    asset: StellarSDK.Asset | string,
-    passphrase = this.networkPassphrase
-  ): string {
+  public getApiUrl(): string {
+    return this.isTestnet ? AQUARIUS_TESTNET_API_URL : AQUARIUS_MAINNET_API_URL;
+  }
+
+  public getContractId(asset: any, passphrase = this.networkPassphrase): string {
+    if (!asset) {
+      throw new Error('No asset provided to getContractId');
+    }
+
     if (typeof asset === 'string') {
       const trimmed = asset.trim();
       if (trimmed.startsWith('C') && trimmed.length === 56) {
@@ -67,26 +85,101 @@ export class AquariusService {
       if (trimmed.toUpperCase() === 'XLM' || trimmed.toLowerCase() === 'native') {
         return StellarSDK.Asset.native().contractId(passphrase);
       }
-      if (trimmed.includes(':')) {
-        const [code, issuer] = trimmed.split(':');
-        return new StellarSDK.Asset(code, issuer).contractId(passphrase);
+      if (this.isTestnet) {
+        if (trimmed.toUpperCase() === 'USDC') {
+          return 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA';
+        }
+        if (trimmed.toUpperCase() === 'XTAR') {
+          return 'CCZGLAUBDKJSQK72QOZHVU7CUWKW45OZWYWCLL27AEK74U2OIBK6LXF2';
+        }
+      }
+      if (trimmed.includes(':') || trimmed.includes('-')) {
+        const separator = trimmed.includes(':') ? ':' : '-';
+        const [code, issuer] = trimmed.split(separator);
+        if (this.isTestnet && code.toUpperCase() === 'USDC') {
+          return 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA';
+        }
+        if (this.isTestnet && code.toUpperCase() === 'XTAR') {
+          return 'CCZGLAUBDKJSQK72QOZHVU7CUWKW45OZWYWCLL27AEK74U2OIBK6LXF2';
+        }
+        if (issuer.startsWith('G')) {
+          return new StellarSDK.Asset(code, issuer).contractId(passphrase);
+        }
+        if (issuer.startsWith('C') && issuer.length === 56) {
+          return issuer;
+        }
       }
       throw new Error(`Cannot derive Soroban contract ID for asset: ${asset}`);
     }
 
-    if (asset instanceof StellarSDK.Asset) {
-      return asset.contractId(passphrase);
+    if (typeof asset === 'object') {
+      if (asset.contract && typeof asset.contract === 'string' && asset.contract.startsWith('C')) {
+        if (this.isTestnet && (asset.code === 'USDC' || asset.symbol === 'USDC')) {
+          return 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA';
+        }
+        return asset.contract;
+      }
+      if (
+        asset.contractAddress &&
+        typeof asset.contractAddress === 'string' &&
+        asset.contractAddress.startsWith('C')
+      ) {
+        if (this.isTestnet && (asset.code === 'USDC' || asset.symbol === 'USDC')) {
+          return 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA';
+        }
+        return asset.contractAddress;
+      }
+      if (asset.address && typeof asset.address === 'string' && asset.address.startsWith('C')) {
+        if (this.isTestnet && (asset.code === 'USDC' || asset.symbol === 'USDC')) {
+          return 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA';
+        }
+        return asset.address;
+      }
+      if (
+        asset.isNative === true ||
+        (typeof asset.isNative === 'function' && asset.isNative()) ||
+        asset.symbol === 'XLM' ||
+        asset.code === 'XLM'
+      ) {
+        return StellarSDK.Asset.native().contractId(passphrase);
+      }
+
+      const code =
+        typeof asset.getCode === 'function' ? asset.getCode() : asset.code || asset.symbol;
+
+      if (this.isTestnet && code) {
+        if (code.toUpperCase() === 'USDC') {
+          return 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA';
+        }
+        if (code.toUpperCase() === 'XTAR') {
+          return 'CCZGLAUBDKJSQK72QOZHVU7CUWKW45OZWYWCLL27AEK74U2OIBK6LXF2';
+        }
+      }
+
+      if (typeof asset.contractId === 'function') {
+        const cid = asset.contractId(passphrase);
+        if (cid && typeof cid === 'string' && cid.startsWith('C')) return cid;
+      }
+
+      if (asset instanceof StellarSDK.Asset) {
+        return asset.contractId(passphrase);
+      }
+
+      const issuer = asset.issuer || (asset.address?.startsWith('G') ? asset.address : undefined);
+      if (code && issuer && issuer.startsWith('G')) {
+        return new StellarSDK.Asset(code, issuer).contractId(passphrase);
+      }
+      if (asset.asset instanceof StellarSDK.Asset) {
+        return asset.asset.contractId(passphrase);
+      }
     }
 
     throw new Error('Invalid asset passed to getContractId');
   }
 
-  /**
-   * Query the Aquarius AMM External API for an optimal swap route.
-   */
   async getQuote(
-    fromAsset: StellarSDK.Asset,
-    toAsset: StellarSDK.Asset,
+    fromAsset: any,
+    toAsset: any,
     amount: string,
     options: { slippageTolerance?: number; maxDepth?: number } = {}
   ): Promise<SwapQuote> {
@@ -96,7 +189,6 @@ export class AquariusService {
     const slippageTolerance = options.slippageTolerance ?? 1;
     const slippageFraction = (slippageTolerance / 100).toFixed(6);
 
-    // Aquarius amounts are integers in smallest units (1e-7 for 7 decimal Stellar assets)
     const amountSmallest = new BigNumber(amount).shiftedBy(7).integerValue().toFixed(0);
 
     const payload = {
@@ -108,7 +200,8 @@ export class AquariusService {
       max_depth: options.maxDepth ?? 4,
     };
 
-    const res = await fetch(`${AQUARIUS_API_URL}/find-path/`, {
+    const apiUrl = this.getApiUrl();
+    const res = await fetch(`${apiUrl}/find-path/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -117,8 +210,9 @@ export class AquariusService {
     });
 
     const data: AquariusFindPathResponse = await res.json().catch(() => ({ success: false }));
+    const swapChainXdr = data.swap_chain_xdr || data.swapChainXdr;
 
-    if (!res.ok || !data.success || !data.amount || !data.swap_chain_xdr) {
+    if (!res.ok || !data.success || !data.amount || !swapChainXdr) {
       throw new Error('Aquarius found no viable swap route for this pair');
     }
 
@@ -129,7 +223,6 @@ export class AquariusService {
       .shiftedBy(-7)
       .toFixed(7, BigNumber.ROUND_DOWN);
 
-    // Compute price impact if provided by Aquarius API
     let priceImpact = 0;
     const rawPriceImpact = data.price_impact ?? data.priceImpact;
     if (rawPriceImpact !== undefined && rawPriceImpact !== null) {
@@ -138,6 +231,36 @@ export class AquariusService {
         priceImpact = piBN.toNumber();
       }
     }
+
+    const fromCode =
+      (fromAsset && typeof fromAsset.getCode === 'function'
+        ? fromAsset.getCode()
+        : fromAsset?.code || fromAsset?.symbol) ||
+      (token_in_address === 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'
+        ? 'XLM'
+        : 'Asset');
+    const toCode =
+      (toAsset && typeof toAsset.getCode === 'function'
+        ? toAsset.getCode()
+        : toAsset?.code || toAsset?.symbol) ||
+      (token_out_address === 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA' ||
+      token_out_address === 'CB3TLW74NBIOT3BUWOZ3TUM6RFDF6A4GVIRUQRQZABG5KPOUL4JJOV2F'
+        ? 'USDC'
+        : 'Asset');
+
+    const fromPathAsset =
+      fromAsset instanceof StellarSDK.Asset
+        ? fromAsset
+        : fromCode === 'XLM'
+          ? StellarSDK.Asset.native()
+          : ({ code: fromCode, isNative: () => false, getCode: () => fromCode } as any);
+
+    const toPathAsset =
+      toAsset instanceof StellarSDK.Asset
+        ? toAsset
+        : toCode === 'XLM'
+          ? StellarSDK.Asset.native()
+          : ({ code: toCode, isNative: () => false, getCode: () => toCode } as any);
 
     return {
       fromAsset,
@@ -152,7 +275,7 @@ export class AquariusService {
       swapChainXdr: data.swap_chain_xdr,
       pools: data.pools || [],
       path: {
-        path: [fromAsset, toAsset],
+        path: [fromPathAsset, toPathAsset],
         pools: [],
         estimatedOutput,
         priceImpact,

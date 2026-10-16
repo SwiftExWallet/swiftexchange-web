@@ -77,8 +77,14 @@ const AmmSwapUI = () => {
     userAddress: stellarAddress,
   });
 
-  const { setDefaultSlippage, setSelectedChartPair, preSelectedToken, setPreSelectedToken } =
-    useAmmSwapStore();
+  const {
+    setDefaultSlippage,
+    isDynamicSlippage,
+    setIsDynamicSlippage,
+    setSelectedChartPair,
+    preSelectedToken,
+    setPreSelectedToken,
+  } = useAmmSwapStore();
 
   const isMainnet = currentNetwork === 'mainnet';
   const stellarChainId = isMainnet ? 'pubnet' : 'testnet';
@@ -163,7 +169,8 @@ const AmmSwapUI = () => {
       )
     : '0';
 
-  const handleSlippageChange = (slippage: number) => {
+  const handleSlippageChange = (slippage: number, dynamic = false) => {
+    setIsDynamicSlippage(dynamic);
     setSlippageTolerance(slippage);
     setDefaultSlippage(slippage);
   };
@@ -260,6 +267,7 @@ const AmmSwapUI = () => {
             onSlippageChange={handleSlippageChange}
             isOpen={showSettings}
             onClose={() => setShowSettings(false)}
+            isDynamic={isDynamicSlippage}
           />
         </div>
       </div>
