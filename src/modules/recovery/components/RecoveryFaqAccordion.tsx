@@ -86,7 +86,9 @@ export const RecoveryFaqAccordion: FC = () => {
       <div className="border-t border-[var(--color-border)]/60 pt-4 space-y-2">
         <button
           type="button"
-          onClick={() => window.open('https://discord.gg', '_blank')}
+          onClick={() =>
+            typeof window !== 'undefined' && window?.open?.('https://discord.gg', '_blank')
+          }
           className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
         >
           <span>Chat with Support</span>

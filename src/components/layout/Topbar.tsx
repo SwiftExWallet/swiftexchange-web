@@ -72,7 +72,9 @@ const Topbar: React.FC = () => {
               { label: 'Perps', href: ROUTES.TRADING_PERPS, isHot: true },
               { label: 'Swap', href: ROUTES.TRADING_EVM_SWAP },
               { label: 'Markets', href: ROUTES.MARKETS },
-              { label: 'Recovery', href: ROUTES.RECOVERY },
+              ...(currentNetwork === 'testnet'
+                ? [{ label: 'Recovery', href: ROUTES.RECOVERY }]
+                : []),
             ].map(tab => {
               const isActive = loc.pathname === tab.href;
               return (

@@ -63,7 +63,9 @@ export const HelpSupportModal: FC<HelpSupportModalProps> = ({ isOpen, onClose })
         <div className="flex items-center justify-between border-t border-[var(--color-border)]/60 pt-4">
           <button
             type="button"
-            onClick={() => window.open('https://discord.gg', '_blank')}
+            onClick={() =>
+              typeof window !== 'undefined' && window?.open?.('https://discord.gg', '_blank')
+            }
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-blue-500 transition-colors cursor-pointer"
           >
             <span>Open Discord Support</span>

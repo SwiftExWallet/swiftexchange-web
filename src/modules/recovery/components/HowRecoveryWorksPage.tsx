@@ -1,8 +1,8 @@
-import { ArrowLeft, ShieldCheck, Timer } from 'lucide-react';
+import { ShieldCheck, Timer } from 'lucide-react';
 import type { FC } from 'react';
 
 interface HowRecoveryWorksPageProps {
-  onBack: () => void;
+  onBack?: () => void;
   onGoToSetup: () => void;
   onStartRecovery: () => void;
 }
@@ -30,64 +30,36 @@ const steps = [
     num: '04',
     title: '7-Day Safety Timelock & Sweep',
     summary:
-      'A 7-day challenge window begins. If unauthorized, the owner can cancel immediately. Once expired, 100% of assets sweep to the new address.',
+      'A 7-day challenge window begins. If unauthorized, the owner can cancel immediately. Once expired, all guarded assets sweep to the new address.',
   },
 ];
 
 export const HowRecoveryWorksPage: FC<HowRecoveryWorksPageProps> = ({
-  onBack,
   onGoToSetup,
   onStartRecovery,
 }) => {
   return (
-    <div className="mx-auto max-w-5xl space-y-12 py-4">
-      <div className="space-y-4">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer group"
-        >
-          <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
-          <span>Back to recovery</span>
-        </button>
-
-        <div className="space-y-2">
-          <span className="font-mono text-xs font-semibold tracking-widest text-blue-400 uppercase">
-            PROTOCOL ARCHITECTURE
-          </span>
-          <h1 className="font-['Space_Grotesk'] text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-[var(--color-text-primary)]">
-            How smart contract fund recovery works
-          </h1>
-          <p className="max-w-3xl text-sm sm:text-base text-[var(--color-text-secondary)] leading-relaxed">
-            SwiftEx uses a trustless, non-custodial guardian architecture. Rather than relying on
-            centralized custody or storing private keys on a server, on-chain smart contracts verify
-            your email signature and safely sweep funds to a new address.
-          </p>
-        </div>
-      </div>
-
+    <div className="mx-auto max-w-5xl space-y-6 py-2">
       <div className="space-y-4">
         <h2 className="text-xs font-mono font-semibold tracking-wider text-[var(--color-text-muted)] uppercase">
           Recovery Lifecycle
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {steps.map(step => (
             <div
               key={step.num}
-              className="relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-6 flex flex-col justify-between transition-all hover:border-[var(--color-border-dark)]"
+              className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-6 space-y-4 transition-all hover:border-[var(--color-border-dark)]"
             >
-              <div className="space-y-3">
-                <span className="font-mono text-2xl font-bold text-blue-400/80">{step.num}</span>
-
-                <h3 className="text-base font-bold text-[var(--color-text-primary)] font-['Space_Grotesk'] leading-snug">
-                  {step.title}
-                </h3>
-
-                <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
-                  {step.summary}
-                </p>
-              </div>
+              <span className="font-['Space_Grotesk'] text-2xl font-bold text-blue-400">
+                {step.num}
+              </span>
+              <h3 className="font-['Space_Grotesk'] text-base font-bold text-[var(--color-text-primary)] leading-snug">
+                {step.title}
+              </h3>
+              <p className="text-xs sm:text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                {step.summary}
+              </p>
             </div>
           ))}
         </div>
@@ -104,7 +76,7 @@ export const HowRecoveryWorksPage: FC<HowRecoveryWorksPageProps> = ({
           <p className="text-xs sm:text-sm text-[var(--color-text-secondary)] leading-relaxed">
             In self-custodial Web3, private keys are generated locally and never leave your device.
             SwiftEx never knows your seed phrase or password. Recovery works by executing an
-            authorized smart contract sweep that transfers 100% of balances into a freshly connected
+            authorized smart contract sweep that transfers guarded balances into a freshly connected
             wallet under your control.
           </p>
         </div>
@@ -141,7 +113,7 @@ export const HowRecoveryWorksPage: FC<HowRecoveryWorksPageProps> = ({
             onClick={onGoToSetup}
             className="inline-flex h-11 w-full sm:w-auto items-center justify-center rounded-xl bg-blue-600 px-6 text-xs sm:text-sm font-semibold text-white shadow-lg shadow-blue-600/30 hover:bg-blue-500 transition-colors cursor-pointer"
           >
-            Register email recovery
+            <span>Register</span>
           </button>
 
           <button
@@ -149,7 +121,7 @@ export const HowRecoveryWorksPage: FC<HowRecoveryWorksPageProps> = ({
             onClick={onStartRecovery}
             className="inline-flex h-11 w-full sm:w-auto items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-5 text-xs sm:text-sm font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] transition-colors cursor-pointer"
           >
-            Recover my funds
+            <span>Recover</span>
           </button>
         </div>
       </div>

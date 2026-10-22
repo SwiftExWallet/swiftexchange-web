@@ -21,5 +21,7 @@ export interface RecoveryConfig {
   initiatedAt: string;
   recoveryInProgress: boolean;
   recoveryStartedAt: number | null;
+  unlockAt: number | null;
   recoveryDurationMs: number;
+  lastTxHash?: string;
 }

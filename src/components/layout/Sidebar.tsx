@@ -20,6 +20,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ROUTES } from '../../constants/routes';
 import { RESTRICTED_TRADING_LOCATIONS } from '../../modules/commonfeature/constants/compliance';
 import { useGeolocationGuard } from '../../modules/commonfeature/hook/useGeolocationGuard';
+import { useWalletStore } from '../../modules/walletconnect/store/walletConnectStore';
 
 interface NavItem {
   href: string;
@@ -39,6 +40,7 @@ interface NavSection {
 
 const Sidebar: FC = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const currentNetwork = useWalletStore(state => state.network);
   const location = useLocation();
   const navigate = useNavigate();
   const activeItem = location.pathname;
@@ -298,13 +300,15 @@ const Sidebar: FC = () => {
           ))}
         </nav>
 
-        <div className="shrink-0 p-1.5 border-t border-[var(--color-border)]/40">
-          {renderItem({
-            href: ROUTES.RECOVERY,
-            label: 'Recovery',
-            icon: <Shield className="w-[17px] h-[17px]" />,
-          })}
-        </div>
+        {currentNetwork === 'testnet' && (
+          <div className="shrink-0 p-1.5 border-t border-[var(--color-border)]/40">
+            {renderItem({
+              href: ROUTES.RECOVERY,
+              label: 'Recovery',
+              icon: <Shield className="w-[17px] h-[17px]" />,
+            })}
+          </div>
+        )}
       </aside>
 
       <div className="hidden lg:block shrink-0 w-16" />
