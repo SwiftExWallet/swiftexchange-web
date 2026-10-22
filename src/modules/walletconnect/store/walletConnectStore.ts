@@ -320,7 +320,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
 
       try {
         const currentToken = getCurrentTokenInfo();
-        if (currentToken && currentToken.expiresAt > Date.now() + 60_000 && state.isAuthenticated) {
+        if (currentToken && currentToken.expiresAt > Date.now() + 60_000 && get().isAuthenticated) {
           const hasStellar = Boolean(get().connectedWallets.stellar);
           const linked: ('evm' | 'stellar')[] = hasStellar ? ['evm', 'stellar'] : ['evm'];
           set({
@@ -851,6 +851,8 @@ export const initWalletListener = async () => {
     walletService.onStateChange((type: WalletType, state: ConnectionState) => {
       try {
         if (state === 'disconnected' || state === 'failed') {
+          const disconnectedAddress = useWalletStore.getState().connectedWallets[type]?.address;
+
           useWalletStore.setState(prev => {
             const remainingWallets = { ...prev.connectedWallets };
             delete remainingWallets[type];
@@ -891,7 +893,7 @@ export const initWalletListener = async () => {
           }
 
           if (type === 'evm') {
-            void useWalletStore.getState().logoutAuth();
+            void useWalletStore.getState().logoutAuth(disconnectedAddress);
           } else if (type === 'stellar') {
             useWalletStore.setState(prev => ({
               linkedChains: prev.linkedChains.filter(c => c !== 'stellar'),

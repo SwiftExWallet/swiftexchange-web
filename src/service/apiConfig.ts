@@ -62,9 +62,19 @@ export function getCurrentNetwork(): 'mainnet' | 'testnet' {
 export function getServerUrl(): string {
   const network = getCurrentNetwork();
   if (network === 'testnet') {
-    return import.meta.env.VITE_BASE_SERVER_URL_TEST || 'https://dev.swiftexchange.io/api/v1';
+    return import.meta.env.VITE_BASE_SERVER_URL_TEST || 'https://hackathon.swiftexchange.io/api/v1';
   }
   return import.meta.env.VITE_BASE_SERVER_URL_PROD || 'https://beta-v2.swiftexchange.io/api/v1';
+}
+
+export function getRecoveryServerUrl(): string {
+  return (
+    import.meta.env.VITE_BASE_RECOVERY_URL || 'https://hackathon.swiftexchange.io/api/v1/recovery'
+  );
+}
+
+export function getRecoveryRelayerEmail(): string {
+  return import.meta.env.VITE_RELAYER_EMAIL || 'claim@swiftexwallet.in';
 }
 
 type WalletAddressGetter = (chainType?: 'evm' | 'stellar' | string) => string;
@@ -121,6 +131,9 @@ export function getConnectedWalletAddress(chainType?: 'evm' | 'stellar' | string
 export const API_CONFIG = {
   get serverUrl(): string {
     return getServerUrl();
+  },
+  get recoveryUrl(): string {
+    return getRecoveryServerUrl();
   },
   get proxyUrl(): string {
     return getServerUrl();

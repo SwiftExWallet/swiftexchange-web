@@ -1650,14 +1650,26 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                               </span>
                               <span
                                 className={`text-[11px] font-black ${
-                                  (currentQuote.data?.priceImpact || 0) > 5
+                                  (Number(
+                                    currentQuote.data?.priceImpact ??
+                                      currentQuote.data?.priceImpactPercent
+                                  ) || 0) > 5
                                     ? 'text-red-500'
-                                    : (currentQuote.data?.priceImpact || 0) > 2
+                                    : (Number(
+                                          currentQuote.data?.priceImpact ??
+                                            currentQuote.data?.priceImpactPercent
+                                        ) || 0) > 2
                                       ? 'text-yellow-500'
                                       : 'text-green-500'
                                 }`}
                               >
-                                {(currentQuote.data?.priceImpact || 0).toFixed(2)}%
+                                {(
+                                  Number(
+                                    currentQuote.data?.priceImpact ??
+                                      currentQuote.data?.priceImpactPercent
+                                  ) || 0
+                                ).toFixed(2)}
+                                %
                               </span>
                             </div>
 
@@ -1993,7 +2005,8 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                 </p>
               </div>
             )}
-            {(currentQuote.data?.priceImpact > 5 || currentQuote.data?.priceImpactPercent > 5) &&
+            {(Number(currentQuote.data?.priceImpact) > 5 ||
+              (currentQuote.data?.priceImpactPercent || 0) > 5) &&
               !isLoadingExecution &&
               !isErrorState && (
                 <div className="flex items-start gap-3 rounded-xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 mb-3">

@@ -26,7 +26,7 @@ export function getAuthApiBaseUrl(): string {
     if (isTestnet) {
       return (
         (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BASE_SERVER_URL_TEST) ||
-        'https://dev.swiftexchange.io/api/v1'
+        'https://hackathon.swiftexchange.io/api/v1'
       );
     }
     return (

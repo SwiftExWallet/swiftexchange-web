@@ -1,4 +1,4 @@
-import { onJwtSessionSet } from '../modules/walletconnect/services/Siweauthservice';
+import { getAccessToken, onJwtSessionSet } from '../modules/walletconnect/services/Siweauthservice';
 import { useWalletStore } from '../modules/walletconnect/store/walletConnectStore';
 import type { ApiResponse } from '../types/evm/apiResponse.type';
 import {
@@ -22,8 +22,9 @@ import {
 
 export interface RegisterWalletPayload {
   addresses: {
-    multi: string;
-    [key: string]: string;
+    multi?: string;
+    xlm?: string;
+    [key: string]: string | undefined;
   };
   isPrimary?: boolean;
 }
@@ -45,17 +46,43 @@ export interface ActivateWalletResponse {
 const linkedWalletsCache = new Set<string>();
 const inflightWalletLinks = new Map<string, Promise<boolean>>();
 
-function getLinkCacheKey(token: string, address: string): string {
-  return `_sx_wallet_linked_${token.slice(-16)}_${address.toLowerCase()}`;
+function getLinkCacheKey(token: string, evmAddr?: string, stellarAddr?: string): string {
+  const e = (evmAddr || '').toLowerCase();
+  const s = (stellarAddr || '').toLowerCase();
+  return `_sx_wallet_linked_${token.slice(-16)}_${e}_${s}`;
+}
+
+export function getEffectiveAuthToken(explicitToken?: string): string {
+  if (explicitToken && explicitToken.trim()) return explicitToken.trim();
+  const devToken = getValidDeviceToken();
+  if (devToken && devToken.trim()) return devToken.trim();
+  const jwt = getAccessToken();
+  if (jwt && jwt.trim()) return jwt.trim();
+  const configAuth = API_CONFIG.deviceAuth;
+  if (configAuth && configAuth.trim()) return configAuth.trim();
+  return '';
 }
 
 export function isWalletLinkedToDevice(walletAddress?: string, deviceToken?: string): boolean {
   if (typeof window === 'undefined') return false;
-  // Only check against the real device_token, not the SIWE JWT
-  const token = deviceToken || getValidDeviceToken();
-  const address = walletAddress || getConnectedWalletAddress();
-  if (!token || !address) return false;
-  const key = getLinkCacheKey(token, address);
+  const token = getEffectiveAuthToken(deviceToken);
+  if (!token) return false;
+
+  const stateWallets = useWalletStore?.getState?.()?.connectedWallets;
+  const evm =
+    (walletAddress?.startsWith('0x') ? walletAddress : stateWallets?.evm?.address) ||
+    getConnectedWalletAddress('evm') ||
+    '';
+  const stellar =
+    (walletAddress?.startsWith('G') || walletAddress?.startsWith('C')
+      ? walletAddress
+      : stateWallets?.stellar?.address) ||
+    getConnectedWalletAddress('stellar') ||
+    '';
+
+  if (!evm && !stellar && !walletAddress) return false;
+
+  const key = getLinkCacheKey(token, evm, stellar);
   return linkedWalletsCache.has(key) || sessionStorage.getItem(key) === 'true';
 }
 
@@ -65,16 +92,36 @@ export async function registerWalletToDevice(
 ): Promise<boolean> {
   if (typeof window === 'undefined') return false;
 
-  // IMPORTANT: Only use the real device_token (x-auth-device-token header).
-  // Do NOT fall back to the SIWE JWT — the backend /wallet route rejects it with 401.
-  const token = deviceToken || getValidDeviceToken();
-  const address = walletAddress || getConnectedWalletAddress();
-
-  if (!token || !address) {
+  const token = getEffectiveAuthToken(deviceToken);
+  if (!token) {
     return false;
   }
 
-  const key = getLinkCacheKey(token, address);
+  const stateWallets = useWalletStore?.getState?.()?.connectedWallets;
+  let evmAddress =
+    (walletAddress?.startsWith('0x') ? walletAddress : stateWallets?.evm?.address) ||
+    getConnectedWalletAddress('evm') ||
+    '';
+  let stellarAddress =
+    (walletAddress?.startsWith('G') || walletAddress?.startsWith('C')
+      ? walletAddress
+      : stateWallets?.stellar?.address) ||
+    getConnectedWalletAddress('stellar') ||
+    '';
+
+  if (!evmAddress && !stellarAddress && walletAddress) {
+    if (walletAddress.startsWith('0x')) {
+      evmAddress = walletAddress;
+    } else {
+      stellarAddress = walletAddress;
+    }
+  }
+
+  if (!evmAddress && !stellarAddress) {
+    return false;
+  }
+
+  const key = getLinkCacheKey(token, evmAddress, stellarAddress);
   if (linkedWalletsCache.has(key) || sessionStorage.getItem(key) === 'true') {
     return true;
   }
@@ -86,19 +133,34 @@ export async function registerWalletToDevice(
   const linkPromise = (async () => {
     try {
       const url = `${API_CONFIG.serverUrl}/wallet`;
+      const addresses: { multi?: string; xlm?: string } = {};
+
+      if (evmAddress && evmAddress.startsWith('0x')) {
+        addresses.multi = evmAddress;
+      }
+      if (stellarAddress && (stellarAddress.startsWith('G') || stellarAddress.startsWith('C'))) {
+        addresses.xlm = stellarAddress;
+      }
+
+      if (!addresses.multi && !addresses.xlm) {
+        if (evmAddress) addresses.multi = evmAddress;
+        else if (stellarAddress) addresses.xlm = stellarAddress;
+      }
+
       const payload: RegisterWalletPayload = {
-        addresses: {
-          multi: address,
-        },
+        addresses,
         isPrimary: true,
+      };
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-auth-device-token': token,
+        Authorization: `Bearer ${token}`,
       };
 
       const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-auth-device-token': token,
-        },
+        headers,
         body: JSON.stringify(payload),
       });
 
@@ -106,8 +168,8 @@ export async function registerWalletToDevice(
         linkedWalletsCache.add(key);
         try {
           sessionStorage.setItem(key, 'true');
-        } catch {
-          /* ignore storage quota */
+        } catch (e) {
+          void e;
         }
         return true;
       }
@@ -138,36 +200,21 @@ export async function ensureWalletLinkedToDevice(
   return registerWalletToDevice(walletAddress, deviceToken);
 }
 
-// Auto-link triggers when token or wallet address updates
 if (typeof window !== 'undefined') {
-  // Trigger 1: New device token received → link current wallet
   onDeviceTokenChange(token => {
-    const address = getConnectedWalletAddress();
+    const stateWallets = useWalletStore?.getState?.()?.connectedWallets;
+    const address =
+      stateWallets?.evm?.address || stateWallets?.stellar?.address || getConnectedWalletAddress();
     if (address && token) {
       ensureWalletLinkedToDevice(address, token).catch(() => {});
     }
   });
 
-  // Trigger 2: JWT (accessToken) received → link its wallet address to device token
-  // Wallet address comes from the JWT payload; device_token read directly from localStorage.
-  // NOTE: we must use getValidDeviceToken() here — NOT API_CONFIG.deviceAuth which falls
-  // back to the SIWE JWT and would cause a 401 on the /wallet endpoint.
-  onJwtSessionSet((_accessToken, walletAddress) => {
+  onJwtSessionSet((accessToken, walletAddress) => {
     if (!walletAddress) return;
-    const deviceToken = getValidDeviceToken();
-    if (!deviceToken) {
-      console.warn(
-        '[apiService] JWT received but no device_token in localStorage — skipping wallet link'
-      );
-      return;
-    }
-    console.log(
-      '[apiService] JWT received — linking wallet to device:',
-      walletAddress.slice(0, 10) + '...'
-    );
-    ensureWalletLinkedToDevice(walletAddress, deviceToken).catch(err => {
-      console.warn('[apiService] Failed to link wallet after JWT received:', err);
-    });
+    const token = getEffectiveAuthToken(accessToken);
+    if (!token) return;
+    ensureWalletLinkedToDevice(walletAddress, token).catch(() => {});
   });
 
   try {
@@ -178,11 +225,12 @@ if (typeof window !== 'undefined') {
         return `${evmAddr || ''}:${stellarAddr || ''}`;
       },
       combo => {
-        const token = API_CONFIG.deviceAuth;
+        const token = getEffectiveAuthToken();
         if (!token) return;
         const [evm, stellar] = combo.split(':');
-        if (evm) ensureWalletLinkedToDevice(evm, token).catch(() => {});
-        if (stellar) ensureWalletLinkedToDevice(stellar, token).catch(() => {});
+        if (evm || stellar) {
+          ensureWalletLinkedToDevice(evm || stellar, token).catch(() => {});
+        }
       }
     );
   } catch {
@@ -398,7 +446,7 @@ export function makeHeaders(
   chainTypeOrEndpoint?: 'evm' | 'stellar' | string,
   body?: unknown
 ): Record<string, string> {
-  const token = API_CONFIG.deviceAuth;
+  const token = getEffectiveAuthToken();
   const inferredChain = inferChainType(chainTypeOrEndpoint, extra, body);
   const walletAddress =
     extra?.['x-wallet-address'] || getConnectedWalletAddress(inferredChain || chainTypeOrEndpoint);

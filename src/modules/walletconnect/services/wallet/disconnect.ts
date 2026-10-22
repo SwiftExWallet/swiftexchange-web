@@ -30,12 +30,6 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
   if (provider) {
     ctx.registeredProviders.delete(provider);
 
-    try {
-      provider.removeAllListeners?.();
-    } catch {
-      // ignore
-    }
-
     if (provider.session) {
       try {
         await provider.disconnect();
@@ -86,11 +80,6 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
 
   const providers = new Set(ctx.providers.values());
   for (const provider of providers) {
-    try {
-      provider?.removeAllListeners?.();
-    } catch {
-      // ignore
-    }
     if (provider?.session) {
       try {
         await provider.disconnect();

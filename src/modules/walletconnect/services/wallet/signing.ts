@@ -359,6 +359,7 @@ export async function signStellarPayload(
 
     return signedXdr;
   } catch (err: any) {
+    console.log(err, 'errr ---');
     if (err?.message === 'USER_REJECTED' || err?.code === 4001) throw err;
     console.error('[Auth:Stellar] WalletConnect Stellar sign failed:', err);
     if (
@@ -367,9 +368,7 @@ export async function signStellarPayload(
         .toLowerCase()
         .includes('something went wrong')
     ) {
-      throw new Error(
-        'Connected wallet does not support Stellar Testnet (e.g. LOBSTR only supports Mainnet). Please use a testnet-compatible wallet like Freighter or switch to Mainnet.'
-      );
+      throw new Error('Maybe Connected wallet does not support Stellar Testnet.');
     }
     throw err;
   }

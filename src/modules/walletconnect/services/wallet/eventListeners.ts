@@ -1,38 +1,55 @@
 import type { WalletServiceContext, WalletType } from './types';
 
-// ---------------------------------------------------------------------------
-// EVM extension listeners
-// ---------------------------------------------------------------------------
+type EVMHandlers = {
+  accountsChanged: (accounts: string[]) => void;
+  chainChanged: (chainId: string) => void;
+  disconnect: () => void;
+};
+
+const evmListenerMap = new WeakMap<object, EVMHandlers>();
 
 export function setupEVMListeners(ctx: WalletServiceContext, provider: any): void {
-  provider.on('accountsChanged', (accounts: string[]) => {
-    if (!accounts?.length) {
+  const existing = evmListenerMap.get(provider);
+  if (existing) {
+    provider.removeListener?.('accountsChanged', existing.accountsChanged);
+    provider.removeListener?.('chainChanged', existing.chainChanged);
+    provider.removeListener?.('disconnect', existing.disconnect);
+  }
+
+  const handlers: EVMHandlers = {
+    accountsChanged: (accounts: string[]) => {
+      if (!accounts?.length) {
+        handleDisconnect(ctx, 'evm');
+        return;
+      }
+
+      const session = ctx.sessions.get('evm');
+      if (!session) return;
+
+      session.evmAddress = accounts[0];
+
+      ctx.sessions.set('evm', session);
+      ctx.saveSession();
+      ctx.emitState('evm', 'connected');
+    },
+    chainChanged: (chainId: string) => {
+      const session = ctx.sessions.get('evm');
+      if (!session) return;
+      session.evmChainId = parseInt(chainId, 16);
+      ctx.sessions.set('evm', session);
+      ctx.saveSession();
+      ctx.emitState('evm', 'connected');
+    },
+    disconnect: () => {
       handleDisconnect(ctx, 'evm');
-      return;
-    }
+    },
+  };
 
-    const session = ctx.sessions.get('evm');
-    if (!session) return;
+  evmListenerMap.set(provider, handlers);
 
-    session.evmAddress = accounts[0];
-
-    ctx.sessions.set('evm', session);
-    ctx.saveSession();
-    ctx.emitState('evm', 'connected');
-  });
-
-  provider.on('chainChanged', (chainId: string) => {
-    const session = ctx.sessions.get('evm');
-    if (!session) return;
-    session.evmChainId = parseInt(chainId, 16);
-    ctx.sessions.set('evm', session);
-    ctx.saveSession();
-    ctx.emitState('evm', 'connected');
-  });
-
-  provider.on('disconnect', () => {
-    handleDisconnect(ctx, 'evm');
-  });
+  provider.on('accountsChanged', handlers.accountsChanged);
+  provider.on('chainChanged', handlers.chainChanged);
+  provider.on('disconnect', handlers.disconnect);
 }
 
 // ---------------------------------------------------------------------------

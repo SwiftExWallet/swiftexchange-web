@@ -91,6 +91,33 @@ describe('Wallet to Device Token Linking', () => {
       expect(isWalletLinkedToDevice(walletAddr, deviceToken)).toBe(true);
     });
 
+    it('successfully calls /wallet API with xlm key for Stellar address', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      });
+      global.fetch = mockFetch;
+
+      const stellarAddr = 'GDZSAKB7UCZESMJ7MHKE43Z3VAPVBAA22DZSAKB7UCZESMJ7MHKE43Z3';
+      const deviceToken = 'mock-device-token-stellar';
+
+      const success = await registerWalletToDevice(stellarAddr, deviceToken);
+      expect(success).toBe(true);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [, calledOptions] = mockFetch.mock.calls[0];
+      const body = JSON.parse(calledOptions.body);
+      expect(body).toEqual({
+        addresses: {
+          xlm: stellarAddr,
+        },
+        isPrimary: true,
+      });
+
+      expect(isWalletLinkedToDevice(stellarAddr, deviceToken)).toBe(true);
+    });
+
     it('deduplicates calls and caches linked status in memory and sessionStorage', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
