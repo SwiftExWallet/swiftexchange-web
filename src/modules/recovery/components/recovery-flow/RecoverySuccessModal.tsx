@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import {
   type LedgerAssetBalance,
   fetchWalletLedgerBalances,
+  isValidStellarPublicKey,
 } from '../../services/sparekeyContractService';
 
 interface RecoverySuccessModalProps {
@@ -32,12 +33,7 @@ export const RecoverySuccessModal: FC<RecoverySuccessModalProps> = ({
   const [isLoadingBalances, setIsLoadingBalances] = useState(false);
 
   useEffect(() => {
-    if (
-      isOpen &&
-      destinationAddress &&
-      destinationAddress.startsWith('G') &&
-      destinationAddress.length === 56
-    ) {
+    if (isOpen && destinationAddress && isValidStellarPublicKey(destinationAddress)) {
       let isCurrent = true;
       setIsLoadingBalances(true);
       fetchWalletLedgerBalances(destinationAddress)
@@ -51,8 +47,21 @@ export const RecoverySuccessModal: FC<RecoverySuccessModalProps> = ({
         .finally(() => {
           if (isCurrent) setIsLoadingBalances(false);
         });
+
+      // Refetch once more after 4 seconds to capture the newly closed Stellar ledger
+      const timer = setTimeout(() => {
+        if (!isCurrent) return;
+        fetchWalletLedgerBalances(destinationAddress)
+          .then(b => {
+            if (!isCurrent) return;
+            if (b && b.length > 0) setDestBalances(b);
+          })
+          .catch(() => {});
+      }, 4000);
+
       return () => {
         isCurrent = false;
+        clearTimeout(timer);
       };
     }
   }, [isOpen, destinationAddress]);
@@ -174,15 +183,21 @@ export const RecoverySuccessModal: FC<RecoverySuccessModalProps> = ({
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                {displayBalances.map(b => (
-                  <span
-                    key={b.code}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-bg-primary)] border border-[var(--color-border)] px-2.5 py-1 font-mono text-xs font-semibold text-[var(--color-text-primary)]"
-                  >
-                    <span>{parseFloat(b.balance).toLocaleString()}</span>
-                    <span className="text-emerald-400">{b.code}</span>
-                  </span>
-                ))}
+                {displayBalances.map(b => {
+                  const num = Number(b.balance || 0);
+                  const formatted = isNaN(num)
+                    ? b.balance || '0'
+                    : num.toLocaleString(undefined, { maximumFractionDigits: 4 });
+                  return (
+                    <span
+                      key={b.code}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-bg-primary)] border border-[var(--color-border)] px-2.5 py-1 font-mono text-xs font-semibold text-[var(--color-text-primary)]"
+                    >
+                      <span>{formatted}</span>
+                      <span className="text-emerald-400">{b.code}</span>
+                    </span>
+                  );
+                })}
               </div>
             </div>
           )}

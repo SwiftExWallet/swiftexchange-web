@@ -159,6 +159,11 @@ export const useRecoveryStore = create<RecoveryStoreState>()(
       },
 
       disableRecovery: () => {
+        try {
+          localStorage.removeItem('swiftex_recovery_storage');
+        } catch (err) {
+          void err;
+        }
         set({
           isConfigured: false,
           isOnChainVerified: false,
@@ -257,6 +262,11 @@ export const useRecoveryStore = create<RecoveryStoreState>()(
       },
 
       resetAll: () => {
+        try {
+          localStorage.removeItem('swiftex_recovery_storage');
+        } catch (err) {
+          void err;
+        }
         set({
           currentStep: 'welcome',
           isConfigured: false,
@@ -288,29 +298,18 @@ export const useRecoveryStore = create<RecoveryStoreState>()(
           Date.now() < state.unlockAt + 3600_000
         );
 
-        return {
-          isConfigured: state.isConfigured,
-          isOnChainVerified: state.isOnChainVerified,
-          email: state.email,
-          walletAddress: state.walletAddress,
-          commitmentHex: state.commitmentHex,
-          saltHex: state.saltHex,
-          confirmedAt: state.confirmedAt,
-          contractId: state.contractId,
-          ...(isActivelyRecovering
-            ? {
-                recoveryInProgress: true,
-                recoveryStartedAt: state.recoveryStartedAt,
-                unlockAt: state.unlockAt,
-                targetWallet: state.targetWallet,
-                newKey: state.newKey,
-                currentStep: state.currentStep,
-              }
-            : {
-                recoveryInProgress: false,
-                currentStep: state.isConfigured ? 'active' : 'welcome',
-              }),
-        };
+        if (isActivelyRecovering) {
+          return {
+            recoveryInProgress: true,
+            recoveryStartedAt: state.recoveryStartedAt,
+            unlockAt: state.unlockAt,
+            targetWallet: state.targetWallet,
+            newKey: state.newKey,
+            currentStep: state.currentStep,
+          };
+        }
+
+        return {};
       },
     }
   )

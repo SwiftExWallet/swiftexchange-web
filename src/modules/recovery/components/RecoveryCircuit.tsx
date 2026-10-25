@@ -28,9 +28,9 @@ const RECOVERY_STEPS: RecoveryStep[] = [
   },
   {
     num: '04',
-    title: '7-Day Safety Timelock & Sweep',
+    title: 'Safety Timelock & Sweep',
     summary:
-      'Security delay enforces challenge window before guarded balances sweep to new address.',
+      'Security delay enforces challenge window (5s on Testnet / 7d on Mainnet) before guarded balances sweep to new address.',
   },
 ];
 

@@ -645,6 +645,10 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           portfolio.clearAssetsByType('stellar');
         }
       }
+
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
     },
 
     disconnectAll: async () => {
@@ -664,6 +668,10 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       });
 
       usePortfolioStore.getState().clearAssets();
+
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
     },
 
     restoreSessions: async () => {

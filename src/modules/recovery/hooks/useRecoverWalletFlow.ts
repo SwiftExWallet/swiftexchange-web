@@ -11,8 +11,8 @@ import {
 } from '../services/recoveryApi';
 import {
   type LedgerAssetBalance,
-  checkOnChainRegistration,
   fetchWalletLedgerBalances,
+  isValidStellarPublicKey,
   parseContractError,
 } from '../services/sparekeyContractService';
 import {
@@ -21,9 +21,6 @@ import {
   requestRecoveryFromBackend,
 } from '../services/zkRecoveryService';
 import { useRecoveryStore } from '../store/recoveryStore';
-
-export type TargetRegistrationStatus =
-  'idle' | 'unauthenticated' | 'checking' | 'registered' | 'not_registered';
 
 export function useRecoverWalletFlow(options?: { onSuccess?: () => void }) {
   const { connectedWallets, openModal } = useWalletConnect();
@@ -97,60 +94,11 @@ export function useRecoverWalletFlow(options?: { onSuccess?: () => void }) {
   const [lastTxHash, setLastTxHash] = useState(storeLastTxHash || '');
 
   const [isTokenMissing, setIsTokenMissing] = useState(!getEffectiveAuthToken());
-  const [targetRegistrationStatus, setTargetRegistrationStatus] =
-    useState<TargetRegistrationStatus>('idle');
 
   const activeOwnerWallet = (inputTargetWallet || targetWallet || '').trim();
 
   // Helper validators
-  const isValidStellarAddress = (addr: string) => /^G[A-Z2-7]{55}$/.test((addr || '').trim());
-
-  // Verify target wallet registration
-  useEffect(() => {
-    let isMounted = true;
-    if (activeOwnerWallet.length === 56 && activeOwnerWallet.startsWith('G')) {
-      const token = getEffectiveAuthToken();
-      if (!token) {
-        setTargetRegistrationStatus('unauthenticated');
-        return;
-      }
-
-      const store = useRecoveryStore.getState();
-      if (
-        store.walletAddress &&
-        store.walletAddress.toLowerCase() === activeOwnerWallet.toLowerCase() &&
-        (store.isConfigured || store.isOnChainVerified || Boolean(store.commitmentHex))
-      ) {
-        setTargetRegistrationStatus('registered');
-        if (!inputEmail && store.email) {
-          setInputEmail(store.email);
-        }
-        return;
-      }
-
-      setTargetRegistrationStatus('checking');
-      checkOnChainRegistration(activeOwnerWallet)
-        .then(res => {
-          if (!isMounted) return;
-          if (res?.isRegistered) {
-            setTargetRegistrationStatus('registered');
-          } else if (res?.isAuthMissing) {
-            setTargetRegistrationStatus('unauthenticated');
-          } else {
-            setTargetRegistrationStatus('not_registered');
-          }
-        })
-        .catch(() => {
-          if (isMounted) setTargetRegistrationStatus('not_registered');
-        });
-    } else {
-      setTargetRegistrationStatus('idle');
-    }
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeOwnerWallet, inputEmail]);
+  const isValidStellarAddress = (addr: string) => isValidStellarPublicKey(addr);
 
   // Load destination wallet balances
   useEffect(() => {
@@ -211,6 +159,22 @@ export function useRecoverWalletFlow(options?: { onSuccess?: () => void }) {
     if (!file) return;
     setProofSubmitError('');
     setProofSubmitSuccess('');
+
+    if (file.size > 10 * 1024 * 1024) {
+      setProofSubmitError('File size exceeds the 10MB limit. Please upload a valid .eml file.');
+      return;
+    }
+
+    const isLikelyEml =
+      file.name.toLowerCase().endsWith('.eml') ||
+      file.name.toLowerCase().endsWith('.txt') ||
+      file.type.includes('message/rfc822') ||
+      file.type.includes('text/');
+    if (!isLikelyEml) {
+      setProofSubmitError('Please select a valid raw .eml message file.');
+      return;
+    }
+
     setEmlFileName(file.name || 'recovery.eml');
     setEmlRawFile(file);
 
@@ -241,8 +205,11 @@ export function useRecoverWalletFlow(options?: { onSuccess?: () => void }) {
     }
   }, []);
 
+  const activePollingOwnerRef = useRef<string>('');
+
   const stopPolling = useCallback(() => {
     isPollingRef.current = false;
+    activePollingOwnerRef.current = '';
     setIsPolling(false);
     if (pollingTimerRef.current) {
       clearTimeout(pollingTimerRef.current);
@@ -304,17 +271,24 @@ export function useRecoverWalletFlow(options?: { onSuccess?: () => void }) {
   // Start continuous polling loop
   const startPolling = useCallback(
     (owner: string) => {
-      if (!owner || isPollingRef.current) return;
+      if (!owner) return;
+      if (isPollingRef.current && activePollingOwnerRef.current === owner) return;
       if (!getEffectiveAuthToken()) {
         setIsTokenMissing(true);
         return;
       }
 
+      if (pollingTimerRef.current) {
+        clearTimeout(pollingTimerRef.current);
+        pollingTimerRef.current = null;
+      }
+
       isPollingRef.current = true;
+      activePollingOwnerRef.current = owner;
       setIsPolling(true);
 
       const pollLoop = async () => {
-        if (!isPollingRef.current) return;
+        if (!isPollingRef.current || activePollingOwnerRef.current !== owner) return;
         if (!getEffectiveAuthToken()) {
           setIsTokenMissing(true);
           stopPolling();
@@ -556,7 +530,6 @@ export function useRecoverWalletFlow(options?: { onSuccess?: () => void }) {
     setDestinationAddress,
     inputEmail,
     setInputEmail,
-    targetRegistrationStatus,
     hasAuthToken: Boolean(getEffectiveAuthToken()),
     isTokenMissing,
     openConnectModal: openModal,

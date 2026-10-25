@@ -1,44 +1,19 @@
 import { AlertCircle, ArrowRight, Lock, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { FC } from 'react';
 
-import { WalletType } from '@/modules/walletconnect/constants/Wallet';
-import { useWalletConnect } from '@/modules/walletconnect/hooks/useWalletConnect';
-
-import { useRecoveryStore } from '../store/recoveryStore';
 import { RecoveryCircuit } from './RecoveryCircuit';
 
 interface RecoveryHeroProps {
   onStartRecovery: () => void;
   onGoToSetup: () => void;
   onLearnMore?: () => void;
-  onViewStatus?: () => void;
 }
 
 export const RecoveryHero: FC<RecoveryHeroProps> = ({
   onStartRecovery,
   onGoToSetup,
   onLearnMore,
-  onViewStatus,
 }) => {
-  const isConfigured = useRecoveryStore(state => state.isConfigured);
-  const storeWallet = useRecoveryStore(state => state.walletAddress);
-  const setCurrentStep = useRecoveryStore(state => state.setCurrentStep);
-
-  const { connectedWallets } = useWalletConnect();
-  const rawStellar =
-    connectedWallets?.[WalletType.STELLAR]?.address || connectedWallets?.stellar?.address;
-  const activeStellarWallet =
-    typeof rawStellar === 'string' && rawStellar.startsWith('G') && rawStellar.length === 56
-      ? rawStellar
-      : '';
-
-  const isWalletProtected = Boolean(
-    isConfigured &&
-    activeStellarWallet &&
-    storeWallet &&
-    activeStellarWallet.toLowerCase() === storeWallet.toLowerCase()
-  );
-
   return (
     <div className="py-2 sm:py-6">
       <div className="grid grid-cols-1 items-center gap-8 lg:grid-cols-12 lg:gap-10">
@@ -54,25 +29,14 @@ export const RecoveryHero: FC<RecoveryHeroProps> = ({
           </p>
 
           <div className="grid grid-cols-2 gap-2.5 sm:flex sm:flex-row sm:gap-3 pt-2 w-full max-w-md">
-            {isWalletProtected ? (
-              <button
-                id="hero-manage-protection-btn"
-                type="button"
-                onClick={onViewStatus || (() => setCurrentStep('active'))}
-                className="inline-flex h-11 sm:h-12 flex-1 items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-blue-600 px-3 sm:px-6 text-xs sm:text-sm font-semibold text-white shadow-lg shadow-blue-600/30 transition-all hover:bg-blue-500 hover:shadow-blue-500/40 active:scale-[0.98] cursor-pointer"
-              >
-                <span>Manage Protection</span>
-              </button>
-            ) : (
-              <button
-                id="hero-setup-protection-btn"
-                type="button"
-                onClick={onGoToSetup}
-                className="inline-flex h-11 sm:h-12 flex-1 items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-blue-600 px-3 sm:px-6 text-xs sm:text-sm font-semibold text-white shadow-lg shadow-blue-600/30 transition-all hover:bg-blue-500 hover:shadow-blue-500/40 active:scale-[0.98] cursor-pointer"
-              >
-                <span>Protect My Funds</span>
-              </button>
-            )}
+            <button
+              id="hero-setup-protection-btn"
+              type="button"
+              onClick={onGoToSetup}
+              className="inline-flex h-11 sm:h-12 flex-1 items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-blue-600 px-3 sm:px-6 text-xs sm:text-sm font-semibold text-white shadow-lg shadow-blue-600/30 transition-all hover:bg-blue-500 hover:shadow-blue-500/40 active:scale-[0.98] cursor-pointer"
+            >
+              <span>Protect My Funds</span>
+            </button>
 
             <button
               id="hero-sweep-funds-btn"
@@ -109,7 +73,7 @@ export const RecoveryHero: FC<RecoveryHeroProps> = ({
             <button
               id="hero-how-it-works-link"
               type="button"
-              onClick={onLearnMore || (() => setCurrentStep('how-it-works'))}
+              onClick={onLearnMore}
               className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors cursor-pointer group"
             >
               <span className="group-hover:underline">How zero-knowledge fund sweep works</span>

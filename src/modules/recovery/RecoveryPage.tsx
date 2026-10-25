@@ -11,9 +11,7 @@ import { HelpSupportModal } from './components/HelpSupportModal';
 import { HowRecoveryWorksPage } from './components/HowRecoveryWorksPage';
 import { ProtectWalletForm } from './components/ProtectWalletForm';
 import { RecoverWalletFlow } from './components/RecoverWalletFlow';
-import { RecoveryActiveStatus } from './components/RecoveryActiveStatus';
 import { RecoveryHero } from './components/RecoveryHero';
-import { checkOnChainRegistration } from './services/sparekeyContractService';
 import { useRecoveryStore } from './store/recoveryStore';
 
 const RecoveryPage: FC = () => {
@@ -21,8 +19,6 @@ const RecoveryPage: FC = () => {
   const currentNetwork = useWalletStore(state => state.network);
   const setNetwork = useWalletStore(state => state.setNetwork);
   const currentStep = useRecoveryStore(state => state.currentStep);
-  const isConfigured = useRecoveryStore(state => state.isConfigured);
-  const storeWallet = useRecoveryStore(state => state.walletAddress);
 
   const { connectedWallets } = useWalletConnect();
   const rawStellar =
@@ -31,13 +27,6 @@ const RecoveryPage: FC = () => {
     typeof rawStellar === 'string' && rawStellar.startsWith('G') && rawStellar.length === 56
       ? rawStellar
       : '';
-
-  const isWalletConfigured = Boolean(
-    isConfigured &&
-    activeStellarWallet &&
-    storeWallet &&
-    activeStellarWallet.toLowerCase() === storeWallet.toLowerCase()
-  );
 
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
@@ -49,7 +38,7 @@ const RecoveryPage: FC = () => {
     ''
   ).toLowerCase();
 
-  const activeTabKey: 'welcome' | 'register' | 'recover' | 'how-it-works' | 'status' = [
+  const activeTabKey: 'welcome' | 'register' | 'recover' | 'how-it-works' = [
     'register',
     'setup',
     'protect',
@@ -57,29 +46,25 @@ const RecoveryPage: FC = () => {
     ? 'register'
     : ['recover', 'restore', 'claim'].includes(rawTab) || rawTab.startsWith('recover-')
       ? 'recover'
-      : ['status', 'active', 'settings', 'guardian'].includes(rawTab)
-        ? 'status'
-        : ['how-it-works', 'learn', 'architecture', 'faq'].includes(rawTab)
-          ? 'how-it-works'
-          : ['overview', 'welcome', 'home'].includes(rawTab)
+      : ['how-it-works', 'learn', 'architecture', 'faq'].includes(rawTab)
+        ? 'how-it-works'
+        : ['overview', 'welcome', 'home', 'status', 'active', 'settings', 'guardian'].includes(
+              rawTab
+            )
+          ? 'welcome'
+          : currentStep === 'welcome'
             ? 'welcome'
-            : currentStep === 'welcome'
-              ? 'welcome'
-              : currentStep === 'how-it-works'
-                ? 'how-it-works'
-                : currentStep === 'setup' || currentStep === 'setup-verifying'
-                  ? 'register'
-                  : currentStep === 'active'
-                    ? 'status'
-                    : currentStep.startsWith('recover-')
-                      ? 'recover'
-                      : isWalletConfigured
-                        ? 'status'
-                        : 'welcome';
+            : currentStep === 'how-it-works'
+              ? 'how-it-works'
+              : currentStep === 'setup' || currentStep === 'setup-verifying'
+                ? 'register'
+                : currentStep.startsWith('recover-')
+                  ? 'recover'
+                  : 'welcome';
 
   const navigateToTab = useCallback(
     (
-      tab: 'welcome' | 'register' | 'recover' | 'how-it-works' | 'status',
+      tab: 'welcome' | 'register' | 'recover' | 'how-it-works',
       options?: {
         targetWallet?: string;
         email?: string;
@@ -121,9 +106,6 @@ const RecoveryPage: FC = () => {
       } else if (tab === 'how-it-works') {
         newParams.set('tab', 'how-it-works');
         store.setCurrentStep('how-it-works');
-      } else if (tab === 'status') {
-        newParams.set('tab', 'status');
-        store.setCurrentStep('active');
       }
 
       setSearchParams(newParams, { replace: options?.replace ?? false });
@@ -192,41 +174,15 @@ const RecoveryPage: FC = () => {
   }, [searchParams]);
 
   useEffect(() => {
-    let isMounted = true;
-    const hasExplicitTab =
-      searchParams.get('tab') ||
-      searchParams.get('view') ||
-      searchParams.get('action') ||
-      searchParams.get('step');
-
-    if (activeStellarWallet && activeStellarWallet.startsWith('G')) {
-      checkOnChainRegistration(activeStellarWallet)
-        .then(res => {
-          if (!isMounted) return;
-          const reg = Boolean(res?.isRegistered);
-          if (reg) {
-            useRecoveryStore.getState().confirmOnChainSetup({
-              email:
-                res?.owner === activeStellarWallet ? useRecoveryStore.getState().email || '' : '',
-              commitmentHex: res?.commitmentHex || '',
-              saltHex: res?.saltHex || '',
-              walletAddress: activeStellarWallet,
-            });
-            if (!hasExplicitTab) {
-              navigateToTab('status', { replace: true });
-            }
-          }
-        })
-        .catch(err => {
-          if (!isMounted) return;
-          console.warn('Could not query on-chain registration on mount:', err);
-        });
+    if (!activeStellarWallet || !activeStellarWallet.startsWith('G')) {
+      useRecoveryStore.getState().resetAll();
+      try {
+        localStorage.removeItem('swiftex_recovery_storage');
+      } catch (err) {
+        void err;
+      }
     }
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeStellarWallet, navigateToTab, searchParams]);
+  }, [activeStellarWallet]);
 
   if (currentNetwork !== 'testnet') {
     return (
@@ -293,21 +249,6 @@ const RecoveryPage: FC = () => {
 
               <button
                 type="button"
-                onClick={() => navigateToTab('status')}
-                className={`relative pb-3 text-xs sm:text-sm font-medium transition-colors cursor-pointer shrink-0 ${
-                  activeTabKey === 'status'
-                    ? 'text-blue-500 font-semibold'
-                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                }`}
-              >
-                <span>Protection Status</span>
-                {activeTabKey === 'status' && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 rounded-full" />
-                )}
-              </button>
-
-              <button
-                type="button"
                 onClick={() => navigateToTab('recover')}
                 className={`relative pb-3 text-xs sm:text-sm font-medium transition-colors cursor-pointer shrink-0 ${
                   activeTabKey === 'recover'
@@ -342,7 +283,6 @@ const RecoveryPage: FC = () => {
               onGoToSetup={() => navigateToTab('register')}
               onStartRecovery={() => navigateToTab('recover')}
               onLearnMore={() => navigateToTab('how-it-works')}
-              onViewStatus={() => navigateToTab('status')}
             />
           )}
 
@@ -356,23 +296,16 @@ const RecoveryPage: FC = () => {
 
           {activeTabKey === 'register' && (
             <ProtectWalletForm
-              onSuccess={() => navigateToTab('status')}
-              onCancel={() => navigateToTab(isWalletConfigured ? 'status' : 'welcome')}
+              onSuccess={() => navigateToTab('recover')}
+              onCancel={() => navigateToTab('welcome')}
               onOpenHelp={() => setIsHelpOpen(true)}
               onGoToRecover={() => navigateToTab('recover')}
             />
           )}
 
-          {activeTabKey === 'status' && (
-            <RecoveryActiveStatus
-              onChangeEmail={() => navigateToTab('register')}
-              onInitiateTestRecovery={() => navigateToTab('recover')}
-            />
-          )}
-
           {activeTabKey === 'recover' && (
             <RecoverWalletFlow
-              onBackToWelcome={() => navigateToTab(isWalletConfigured ? 'status' : 'welcome')}
+              onBackToWelcome={() => navigateToTab('welcome')}
               onOpenHelp={() => setIsHelpOpen(true)}
             />
           )}

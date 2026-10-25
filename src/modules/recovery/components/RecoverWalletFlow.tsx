@@ -18,7 +18,6 @@ export const RecoverWalletFlow: FC<RecoverWalletFlowProps> = ({ onBackToWelcome,
     setInputTargetWallet,
     inputEmail,
     setInputEmail,
-    targetRegistrationStatus,
     destinationAddress,
     setDestinationAddress,
     emlFileName,
@@ -78,7 +77,6 @@ export const RecoverWalletFlow: FC<RecoverWalletFlowProps> = ({ onBackToWelcome,
           onOwnerWalletChange={setInputTargetWallet}
           recoveryEmail={inputEmail}
           onRecoveryEmailChange={setInputEmail}
-          targetRegistrationStatus={targetRegistrationStatus}
           destinationAddress={destinationAddress}
           onDestinationAddressChange={setDestinationAddress}
           targetBalances={targetBalances}

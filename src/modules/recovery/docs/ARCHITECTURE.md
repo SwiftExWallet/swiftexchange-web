@@ -98,6 +98,6 @@ The Recovery Module (`src/modules/recovery/`) serves as the user-facing interfac
 
 | Contract                       | Network         | Address                                                    |
 | :----------------------------- | :-------------- | :--------------------------------------------------------- |
-| **SpareKey Recovery Contract** | Stellar Testnet | `CD4D3YHVYIYIM3WUJYY6XTIQCU3KOBNPJN52S4KAPNRFBI7JVFFRPLQ5` |
+| **SpareKey Recovery Contract** | Stellar Testnet | `CDT5MXYHAZK6YPTWFBKPECHGPCBQFINME6WJCONXCT73RKJRDIJ2HYJK` |
 | **Native XLM SAC**             | Stellar Testnet | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` |
 | **USDC SAC**                   | Stellar Testnet | `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA` |

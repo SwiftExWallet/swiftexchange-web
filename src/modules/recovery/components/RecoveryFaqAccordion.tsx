@@ -23,9 +23,9 @@ const FAQS: FaqItem[] = [
   },
   {
     id: 'wait-period',
-    question: 'Why is there a 7-day wait?',
+    question: 'Why is there a timelock delay?',
     answer:
-      'It gives you time to stop an unauthorized request. It applies to wallet recovery, not email setup, and cannot be shortened.',
+      'It gives you time to stop an unauthorized request (configured to 5 seconds on Testnet for instant validation, and 7 days on Mainnet). It applies to wallet recovery, not email setup.',
   },
   {
     id: 'how-cancel',

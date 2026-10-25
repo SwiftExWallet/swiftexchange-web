@@ -7,22 +7,39 @@ export interface NormalizedRecoveryStatus {
   attemptId: string;
   status: string;
   isActive: boolean;
+  isRegistered?: boolean;
+  email?: string;
   destination: string;
   unlockAt: number | null;
   error: string;
+  raw?: any;
 }
 
 export function normalizeRecoveryStatus(result: any = {}): NormalizedRecoveryStatus {
   const pending = result?.pending || null;
   const status = result?.status || (pending ? 'PENDING' : '');
   const isActive = ['STARTED', 'PENDING', 'EXECUTING'].includes(status);
+  const isRegistered = Boolean(
+    result?.isRegistered ||
+    result?.registered ||
+    result?.email ||
+    result?.guardian ||
+    status === 'REGISTERED' ||
+    status === 'ACTIVE' ||
+    isActive ||
+    Boolean(result?.attemptId || result?._id)
+  );
+
   return {
     attemptId: String(result?.attemptId || result?._id || ''),
     status,
     isActive,
+    isRegistered,
+    email: result?.email || '',
     destination: result?.destination || pending?.destination || '',
     unlockAt: result?.unlockAt ?? pending?.unlockAt ?? null,
     error: result?.error || '',
+    raw: result,
   };
 }
 
@@ -46,6 +63,9 @@ export function extractUnsignedXdr(res: any): string {
     res?.txXdr ||
     res?.data?.xdr ||
     res?.data?.unsignedXdr ||
+    res?.data?.transactionXdr ||
+    res?.result?.xdr ||
+    res?.result?.unsignedXdr ||
     ''
   );
 }

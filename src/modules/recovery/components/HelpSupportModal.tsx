@@ -44,7 +44,7 @@ export const HelpSupportModal: FC<HelpSupportModalProps> = ({ isOpen, onClose })
             <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
               When you link your recovery email, SwiftEx registers an encrypted guardian hash for
               your wallet. If you ever lose your device or session, you can authorize recovery using
-              this email. A mandatory 7-day safety period prevents malicious takeovers.
+              this email. A mandatory safety timelock period prevents malicious takeovers.
             </p>
           </div>
 

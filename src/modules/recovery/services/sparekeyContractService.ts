@@ -9,20 +9,52 @@ import {
   TESTNET_USDC_CODE,
   TESTNET_USDC_ISSUER,
 } from '../constants';
-import { useRecoveryStore } from '../store/recoveryStore';
 import { extractUnsignedXdr, recoveryApi } from './recoveryApi';
 
+export function isValidStellarPublicKey(address: string): boolean {
+  if (!address || typeof address !== 'string') return false;
+  const clean = address.trim();
+  if (clean.length !== 56 || !clean.startsWith('G')) return false;
+  try {
+    return StellarSDK.StrKey.isValidEd25519PublicKey(clean);
+  } catch {
+    return /^G[A-Z2-7]{55}$/.test(clean);
+  }
+}
+
 export function parseContractError(error: unknown): string {
-  const msg = String((error as any)?.message || error || '');
+  if (!error) return 'An unknown error occurred.';
+  const errObj = error as any;
+  const msg = String(
+    errObj?.message || errObj?.error || errObj?.data?.message || errObj?.details || ''
+  );
+  const lowerMsg = (msg || (typeof error === 'string' ? error : '')).toLowerCase();
+
   if (
-    msg.includes('rejected') ||
-    msg.includes('User declined') ||
-    msg.includes('USER_REJECTED') ||
-    msg.includes('4001')
+    lowerMsg.includes('rejected') ||
+    lowerMsg.includes('user declined') ||
+    lowerMsg.includes('user_rejected') ||
+    lowerMsg.includes('4001')
   ) {
     return 'Transaction signing was cancelled in your wallet.';
   }
-  return msg;
+
+  if (lowerMsg.includes('tx_bad_auth')) {
+    return 'Transaction failed: Invalid authorization signature for this wallet.';
+  }
+
+  if (lowerMsg.includes('op_underfunded') || lowerMsg.includes('insufficient balance')) {
+    return 'Insufficient balance to cover transaction fees or reserve minimums.';
+  }
+
+  if (msg) return msg;
+  try {
+    const jsonStr = JSON.stringify(error);
+    if (jsonStr !== '{}') return jsonStr;
+  } catch {
+    // Ignore stringify error
+  }
+  return String(error || 'Contract transaction failed.');
 }
 
 export interface OnChainRegistration {
@@ -34,6 +66,7 @@ export interface OnChainRegistration {
   txHash?: string;
   error?: string;
   statusCode?: number;
+  isAuthMissing?: boolean;
   [key: string]: any;
 }
 
@@ -79,57 +112,54 @@ export function normalizeEmail(email: string): string {
 }
 
 export async function checkOnChainRegistration(ownerAddress: string): Promise<OnChainRegistration> {
-  if (!ownerAddress || !ownerAddress.startsWith('G') || ownerAddress.length !== 56) {
+  if (!isValidStellarPublicKey(ownerAddress)) {
     return { isRegistered: false };
   }
 
   const cleanOwner = ownerAddress.trim();
-  const store = useRecoveryStore.getState();
-  const isMatchInStore =
-    Boolean(store.walletAddress) &&
-    store.walletAddress.toLowerCase() === cleanOwner.toLowerCase() &&
-    (store.isConfigured || store.isOnChainVerified || Boolean(store.commitmentHex));
-
   const token = getEffectiveAuthToken();
-  if (token) {
-    try {
-      const status = await recoveryApi.getRecoveryStatus(cleanOwner);
-      if (
-        status &&
-        (status.isActive ||
-          status.status ||
-          status.attemptId ||
-          (status as any)?.destination ||
-          !status.error)
-      ) {
-        return {
-          isRegistered: true,
-          owner: cleanOwner,
-          commitmentHex: store.commitmentHex || '',
-          saltHex: store.saltHex || '',
-          email: store.email || '',
-          registeredAt: store.confirmedAt || Date.now(),
-          txHash: store.lastTxHash,
-        };
-      }
-    } catch (err: any) {
-      console.warn('Backend recovery status check failed:', err);
-    }
+  if (!token) {
+    return { isRegistered: false, owner: cleanOwner, isAuthMissing: true };
   }
 
-  if (isMatchInStore) {
+  try {
+    const status = await recoveryApi.getRecoveryStatus(cleanOwner);
+    const hasActiveOrRegistered = Boolean(
+      status &&
+      (status.isRegistered ||
+        status.isActive ||
+        (status.status && status.status !== 'NONE' && status.status !== 'NOT_FOUND') ||
+        status.attemptId ||
+        Boolean(
+          status.raw?.isRegistered ||
+          status.raw?.registered ||
+          status.raw?.email ||
+          status.raw?.commitment
+        ))
+    );
+
+    if (hasActiveOrRegistered) {
+      return {
+        isRegistered: true,
+        owner: cleanOwner,
+        email: status.email || status.raw?.email || '',
+        commitmentHex: status.raw?.commitment || '',
+        registeredAt: Date.now(),
+      };
+    }
+
+    return { isRegistered: false, owner: cleanOwner };
+  } catch (err: any) {
+    if (err?.statusCode === 404 || err?.status === 404) {
+      return { isRegistered: false, owner: cleanOwner };
+    }
     return {
-      isRegistered: true,
+      isRegistered: false,
       owner: cleanOwner,
-      commitmentHex: store.commitmentHex,
-      saltHex: store.saltHex,
-      email: store.email,
-      registeredAt: store.confirmedAt || Date.now(),
-      txHash: store.lastTxHash,
+      error: err?.message || 'Failed to check recovery status from server',
+      statusCode: err?.statusCode || err?.status,
     };
   }
-
-  return { isRegistered: false, owner: cleanOwner };
 }
 
 export async function registerRecoveryEmailOnChain(params: {
@@ -158,7 +188,9 @@ export async function registerRecoveryEmailOnChain(params: {
       : [{ tokenAddress: SPAREKEY_CONFIG.xlmSac, floor: BASE_RESERVE_FLOOR_STROOPS, code: 'XLM' }];
 
   if (assetSpecs.length > MAX_RECOVERY_ASSETS) {
-    throw new Error('SpareKey smart contract allows a maximum of 8 protected assets.');
+    throw new Error(
+      `SpareKey smart contract allows a maximum of ${MAX_RECOVERY_ASSETS} protected assets.`
+    );
   }
 
   const hasXlm = assetSpecs.some(

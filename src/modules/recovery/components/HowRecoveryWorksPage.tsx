@@ -28,9 +28,9 @@ const steps = [
   },
   {
     num: '04',
-    title: '7-Day Safety Timelock & Sweep',
+    title: 'Safety Timelock & Asset Sweep',
     summary:
-      'A 7-day challenge window begins. If unauthorized, the owner can cancel immediately. Once expired, all guarded assets sweep to the new address.',
+      'A security delay challenge window begins (5 seconds on Testnet for instant testing, 7 days on Mainnet). Once elapsed, all guarded assets sweep to your new address.',
   },
 ];
 
@@ -85,14 +85,15 @@ export const HowRecoveryWorksPage: FC<HowRecoveryWorksPageProps> = ({
           <div className="flex items-center gap-2.5 text-blue-400">
             <Timer className="h-5 w-5" />
             <h3 className="text-base font-bold text-[var(--color-text-primary)] font-['Space_Grotesk']">
-              Why the 7-day safety timelock is mandatory
+              Why the safety timelock is mandatory
             </h3>
           </div>
           <p className="text-xs sm:text-sm text-[var(--color-text-secondary)] leading-relaxed">
             The mandatory delay protects against phishing or compromised email accounts. If an
-            attacker breaches your inbox and attempts an unauthorized recovery, the 7-day window
-            gives you ample time to cancel the request and move your funds before the transfer
-            executes.
+            attacker breaches your inbox and attempts an unauthorized recovery, the challenge window
+            gives you time to cancel the request and move your funds before the transfer executes
+            (configured to 5 seconds on Stellar Testnet for instant validation, and 7 days on
+            Mainnet).
           </p>
         </div>
       </div>

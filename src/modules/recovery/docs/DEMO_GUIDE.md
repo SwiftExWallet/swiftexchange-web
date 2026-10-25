@@ -53,7 +53,7 @@ Open your browser at:
    - Enter your personal recovery email address (e.g. `yourname@gmail.com`) and confirm it.
    - Choose the assets to protect (XLM is auto-protected with a 2 XLM reserve floor; USDC if trustline is active).
 4. **Sign On-Chain:** Click **Continue** and approve the transaction in Freighter.
-   - _Under the hood:_ The client computes `Poseidon(Email, Salt)` locally and submits the commitment hash to the **SpareKey Soroban contract** (`CD4D3YHVYIYIM3WUJYY6XTIQCU3KOBNPJN52S4KAPNRFBI7JVFFRPLQ5`). Your cleartext email is never submitted to the blockchain.
+   - _Under the hood:_ The client computes `Poseidon(Email, Salt)` locally and submits the commitment hash to the **SpareKey Soroban contract** (`CDT5MXYHAZK6YPTWFBKPECHGPCBQFINME6WJCONXCT73RKJRDIJ2HYJK`). Your cleartext email is never submitted to the blockchain.
 5. **Confirmation:** The interface transitions to **Wallet Already Protected** and displays verified on-chain guardian details.
 
 ---
@@ -92,7 +92,7 @@ Simulate losing access to the original wallet:
 Every step can be independently audited on the Stellar Testnet block explorer:
 
 - **SpareKey Smart Contract on Stellar.Expert:**  
-  [https://stellar.expert/explorer/testnet/contract/CD4D3YHVYIYIM3WUJYY6XTIQCU3KOBNPJN52S4KAPNRFBI7JVFFRPLQ5](https://stellar.expert/explorer/testnet/contract/CD4D3YHVYIYIM3WUJYY6XTIQCU3KOBNPJN52S4KAPNRFBI7JVFFRPLQ5)
+  [https://stellar.expert/explorer/testnet/contract/CDT5MXYHAZK6YPTWFBKPECHGPCBQFINME6WJCONXCT73RKJRDIJ2HYJK](https://stellar.expert/explorer/testnet/contract/CDT5MXYHAZK6YPTWFBKPECHGPCBQFINME6WJCONXCT73RKJRDIJ2HYJK)
 
 - **Native XLM SAC Address:**  
   `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`

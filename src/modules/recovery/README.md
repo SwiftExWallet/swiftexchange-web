@@ -78,7 +78,7 @@ For full testing steps, see the [End-to-End Walkthrough & Demo Guide](./docs/DEM
 
 | Component                      | Identifier / Address                                       | Details                                             |
 | :----------------------------- | :--------------------------------------------------------- | :-------------------------------------------------- |
-| **SpareKey Recovery Contract** | `CD4D3YHVYIYIM3WUJYY6XTIQCU3KOBNPJN52S4KAPNRFBI7JVFFRPLQ5` | Main recovery manager on Soroban Testnet            |
+| **SpareKey Recovery Contract** | `CDT5MXYHAZK6YPTWFBKPECHGPCBQFINME6WJCONXCT73RKJRDIJ2HYJK` | Main recovery manager on Soroban Testnet            |
 | **Native XLM SAC**             | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` | Enforces 2 XLM (`20,000,000` stroops) reserve floor |
 | **USDC SAC**                   | `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA` | Testnet USD Coin (USDC SAC)                         |
 | **Relayer Inbox**              | `claim@swiftexwallet.in`                                   | Emergency trigger receiver for DKIM verification    |
