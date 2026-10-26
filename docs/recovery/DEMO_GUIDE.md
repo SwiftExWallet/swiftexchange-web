@@ -4,6 +4,13 @@ This guide provides comprehensive instructions for running, testing, and verifyi
 
 ---
 
+## 🌐 Live Hosted Demo (Instant Preview)
+
+If you don't wish to run the app locally, you can test the live deployment directly:  
+👉 **[https://testnet.swiftexchange.io/recovery](https://testnet.swiftexchange.io/recovery)**
+
+---
+
 ## ⚡ Quick Start & Local Serving
 
 To clone and run the application locally:

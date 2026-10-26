@@ -72,7 +72,14 @@ flowchart LR
 
 ---
 
-## ⚡ Quick 1-Minute Run
+## 🌐 Live Hosted Demo
+
+Judges and evaluators can test the live application directly without local installation:  
+👉 **[https://testnet.swiftexchange.io/recovery](https://testnet.swiftexchange.io/recovery)**
+
+---
+
+## ⚡ Quick 1-Minute Run (Local Development)
 
 ```bash
 # Clone the repository & switch to the recovery feature branch
