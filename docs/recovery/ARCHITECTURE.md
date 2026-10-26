@@ -28,40 +28,32 @@ The Recovery Module (`src/modules/recovery/`) serves as the user-facing interfac
 
 ## 🧩 Frontend Architecture & State Machine
 
-```
-+-------------------------------------------------------------------------------+
-|                                RecoveryPage.tsx                               |
-|               (Main Container, Tab Navigation, Route Synchronizer)             |
-+-------------------------------------------------------------------------------+
-           |                                                      |
-           v                                                      v
-+-----------------------+                              +------------------------+
-| ProtectWalletForm.tsx |                              | RecoverWalletFlow.tsx  |
-| (Setup & Registration)|                              | (Emergency Claim Flow) |
-+-----------------------+                              +------------------------+
-           |                                                      |
-           |-- 1. Check Registration Status                      |-- 1. Destination Input
-           |-- 2. Build Registration XDR                         |-- 2. Email Verification
-           |-- 3. Freighter Transaction Signing                  |-- 3. Timelock Countdown
-           |-- 4. Confirm Registration                           |-- 4. Execute Sweep
-           v                                                      v
-+-------------------------------------------------------------------------------+
-|                       State & Data Layer (Zustand + Hooks)                     |
-|  - useRecoverWalletFlow.ts (Multi-step state machine)                         |
-|  - recoveryStore.ts (Persistent local recovery state)                         |
-|  - sparekeyContractService.ts (Horizon & Soroban RPC balance checks)         |
-|  - recoveryApi.ts (HTTP client for Backend Relayer)                           |
-+-------------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    RP["RecoveryPage.tsx<br/>(Tab Navigation & Route Synchronizer)"]
+
+    RP --> PWF["ProtectWalletForm.tsx<br/>(Guardian Setup & Registration)"]
+    RP --> RWF["RecoverWalletFlow.tsx<br/>(Emergency Claim & Status Tracker)"]
+
+    subgraph StateLayer["State & Data Layer (Zustand + Hooks)"]
+        HOOK["useRecoverWalletFlow.ts<br/>(State Machine Hook)"]
+        STORE["recoveryStore.ts<br/>(Persistent Local Recovery Store)"]
+        RPC["sparekeyContractService.ts<br/>(Horizon & Soroban RPC)"]
+        API["recoveryApi.ts<br/>(Relayer REST Client)"]
+    end
+
+    PWF --> StateLayer
+    RWF --> StateLayer
 ```
 
 ---
 
 ## 🔌 Integration Points
 
-### 1. Wallet Layer (Freighter)
+### 1. Wallet Layer (Stellar & WalletConnect)
 
-- Connects to the user's active Stellar account.
-- Signs on-chain transaction XDR during initial guardian registration without transferring or depositing funds into escrow.
+- Connects to the user's active Stellar account via WalletConnect or any Stellar browser wallet (Freighter, Albedo).
+- Signs on-chain transaction XDR during initial guardian registration without moving or locking funds.
 
 ### 2. Backend Relayer API
 

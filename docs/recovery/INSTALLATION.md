@@ -10,8 +10,12 @@ Before you begin, ensure you have the following installed:
 
 - **Node.js:** `v20.x` or later (Node 18+ is compatible, but Node 20+ matches `package.json` engine requirements).
 - **npm:** `v10.x` or later.
-- **Stellar Wallet:** [Freighter Wallet](https://www.freighter.app/) extension installed in your Chromium or Firefox browser.
-  - Make sure Freighter is switched to **Testnet** (Settings ➔ Network ➔ Testnet).
+- **Stellar Wallet:** Any Stellar Testnet compatible wallet (e.g., Freighter, Albedo, or any mobile wallet via WalletConnect).
+
+```mermaid
+flowchart LR
+    A["1. Clone Repo"] --> B["2. Checkout Branch"] --> C["3. npm install"] --> D["4. Configure .env"] --> E["5. npm run dev"]
+```
 
 ---
 
