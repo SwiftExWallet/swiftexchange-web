@@ -84,7 +84,14 @@ export const getStellarConfig = (network: NetworkType | string): StellarChainCon
     : STELLAR_CONFIG_TESTNET;
 };
 
-export const WALLETCONNECT_PROJECT_ID = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+export const WALLETCONNECT_PROJECT_ID: string =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WALLETCONNECT_PROJECT_ID) || '';
+
+if (!WALLETCONNECT_PROJECT_ID && typeof window !== 'undefined') {
+  console.warn(
+    '[WalletConnect] VITE_WALLETCONNECT_PROJECT_ID is not configured. WalletConnect QR and pairing features may fail.'
+  );
+}
 
 export const WALLETCONNECT_METADATA = {
   name: 'SwiftExchange',

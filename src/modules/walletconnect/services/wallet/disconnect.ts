@@ -1,3 +1,4 @@
+import { removeEVMListeners } from './eventListeners';
 import { saveSession } from './sessionPersistence';
 import type { WalletServiceContext, WalletType } from './types';
 
@@ -29,6 +30,7 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
 
   if (provider) {
     ctx.registeredProviders.delete(provider);
+    removeEVMListeners(provider);
 
     if (provider.session) {
       try {
@@ -80,6 +82,7 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
 
   const providers = new Set(ctx.providers.values());
   for (const provider of providers) {
+    removeEVMListeners(provider);
     if (provider?.session) {
       try {
         await provider.disconnect();
@@ -98,22 +101,34 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
   ctx.registeredProviders.clear();
 
   await clearAppData();
-  saveSession(ctx);
 }
 
 // ---------------------------------------------------------------------------
-// clearAppData — localStorage + IndexedDB + API keys + dYdX vault
+// clearAppData — localStorage + IndexedDB + API keys
 // ---------------------------------------------------------------------------
 
 export async function clearAppData(): Promise<void> {
   try {
+    // Core session keys
     localStorage.removeItem('wallet_sessions');
     localStorage.removeItem('_sx_active_auth_addr');
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('_sx_auth_')) {
-        localStorage.removeItem(key);
+
+    // Sweep all keys — remove anything matching known stale patterns
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (
+        key.startsWith('_sx_auth_') ||
+        key.startsWith('stellar_active_') || // old format stale sessions
+        key.startsWith('wc@2:') || // WalletConnect v2 pairing/session storage
+        key.startsWith('walletconnect') ||
+        key === 'wallet_sessions'
+      ) {
+        keysToRemove.push(key);
       }
-    });
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
   } catch (error) {
     console.warn('[WalletService] Storage clear failed:', error);
   }
@@ -121,6 +136,7 @@ export async function clearAppData(): Promise<void> {
   try {
     if (typeof indexedDB !== 'undefined') {
       indexedDB.deleteDatabase('_sx_v4_kv_28f3');
+      indexedDB.deleteDatabase('WALLET_CONNECT_V2_INDEXED_DB'); // WC v2 IndexedDB
     }
   } catch (error) {
     console.error('[WalletService] Failed to clear IndexedDB:', error);

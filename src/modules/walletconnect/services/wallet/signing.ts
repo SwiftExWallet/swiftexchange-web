@@ -2,68 +2,6 @@ import { BrowserProvider, getAddress, hexlify, toUtf8Bytes } from 'ethers';
 
 import { sendCustomNotification } from '../../../../service/notificationService';
 
-export async function signDydxMessage(evmAddress: string, provider: unknown): Promise<string> {
-  const typedData = {
-    domain: { name: 'dYdX Chain', chainId: 1 },
-    primaryType: 'dYdX',
-    types: {
-      EIP712Domain: [
-        { name: 'name', type: 'string' },
-        { name: 'chainId', type: 'uint256' },
-      ],
-      dYdX: [{ name: 'action', type: 'string' }],
-    },
-    message: { action: 'dYdX Chain Onboarding' },
-  };
-
-  const lowerAddr = evmAddress.toLowerCase();
-  const checksumAddr = getAddress(evmAddress);
-  const dataToSignStr = JSON.stringify(typedData);
-
-  const token = localStorage.getItem('device_token');
-  if (token) {
-    sendCustomNotification(token, {
-      title: 'Signature Request',
-      body: 'Please open your wallet to sign the dYdX onboarding message.',
-    }).catch(err => {
-      console.error(err);
-    });
-  }
-
-  if (provider && typeof (provider as any).request === 'function') {
-    const trySign = async (addr: string, data: any) => {
-      console.log(`[signDydxMessage] Trying eth_signTypedData_v4 with address ${addr}`);
-      return await (provider as any).request({
-        method: 'eth_signTypedData_v4',
-        params: [addr, data],
-      });
-    };
-
-    try {
-      return (await trySign(lowerAddr, dataToSignStr)) as string;
-    } catch (e1: any) {
-      if (e1?.message === 'USER_REJECTED') throw e1;
-      try {
-        return (await trySign(checksumAddr, dataToSignStr)) as string;
-      } catch (e2: any) {
-        if (e2?.message === 'USER_REJECTED') throw e2;
-        try {
-          return (await trySign(lowerAddr, typedData)) as string;
-        } catch (e3: any) {
-          if (e3?.message === 'USER_REJECTED') throw e3;
-          try {
-            return (await trySign(checksumAddr, typedData)) as string;
-          } catch (e4: any) {
-            throw new Error(e4?.message || 'Wallet does not support eth_signTypedData_v4');
-          }
-        }
-      }
-    }
-  }
-
-  throw new Error('Wallet provider is missing or invalid.');
-}
-
 // ---------------------------------------------------------------------------
 // SIWE (EIP-4361) personal_sign — multi-fallback
 // ---------------------------------------------------------------------------
@@ -257,8 +195,25 @@ export async function signStellarPayload(
         const result = await injectedFreighter.signTransaction(unsignedXdr, {
           networkPassphrase,
           network: isTestnet ? 'TESTNET' : 'PUBLIC',
+          address: stellarAddress,
           accountToSign: stellarAddress,
         });
+        if (result?.error) {
+          const errMsg =
+            typeof result.error === 'string'
+              ? result.error
+              : (result.error as any).message || JSON.stringify(result.error);
+          if (
+            errMsg.toLowerCase().includes('declined') ||
+            errMsg.toLowerCase().includes('reject') ||
+            errMsg.toLowerCase().includes('cancel')
+          ) {
+            const rejErr = new Error('USER_REJECTED') as any;
+            rejErr.code = 4001;
+            throw rejErr;
+          }
+          throw new Error(errMsg);
+        }
         const xdrResult =
           typeof result === 'string'
             ? result
@@ -273,8 +228,25 @@ export async function signStellarPayload(
     if (typeof injectedFreighter?.signMessage === 'function') {
       try {
         const result = await injectedFreighter.signMessage(payload, {
+          networkPassphrase,
           address: stellarAddress,
         });
+        if (result?.error) {
+          const errMsg =
+            typeof result.error === 'string'
+              ? result.error
+              : (result.error as any).message || JSON.stringify(result.error);
+          if (
+            errMsg.toLowerCase().includes('declined') ||
+            errMsg.toLowerCase().includes('reject') ||
+            errMsg.toLowerCase().includes('cancel')
+          ) {
+            const rejErr = new Error('USER_REJECTED') as any;
+            rejErr.code = 4001;
+            throw rejErr;
+          }
+          throw new Error(errMsg);
+        }
         const sig =
           typeof result === 'string' ? result : (result?.signedMessage ?? result?.signature);
         if (sig) return sig;
@@ -390,7 +362,25 @@ export async function signStellarChallenge(
     const result = await (provider as any).signTransaction(xdr, {
       networkPassphrase: networkPassphrase,
     });
-    return typeof result === 'string' ? result : result.signedTxXdr;
+    if (result?.error) {
+      const errMsg =
+        typeof result.error === 'string'
+          ? result.error
+          : (result.error as any).message || JSON.stringify(result.error);
+      if (
+        errMsg.toLowerCase().includes('declined') ||
+        errMsg.toLowerCase().includes('reject') ||
+        errMsg.toLowerCase().includes('cancel')
+      ) {
+        const rejErr = new Error('USER_REJECTED') as any;
+        rejErr.code = 4001;
+        throw rejErr;
+      }
+      throw new Error(errMsg);
+    }
+    const signed = typeof result === 'string' ? result : result?.signedTxXdr;
+    if (!signed) throw new Error('No signed transaction returned');
+    return signed;
   }
 
   const result = await (provider as any).request({

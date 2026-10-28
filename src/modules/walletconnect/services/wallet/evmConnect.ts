@@ -186,11 +186,12 @@ export async function connectWalletConnectSingle(
     events: ['chainChanged', 'accountsChanged'],
   };
 
-  // For testnet, pass namespaces as optional to prevent rigid rejection by wallets that don't support custom testnets
-  const connectParams =
-    ctx.currentNetwork === 'testnet'
-      ? { optionalNamespaces: { eip155: eip155Namespace }, requiredNamespaces: {} }
-      : { namespaces: { eip155: eip155Namespace } };
+  // Use optionalNamespaces on both mainnet and testnet to prevent rigid rejection by wallets
+  // that do not support every single chain in the list (e.g. Ethereum-only or subset wallets).
+  const connectParams = {
+    optionalNamespaces: { eip155: eip155Namespace },
+    requiredNamespaces: {},
+  };
 
   return new Promise((resolve, reject) => {
     let sessionResolved = false;
@@ -215,6 +216,7 @@ export async function connectWalletConnectSingle(
 
     const cleanup = () => {
       ctx.cancelActiveConnection = undefined;
+      ctx.modals.delete('evm');
       clearTimeout(timeout);
       unsubscribe();
       try {
@@ -223,8 +225,8 @@ export async function connectWalletConnectSingle(
         } else if (typeof provider.off === 'function') {
           provider.off('display_uri', onDisplayUri);
         }
-      } catch {
-        // ignore
+      } catch (err) {
+        void err;
       }
     };
 
@@ -272,18 +274,24 @@ export async function connectWalletConnectSingle(
         const namespacesRes = session.namespaces;
         const eip155Acc = namespacesRes?.eip155?.accounts?.[0];
 
-        if (!eip155Acc) {
+        if (!eip155Acc || typeof eip155Acc !== 'string') {
           reject(new Error('EVM account not returned'));
           return;
         }
 
-        let evmAddress: string | undefined;
-        let evmChainId: number | undefined;
-        if (eip155Acc) {
-          const [, chainIdStr, addr] = eip155Acc.split(':');
-          evmAddress = addr;
-          evmChainId = parseInt(chainIdStr, 10);
+        const parts = eip155Acc.split(':');
+        if (parts.length < 3) {
+          reject(new Error('Malformed CAIP-10 EVM account format'));
+          return;
         }
+
+        const [, chainIdStr, addr] = parts;
+        const evmChainId = parseInt(chainIdStr, 10);
+        if (!addr || !/^0x[a-fA-F0-9]{40}$/i.test(addr)) {
+          reject(new Error('Invalid EVM address returned by wallet'));
+          return;
+        }
+        const evmAddress = addr;
         setupWalletConnectListeners(ctx, provider, 'evm');
         const peerMetadata = session.peer?.metadata;
         const meta = getSessionMetadata(walletId, peerMetadata);

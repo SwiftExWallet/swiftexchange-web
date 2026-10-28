@@ -16,7 +16,7 @@ import {
   wrapProviderRequests,
 } from '../services/wallet/providerRegistry';
 import { saveSession } from '../services/wallet/sessionPersistence';
-import { signDydxMessage, signSiweMessage, signStellarChallenge } from '../services/wallet/signing';
+import { signSiweMessage, signStellarChallenge } from '../services/wallet/signing';
 import { connectUnified } from '../services/wallet/unifiedConnect';
 import { extractErrorMessage, isUserRejection } from '../utils/walletErrorHandler';
 import {
@@ -270,20 +270,6 @@ describe('Unified Multi-Chain & EVM Request Verification', () => {
       );
 
       expect(sig).toBe('0xMOCK_SIWE_SIGNATURE_LOWERCASE');
-    });
-
-    it('signs dYdX EIP-712 typed data onboard message', async () => {
-      const provider = {
-        request: vi.fn(async ({ method }: { method: string }) => {
-          if (method === 'eth_signTypedData_v4') {
-            return '0xMOCK_DYDX_TYPED_SIGNATURE';
-          }
-          throw new Error('Unsupported method');
-        }),
-      };
-
-      const sig = await signDydxMessage('0x1111111111111111111111111111111111111111', provider);
-      expect(sig).toBe('0xMOCK_DYDX_TYPED_SIGNATURE');
     });
 
     it('signs Stellar XDR challenge via provider stellar_signXDR', async () => {

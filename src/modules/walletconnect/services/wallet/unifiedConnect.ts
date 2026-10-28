@@ -163,41 +163,67 @@ export async function connectUnified(
     const meta = getSessionMetadata(walletId, peerMetadata);
 
     const evmAccounts: string[] = session.namespaces?.eip155?.accounts ?? [];
-    if (evmAccounts.length > 0) {
-      const [, chainIdStr, address] = evmAccounts[0].split(':');
-      const evmSession: WalletSession = {
-        type: 'evm',
-        walletId,
-        evmAddress: address,
-        evmChainId: parseInt(chainIdStr, 10),
-        connectionMode: 'unified',
-        peerName: meta.peerName,
-        peerIcon: meta.peerIcon,
-        peerRedirect: meta.peerRedirect,
-      };
-      ctx.sessions.set('evm', evmSession);
-      ctx.providers.set('evm', provider);
-      result.evm = evmSession;
-      ctx.emitState('evm', 'connected');
+    if (evmAccounts.length > 0 && typeof evmAccounts[0] === 'string') {
+      const parts = evmAccounts[0].split(':');
+      if (parts.length >= 3) {
+        const [, chainIdStr, address] = parts;
+        if (address && address.startsWith('0x') && address.length >= 8) {
+          const evmSession: WalletSession = {
+            type: 'evm',
+            walletId,
+            evmAddress: address,
+            evmChainId: parseInt(chainIdStr, 10),
+            connectionMode: 'unified',
+            peerName: meta.peerName,
+            peerIcon: meta.peerIcon,
+            peerRedirect: meta.peerRedirect,
+          };
+          ctx.sessions.set('evm', evmSession);
+          ctx.providers.set('evm', provider);
+          result.evm = evmSession;
+          ctx.emitState('evm', 'connected');
+        } else {
+          ctx.emitState('evm', 'idle');
+        }
+      } else {
+        ctx.emitState('evm', 'idle');
+      }
+    } else {
+      ctx.emitState('evm', 'idle');
     }
 
     const stellarAccounts: string[] = session.namespaces?.stellar?.accounts ?? [];
-    if (stellarAccounts.length > 0) {
-      const [, chainId, address] = stellarAccounts[0].split(':');
-      const stellarSession: WalletSession = {
-        type: 'stellar',
-        walletId,
-        stellarAddress: address,
-        stellarChainId: chainId,
-        connectionMode: 'unified',
-        peerName: meta.peerName,
-        peerIcon: meta.peerIcon,
-        peerRedirect: meta.peerRedirect,
-      };
-      ctx.sessions.set('stellar', stellarSession);
-      ctx.providers.set('stellar', provider);
-      result.stellar = stellarSession;
-      ctx.emitState('stellar', 'connected');
+    if (stellarAccounts.length > 0 && typeof stellarAccounts[0] === 'string') {
+      const parts = stellarAccounts[0].split(':');
+      if (parts.length >= 3) {
+        const [, chainId, address] = parts;
+        if (
+          address &&
+          (address.startsWith('G') || address.startsWith('C') || /^[A-Z0-9]+$/i.test(address)) &&
+          address.length >= 20
+        ) {
+          const stellarSession: WalletSession = {
+            type: 'stellar',
+            walletId,
+            stellarAddress: address,
+            stellarChainId: chainId,
+            connectionMode: 'unified',
+            peerName: meta.peerName,
+            peerIcon: meta.peerIcon,
+            peerRedirect: meta.peerRedirect,
+          };
+          ctx.sessions.set('stellar', stellarSession);
+          ctx.providers.set('stellar', provider);
+          result.stellar = stellarSession;
+          ctx.emitState('stellar', 'connected');
+        } else {
+          ctx.emitState('stellar', 'idle');
+        }
+      } else {
+        ctx.emitState('stellar', 'idle');
+      }
+    } else {
+      ctx.emitState('stellar', 'idle');
     }
 
     console.info(`[WalletConnect:${networkTag}] ✓ Unified session established:`, {

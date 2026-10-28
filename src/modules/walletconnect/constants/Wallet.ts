@@ -1,7 +1,14 @@
+import { WALLETCONNECT_PROJECT_ID } from '../config/chains';
+
 export const WalletType = {
   EVM: 'evm',
   STELLAR: 'stellar',
 } as const;
+
+const getWcLogoUrl = (id: string, fallback = '/logo.png') => {
+  if (!WALLETCONNECT_PROJECT_ID) return fallback;
+  return `https://explorer-api.walletconnect.com/v3/logo/sm/${id}?projectId=${WALLETCONNECT_PROJECT_ID}`;
+};
 
 export type WalletType = (typeof WalletType)[keyof typeof WalletType];
 
@@ -49,7 +56,7 @@ export const EVM_WALLETS: WalletConfig[] = [
   {
     id: 'phantom',
     name: 'Phantom',
-    icon: 'https://explorer-api.walletconnect.com/v3/logo/sm/b6ec7b81-bb4f-427d-e290-7631e6e50d00?projectId=fdde0f7f2696cc4d849103c23792d693',
+    icon: getWcLogoUrl('b6ec7b81-bb4f-427d-e290-7631e6e50d00', 'https://phantom.app/favicon.ico'),
     type: WalletType.EVM,
     rdns: 'app.phantom',
     wcListingId: 'a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393',
@@ -138,7 +145,7 @@ export interface WalletMetadata {
 export const WALLET_METADATA_MAP: Record<string, WalletMetadata> = {
   swiftex: {
     name: 'SwiftEx Wallet',
-    icon: 'https://explorer-api.walletconnect.com/v3/logo/sm/54c06c6a-333d-49d6-f2fd-7e89d2068500?projectId=fdde0f7f2696cc4d849103c23792d693',
+    icon: '/logo.png',
     wcListingId: 'a4604022bf9199ca6d762c5663d8a6186a9ca4b607b9dcb29bcb81054d6f1091',
     homepage: 'https://swiftexchange.io/',
     redirects: {
@@ -175,7 +182,7 @@ export const WALLET_METADATA_MAP: Record<string, WalletMetadata> = {
   },
   phantom: {
     name: 'Phantom',
-    icon: 'https://explorer-api.walletconnect.com/v3/logo/sm/b6ec7b81-bb4f-427d-e290-7631e6e50d00?projectId=fdde0f7f2696cc4d849103c23792d693',
+    icon: getWcLogoUrl('b6ec7b81-bb4f-427d-e290-7631e6e50d00', 'https://phantom.app/favicon.ico'),
     rdns: 'app.phantom',
     wcListingId: 'a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393',
     homepage: 'https://phantom.app/',

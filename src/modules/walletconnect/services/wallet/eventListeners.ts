@@ -117,32 +117,25 @@ export function setupWalletConnectListeners(
 
 // ---------------------------------------------------------------------------
 // Visibility handler (relay transport reopen)
-// ---------------------------------------------------------------------------
-
-export function setupVisibilityHandler(ctx: WalletServiceContext): void {
-  if (typeof document === 'undefined') return;
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    const seen = new Set<any>();
-    for (const provider of ctx.providers.values()) {
-      if (!provider || seen.has(provider)) continue;
-      seen.add(provider);
-      if (!provider.session) continue;
-
-      try {
-        const relayer = provider.client?.core?.relayer;
-        if (relayer && typeof relayer.transportOpen === 'function') {
-          console.debug('[WalletService] Tab visible — reopening WC relay transport');
-          relayer.transportOpen().catch((err: any) => {
-            console.warn('[WalletService] Relay transportOpen error:', err);
-          });
-        }
-      } catch (err) {
-        console.warn('[WalletService] visibilitychange relay reopen error:', err);
+export function removeEVMListeners(provider: any): void {
+  if (!provider) return;
+  const existing = evmListenerMap.get(provider);
+  if (existing) {
+    try {
+      if (typeof provider.removeListener === 'function') {
+        provider.removeListener('accountsChanged', existing.accountsChanged);
+        provider.removeListener('chainChanged', existing.chainChanged);
+        provider.removeListener('disconnect', existing.disconnect);
+      } else if (typeof provider.off === 'function') {
+        provider.off('accountsChanged', existing.accountsChanged);
+        provider.off('chainChanged', existing.chainChanged);
+        provider.off('disconnect', existing.disconnect);
       }
+    } catch {
+      // ignore
     }
-  });
+    evmListenerMap.delete(provider);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -167,18 +160,37 @@ export function handleAccountsChanged(
 
   if (type === 'evm') {
     if (firstAccount.includes(':')) {
-      const [, chainIdStr, address] = firstAccount.split(':');
-      session.evmAddress = address;
-      session.evmChainId = parseInt(chainIdStr, 10);
-    } else {
+      const parts = firstAccount.split(':');
+      if (parts.length >= 3) {
+        const [, chainIdStr, address] = parts;
+        if (address && address.startsWith('0x') && address.length >= 8) {
+          session.evmAddress = address;
+          session.evmChainId = parseInt(chainIdStr, 10);
+        }
+      }
+    } else if (firstAccount.startsWith('0x') && firstAccount.length >= 8) {
       session.evmAddress = firstAccount;
     }
   } else if (type === 'stellar') {
     if (firstAccount.includes(':')) {
-      const [, chainId, address] = firstAccount.split(':');
-      session.stellarAddress = address;
-      session.stellarChainId = chainId;
-    } else {
+      const parts = firstAccount.split(':');
+      if (parts.length >= 3) {
+        const [, chainId, address] = parts;
+        if (
+          address &&
+          (address.startsWith('G') || address.startsWith('C') || /^[A-Z0-9]+$/i.test(address)) &&
+          address.length >= 20
+        ) {
+          session.stellarAddress = address;
+          session.stellarChainId = chainId;
+        }
+      }
+    } else if (
+      (firstAccount.startsWith('G') ||
+        firstAccount.startsWith('C') ||
+        /^[A-Z0-9]+$/i.test(firstAccount)) &&
+      firstAccount.length >= 20
+    ) {
       session.stellarAddress = firstAccount;
     }
   }

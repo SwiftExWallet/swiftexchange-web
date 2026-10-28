@@ -7,6 +7,7 @@ import {
 } from '../../../utils/walletConnectUtils';
 import { getEVMChains, getStellarConfig } from '../config/chains';
 import { WalletType } from '../constants/Wallet';
+import type { DiscoveredExtension } from '../services/wallet/types';
 import { walletService } from '../services/walletService';
 import {
   selectConnectedWallet,
@@ -21,6 +22,7 @@ export const useWalletConnect = () => {
   const isModalOpen = useWalletStore(state => state.isModalOpen);
   const network = useWalletStore(state => state.network);
   const isRestoringSession = useWalletStore(state => state.isRestoringSession);
+  const hasRestoredSessions = useWalletStore(state => state.hasRestoredSessions);
   const session = useWalletStore(state => state.session);
   const pairingUri = useWalletStore(state => state.pairingUri);
   const connectingWalletId = useWalletStore(state => state.connectingWalletId);
@@ -50,8 +52,10 @@ export const useWalletConnect = () => {
   const checkSessionHealth = useWalletStore(state => state.checkSessionHealth);
 
   useEffect(() => {
-    restoreSessions();
-  }, []);
+    if (!hasRestoredSessions && !isRestoringSession) {
+      restoreSessions();
+    }
+  }, [hasRestoredSessions, isRestoringSession, restoreSessions]);
 
   const isAnyWalletConnected = useMemo(
     () => Object.keys(connectedWallets).length > 0,
@@ -288,10 +292,18 @@ export const useExtensionDetector = () => {
   const [installedWallets, setInstalledWallets] = useState<string[]>(() =>
     walletService.getInstalledWallets()
   );
+  const [discoveredExtensions, setDiscoveredExtensions] = useState<DiscoveredExtension[]>(() => [
+    ...walletService.getDiscoveredExtensions(),
+    ...walletService.discoverStellarExtensions(),
+  ]);
 
   useEffect(() => {
     const refresh = () => {
       setInstalledWallets(walletService.getInstalledWallets());
+      setDiscoveredExtensions([
+        ...walletService.getDiscoveredExtensions(),
+        ...walletService.discoverStellarExtensions(),
+      ]);
     };
 
     if (typeof window !== 'undefined') {
@@ -321,6 +333,7 @@ export const useExtensionDetector = () => {
 
   return {
     installedWallets,
+    discoveredExtensions,
     isInstalled,
   };
 };

@@ -54,6 +54,7 @@ export interface WalletState {
   pairingUri: string | null;
   connectingWalletId: string | null;
 
+  hasRestoredSessions: boolean;
   isAuthenticated: boolean;
   isAuthenticating: boolean;
   authError: string | null;
@@ -121,6 +122,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     pairingUri: null,
     connectingWalletId: null,
 
+    hasRestoredSessions: false,
     isAuthenticated: false,
     isAuthenticating: false,
     authError: null,
@@ -132,6 +134,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     setConnectingWalletId: (walletId: string | null) => set({ connectingWalletId: walletId }),
 
     connectWallet: async (type, walletId) => {
+      if (get().isConnecting(type)) return;
       const existing = get().connectedWallets[type];
       if (existing?.address) return;
 
@@ -645,10 +648,6 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           portfolio.clearAssetsByType('stellar');
         }
       }
-
-      if (typeof window !== 'undefined') {
-        window.location.reload();
-      }
     },
 
     disconnectAll: async () => {
@@ -665,40 +664,21 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         connectionStatus: {},
         sessionLastPingAt: {},
         session: null,
+        hasRestoredSessions: false,
       });
 
       usePortfolioStore.getState().clearAssets();
-
-      if (typeof window !== 'undefined') {
-        window.location.reload();
-      }
     },
 
     restoreSessions: async () => {
-      if (get().isRestoringSession) return;
+      if (get().hasRestoredSessions || get().isRestoringSession) return;
       set({ isRestoringSession: true });
 
       try {
         const sessions = await walletService.restoreSessions();
 
         if (!sessions.length) {
-          set({ isRestoringSession: false });
-          const hadConnectedWallets =
-            Object.keys(get().connectedWallets).length > 0 ||
-            Boolean(localStorage.getItem('wallet_sessions'));
-          if (hadConnectedWallets) {
-            set({
-              connectedWallets: {},
-              connectionStatus: {},
-              sessionLastPingAt: {},
-              session: null,
-              isAuthenticated: false,
-              authenticatedChain: null,
-              linkedChains: [],
-            });
-            localStorage.removeItem('wallet_sessions');
-            usePortfolioStore.getState().clearAssets();
-          }
+          set({ isRestoringSession: false, hasRestoredSessions: true });
           return;
         }
 
@@ -729,6 +709,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           connectedWallets: wallets,
           connectionStatus: status,
           isRestoringSession: false,
+          hasRestoredSessions: true,
           session: rawSession,
         });
 
@@ -799,6 +780,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         network,
         connectedWallets: {},
         connectionStatus: {},
+        hasRestoredSessions: false,
       });
     },
 

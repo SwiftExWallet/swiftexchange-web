@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.33.2",
+    "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^14.4.3",
     "@walletconnect/core": "^2.20.0",
     "@walletconnect/modal": "^2.7.0",
@@ -36,8 +37,9 @@
     "fflate": "^0.8.3",
     "lightweight-charts": "^5.0.8",
     "lightweight-charts-drawing": "^0.1.1",
-    "lightweight-charts-indicators": "^0.4.2",
+    "lightweight-charts-indicators": "^0.16.8",
     "lucide-react": "^0.525.0",
+    "oakscriptjs": "^0.12.3",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -52,6 +54,7 @@
   "devDependencies": {
     "@eslint/js": "^9.33.0",
     "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

@@ -29,12 +29,35 @@ export interface UnifiedConnectionResult {
   stellar?: WalletSession;
 }
 
+export interface EIP6963ProviderInfo {
+  uuid: string;
+  name: string;
+  icon: string;
+  rdns: string;
+}
+
+export interface EIP6963ProviderDetail {
+  info: EIP6963ProviderInfo;
+  provider: any;
+}
+
+export interface DiscoveredExtension {
+  id: string;
+  name: string;
+  icon: string;
+  type: WalletType;
+  rdns?: string;
+  isInstalled: boolean;
+  provider?: any;
+}
+
 export interface WalletServiceContext {
   sessions: Map<WalletType, WalletSession>;
 
   providers: Map<string, any>;
   modals: Map<string, WalletConnectModal>;
-  eip6963Providers: Map<string, any>;
+  eip6963Providers: Map<string, EIP6963ProviderDetail>;
+  discoveredExtensions: Map<string, DiscoveredExtension>;
   registeredProviders: Set<any>;
   lastPingAt: Map<WalletType, number>;
   disconnecting: Set<WalletType>;

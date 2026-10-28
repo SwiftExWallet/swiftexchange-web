@@ -1,9 +1,20 @@
+import * as FreighterApi from '@stellar/freighter-api';
 import { Core } from '@walletconnect/core';
 import UniversalProviderType from '@walletconnect/universal-provider';
 
 import { WALLETCONNECT_METADATA, WALLETCONNECT_PROJECT_ID } from '../../config/chains';
+import { WALLET_METADATA_MAP } from '../../constants/Wallet';
 import { extractErrorMessage, isUserRejection } from '../../utils/walletErrorHandler';
-import type { WalletServiceContext, WalletType } from './types';
+import type { DiscoveredExtension, WalletServiceContext, WalletType } from './types';
+
+let freighterInstalledCached = false;
+if (typeof window !== 'undefined') {
+  FreighterApi.isConnected()
+    .then(res => {
+      freighterInstalledCached = typeof res === 'boolean' ? res : !!(res as any)?.isConnected;
+    })
+    .catch(() => {});
+}
 
 // ---------------------------------------------------------------------------
 // EIP-6963 rdns → walletId mapping
@@ -47,32 +58,86 @@ function isGenuineMetaMask(provider: any): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Safe redirect protocol allowlist to prevent open redirect / javascript: URI execution (SEC-01)
+const ALLOWED_REDIRECT_SCHEMES = new Set([
+  'metamask',
+  'trust',
+  'phantom',
+  'rainbow',
+  'swiftex',
+  'freighterwallet',
+  'lobstr',
+  'hotwallet',
+  'cbwallet',
+  'zerion',
+  'rabby',
+  'okx',
+  'backpack',
+]);
+
+export function isSafeWalletRedirectUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim().toLowerCase();
+  if (
+    trimmed.startsWith('javascript:') ||
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('vbscript:')
+  ) {
+    return false;
+  }
+  if (trimmed.startsWith('https://') || trimmed.startsWith('http://localhost')) {
+    return true;
+  }
+  const match = trimmed.match(/^([a-z0-9+.-]+):\/\//);
+  if (match && match[1]) {
+    return ALLOWED_REDIRECT_SCHEMES.has(match[1]);
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 export function setupEIP6963Listener(ctx: WalletServiceContext): void {
   if (typeof window === 'undefined') return;
   window.addEventListener('eip6963:announceProvider', (event: any) => {
     const detail = event.detail;
     if (detail?.info?.rdns && detail.provider) {
-      ctx.eip6963Providers.set(detail.info.rdns, detail.provider);
+      ctx.eip6963Providers.set(detail.info.rdns, detail);
+      ctx.discoveredExtensions.set(detail.info.rdns, {
+        id: detail.info.rdns,
+        name: detail.info.name || detail.info.rdns,
+        icon: detail.info.icon || '',
+        type: 'evm',
+        rdns: detail.info.rdns,
+        isInstalled: true,
+        provider: detail.provider,
+      });
     }
   });
   window.dispatchEvent(new Event('eip6963:requestProvider'));
 }
 
-export async function resolveEvmProvider(
-  ctx: WalletServiceContext,
-  walletId: string
-): Promise<any | null> {
+function tryFindEvmProvider(ctx: WalletServiceContext, walletId: string): any | null {
   const win = window as any;
 
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('eip6963:requestProvider'));
-    await new Promise(r => setTimeout(r, 50));
+  if (ctx.eip6963Providers.has(walletId)) {
+    const detail = ctx.eip6963Providers.get(walletId);
+    return detail?.provider ?? (detail as any);
+  }
+
+  for (const [rdns, detail] of ctx.eip6963Providers.entries()) {
+    if (
+      rdns.toLowerCase().includes(walletId.toLowerCase()) ||
+      detail?.info?.name?.toLowerCase().includes(walletId.toLowerCase())
+    ) {
+      return detail?.provider ?? (detail as any);
+    }
   }
 
   if (walletId in EIP6963_RDNS_MAP) {
     for (const rdns of EIP6963_RDNS_MAP[walletId]) {
       if (ctx.eip6963Providers.has(rdns)) {
-        return ctx.eip6963Providers.get(rdns);
+        const detail = ctx.eip6963Providers.get(rdns);
+        return detail?.provider ?? (detail as any);
       }
     }
   }
@@ -113,7 +178,8 @@ export async function resolveEvmProvider(
         if (win.ethereum.isRainbow) return win.ethereum;
         break;
       case 'phantom':
-        if (win.ethereum.isPhantom) return win.ethereum;
+        if (win.phantom?.ethereum || win.ethereum.isPhantom)
+          return win.phantom?.ethereum || win.ethereum;
         break;
       case 'hotwallet':
         if (win.ethereum.isHotWallet) return win.ethereum;
@@ -121,6 +187,26 @@ export async function resolveEvmProvider(
       case 'swiftex':
         if (win.ethereum.isSwiftEx) return win.ethereum;
         break;
+    }
+  }
+
+  return null;
+}
+
+export async function resolveEvmProvider(
+  ctx: WalletServiceContext,
+  walletId: string
+): Promise<any | null> {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+  }
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const provider = tryFindEvmProvider(ctx, walletId);
+    if (provider) return provider;
+    if (attempt < 2 && typeof window !== 'undefined') {
+      await new Promise(r => setTimeout(r, 100));
+      window.dispatchEvent(new Event('eip6963:requestProvider'));
     }
   }
 
@@ -158,11 +244,39 @@ export function isExtensionInstalled(ctx: WalletServiceContext, walletId: string
   if (walletId === 'walletconnect') return false;
   const win = window as any;
 
+  // Dynamic EIP-6963 check
+  if (ctx.eip6963Providers.has(walletId)) return true;
+  for (const [rdns, detail] of ctx.eip6963Providers.entries()) {
+    if (
+      rdns.toLowerCase().includes(walletId.toLowerCase()) ||
+      detail?.info?.name?.toLowerCase().includes(walletId.toLowerCase())
+    ) {
+      return true;
+    }
+  }
+
   if (walletId in EIP6963_RDNS_MAP) {
     if (EIP6963_RDNS_MAP[walletId].some(rdns => ctx.eip6963Providers.has(rdns))) return true;
   }
 
-  if (walletId === 'freighter') return !!(win.freighterApi || win.freighter);
+  // Stellar dynamic capability check
+  const stellarCandidate =
+    win[walletId] || (walletId === 'freighter' ? win.freighterApi : undefined);
+  if (
+    stellarCandidate &&
+    (typeof stellarCandidate.getPublicKey === 'function' ||
+      typeof stellarCandidate.getAddress === 'function' ||
+      typeof stellarCandidate.requestAccess === 'function' ||
+      typeof stellarCandidate.isAllowed === 'function' ||
+      typeof stellarCandidate.isConnected === 'function' ||
+      typeof stellarCandidate.signTransaction === 'function' ||
+      typeof stellarCandidate.sign === 'function')
+  ) {
+    return true;
+  }
+
+  if (walletId === 'freighter')
+    return freighterInstalledCached || !!(win.freighterApi || win.freighter);
   if (walletId === 'lobstr') return !!win.lobstr;
   if (walletId === 'swiftex') return !!(win.swiftex || win.ethereum?.isSwiftEx);
 
@@ -195,7 +309,7 @@ export function getInstalledWallets(ctx: WalletServiceContext): string[] {
   const installed = new Set<string>();
 
   for (const [rdns] of ctx.eip6963Providers.entries()) {
-    const walletId = RDNS_TO_WALLET_ID[rdns];
+    const walletId = RDNS_TO_WALLET_ID[rdns] || rdns;
     if (walletId) installed.add(walletId);
   }
 
@@ -212,11 +326,64 @@ export function getInstalledWallets(ctx: WalletServiceContext): string[] {
   if (win.ethereum?.isRabby) installed.add('rabby');
   if (win.ethereum?.isRainbow) installed.add('rainbow');
   if (win.ethereum?.isHotWallet) installed.add('hotwallet');
-  if (win.freighter || win.freighterApi) installed.add('freighter');
+  if (freighterInstalledCached || win.freighter || win.freighterApi) installed.add('freighter');
   if (win.lobstr) installed.add('lobstr');
+  if (win.xbull) installed.add('xbull');
+  if (win.albedo) installed.add('albedo');
+  if (win.rabet) installed.add('rabet');
   if (win.ethereum?.isSwiftEx || win.swiftex) installed.add('swiftex');
 
   return Array.from(installed);
+}
+
+/**
+ * Dynamically discovers any injected Stellar extension on `window`
+ * based on standard capability methods (getPublicKey / signTransaction).
+ */
+export function discoverStellarExtensions(): DiscoveredExtension[] {
+  if (typeof window === 'undefined') return [];
+  const win = window as any;
+  const candidates: Array<{ id: string; name: string; key: string }> = [
+    { id: 'freighter', name: 'Freighter', key: 'freighterApi' },
+    { id: 'freighter', name: 'Freighter', key: 'freighter' },
+    { id: 'lobstr', name: 'LOBSTR', key: 'lobstr' },
+    { id: 'xbull', name: 'xBull Wallet', key: 'xbull' },
+    { id: 'albedo', name: 'Albedo', key: 'albedo' },
+    { id: 'rabet', name: 'Rabet', key: 'rabet' },
+    { id: 'hana', name: 'Hana Wallet', key: 'hana' },
+    { id: 'swiftex', name: 'SwiftEx Wallet', key: 'swiftexStellar' },
+  ];
+
+  const found: DiscoveredExtension[] = [];
+  const seen = new Set<string>();
+
+  for (const item of candidates) {
+    const prov = win[item.key];
+    if (
+      prov &&
+      !seen.has(item.id) &&
+      (typeof prov.getPublicKey === 'function' ||
+        typeof prov.getAddress === 'function' ||
+        typeof prov.requestAccess === 'function' ||
+        typeof prov.isAllowed === 'function' ||
+        typeof prov.isConnected === 'function' ||
+        typeof prov.signTransaction === 'function' ||
+        typeof prov.sign === 'function')
+    ) {
+      seen.add(item.id);
+      const meta = WALLET_METADATA_MAP[item.id];
+      found.push({
+        id: item.id,
+        name: meta?.name || item.name,
+        icon: meta?.icon || '',
+        type: 'stellar',
+        isInstalled: true,
+        provider: prov,
+      });
+    }
+  }
+
+  return found;
 }
 
 // ---------------------------------------------------------------------------
@@ -460,13 +627,17 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
                 ? redirect.native || redirect.universal
                 : redirect.universal || redirect.native;
 
-              if (href) {
+              if (href && isSafeWalletRedirectUrl(href)) {
                 console.info(`[WalletRequest:${networkTag}] Directing mobile wallet to: ${href}`);
                 try {
                   window.open(href, '_blank', 'noopener');
                 } catch {
                   window.location.href = href;
                 }
+              } else if (href) {
+                console.warn(
+                  `[WalletRequest:${networkTag}] Blocked unsafe mobile redirect URL: ${href}`
+                );
               }
             }
           } catch (e) {

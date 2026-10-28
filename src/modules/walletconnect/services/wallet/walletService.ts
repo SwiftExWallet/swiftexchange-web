@@ -4,15 +4,22 @@ import { useWalletStore } from '../../store/walletConnectStore';
 import { disconnect, disconnectAll } from './disconnect';
 import { connectChainWallet } from './evmConnect';
 import {
+  discoverStellarExtensions,
   getInstalledWallets,
   isExtensionInstalled,
   setupEIP6963Listener,
 } from './providerRegistry';
-import { clearSessionStorage, restoreSessions, saveSession } from './sessionPersistence';
+import {
+  clearSessionStorage,
+  restoreSessions,
+  saveSession,
+  setupCrossTabSync,
+} from './sessionPersistence';
 import { signSiweMessage, signStellarChallenge, signStellarPayload } from './signing';
 import { connectStellar } from './stellarConnect';
 import type {
   ConnectionState,
+  DiscoveredExtension,
   UnifiedConnectionResult,
   WalletServiceContext,
   WalletSession,
@@ -29,6 +36,7 @@ class WalletService {
       providers: new Map(),
       modals: new Map(),
       eip6963Providers: new Map(),
+      discoveredExtensions: new Map(),
       registeredProviders: new Set(),
       lastPingAt: new Map(),
       disconnecting: new Set(),
@@ -44,6 +52,7 @@ class WalletService {
 
     setupEIP6963Listener(this.ctx);
     this.setupVisibilityHandler();
+    setupCrossTabSync(this.ctx);
   }
 
   // ---------------------------------------------------------------------------
@@ -233,7 +242,8 @@ class WalletService {
         } else if (type === 'stellar') {
           try {
             if (typeof provider.isConnected === 'function') {
-              valid = await provider.isConnected();
+              const res = await provider.isConnected();
+              valid = typeof res === 'boolean' ? res : !!(res as any)?.isConnected;
             } else if (typeof provider.getPublicKey === 'function') {
               valid = true;
             }
@@ -308,6 +318,14 @@ class WalletService {
 
   getInstalledWallets(): string[] {
     return getInstalledWallets(this.ctx);
+  }
+
+  getDiscoveredExtensions(): DiscoveredExtension[] {
+    return Array.from(this.ctx.discoveredExtensions.values());
+  }
+
+  discoverStellarExtensions(): DiscoveredExtension[] {
+    return discoverStellarExtensions();
   }
 
   // ---------------------------------------------------------------------------

@@ -55,10 +55,15 @@ const isValidDevicePayload = (payload: unknown): boolean => {
   );
 };
 
+const isSwiftExPeer = (peerMeta?: any): boolean => {
+  if (!peerMeta) return false;
+  const name = typeof peerMeta.name === 'string' ? peerMeta.name.toLowerCase() : '';
+  const url = typeof peerMeta.url === 'string' ? peerMeta.url.toLowerCase() : '';
+  return name.includes('swiftex') || url.includes('swiftexchange.io');
+};
+
 const App = () => {
   const session = useWalletStore(state => state.session);
-
-  console.log(session?.peer?.metadata?.userDevice, '---------');
   const devicePayload = session?.peer?.metadata?.userDevice;
 
   useEffect(() => {
@@ -75,6 +80,11 @@ const App = () => {
       ensureWalletLinkedToDevice(undefined, storedToken).catch(() => {});
       return;
     }
+
+    if (!isSwiftExPeer(session?.peer?.metadata)) {
+      return;
+    }
+
     if (!isValidDevicePayload(devicePayload)) {
       return;
     }
@@ -88,7 +98,7 @@ const App = () => {
         }
       })
       .catch(() => {});
-  }, [devicePayload]);
+  }, [devicePayload, session?.peer?.metadata]);
 
   return (
     <ErrorBoundary>

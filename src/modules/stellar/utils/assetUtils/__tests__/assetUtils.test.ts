@@ -69,9 +69,13 @@ vi.mock('@stellar/stellar-sdk', () => {
   };
 });
 
-vi.mock('../../../../walletconnect/config/chains', () => ({
-  getStellarConfig: vi.fn(() => ({ networkPassphrase: 'mock_passphrase' })),
-}));
+vi.mock('../../../../walletconnect/config/chains', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../../walletconnect/config/chains')>();
+  return {
+    ...actual,
+    getStellarConfig: vi.fn(() => ({ networkPassphrase: 'mock_passphrase' })),
+  };
+});
 
 vi.mock('../../StellarSequenceTracker', () => ({
   StellarSequenceTracker: {

@@ -45,6 +45,59 @@ export const WalletListModal: React.FC = () => {
   );
   const [error, setError] = useState<string | null>(null);
   const connectTimeoutRef = useRef<number | null>(null);
+  const { isInstalled, discoveredExtensions } = useExtensionDetector();
+
+  const dynamicEvmWallets = useMemo(() => {
+    const list: WalletConfig[] = [...EVM_WALLETS];
+    if (discoveredExtensions) {
+      for (const ext of discoveredExtensions) {
+        if (ext.type === 'evm') {
+          const idx = list.findIndex(w => w.id === ext.id);
+          if (idx !== -1) {
+            list[idx] = {
+              ...list[idx],
+              name: ext.name || list[idx].name,
+              icon: ext.icon || list[idx].icon,
+            };
+          } else {
+            list.push({
+              id: ext.id,
+              name: ext.name,
+              icon: ext.icon || WALLETCONNECT_ICON,
+              type: 'evm',
+            });
+          }
+        }
+      }
+    }
+    return list;
+  }, [discoveredExtensions]);
+
+  const dynamicStellarWallets = useMemo(() => {
+    const list: WalletConfig[] = [...STELLAR_WALLETS];
+    if (discoveredExtensions) {
+      for (const ext of discoveredExtensions) {
+        if (ext.type === 'stellar') {
+          const idx = list.findIndex(w => w.id === ext.id);
+          if (idx !== -1) {
+            list[idx] = {
+              ...list[idx],
+              name: ext.name || list[idx].name,
+              icon: ext.icon || list[idx].icon,
+            };
+          } else {
+            list.push({
+              id: ext.id,
+              name: ext.name,
+              icon: ext.icon || WALLETCONNECT_ICON,
+              type: 'stellar',
+            });
+          }
+        }
+      }
+    }
+    return list;
+  }, [discoveredExtensions]);
 
   const activeConnectingWalletId = useMemo(() => {
     if (!connectingWallet) return null;
@@ -58,14 +111,16 @@ export const WalletListModal: React.FC = () => {
   const activeConnectingConfig = useMemo(() => {
     if (!activeConnectingWalletId) return null;
     return (
-      [...EVM_WALLETS, ...STELLAR_WALLETS].find(w => w.id === activeConnectingWalletId) || {
+      [...dynamicEvmWallets, ...dynamicStellarWallets].find(
+        w => w.id === activeConnectingWalletId
+      ) || {
         id: activeConnectingWalletId,
         name: activeConnectingWalletId === 'walletconnect' ? 'WalletConnect' : 'Wallet',
         icon: WALLETCONNECT_ICON,
         type: 'evm' as any,
       }
     );
-  }, [activeConnectingWalletId]);
+  }, [activeConnectingWalletId, dynamicEvmWallets, dynamicStellarWallets]);
 
   const evmConnected = Boolean(connectedWallets.evm?.address);
   const stellarConnected = Boolean(connectedWallets.stellar?.address);
@@ -284,14 +339,8 @@ export const WalletListModal: React.FC = () => {
     setViewMode('wallets');
     cancelConnection();
     closeModal();
-    if (activeAgent.isReady) {
-      if (window.location.pathname !== ROUTES.TRADING_PERPS) {
-        router.navigate(ROUTES.TRADING_PERPS);
-      }
-    }
   }, [
     activeAgent.deriveState,
-    activeAgent.isReady,
     cancelConnection,
     clearConnectTimeout,
     closeModal,
@@ -307,8 +356,8 @@ export const WalletListModal: React.FC = () => {
 
   const getWalletConfig = useCallback(
     (type: WalletType, id: string): WalletConfig | undefined =>
-      [...EVM_WALLETS, ...STELLAR_WALLETS].find(w => w.type === type && w.id === id),
-    []
+      [...dynamicEvmWallets, ...dynamicStellarWallets].find(w => w.type === type && w.id === id),
+    [dynamicEvmWallets, dynamicStellarWallets]
   );
 
   const isAnyActionInProgress = connectingWallet !== null || disconnectingType !== null;
@@ -392,8 +441,6 @@ export const WalletListModal: React.FC = () => {
       handleDisconnect,
     ]
   );
-
-  const { isInstalled } = useExtensionDetector();
 
   const renderWalletCard = useCallback(
     ({
@@ -937,7 +984,7 @@ export const WalletListModal: React.FC = () => {
                           MetaMask, Trust, Rainbow, or browser extension
                         </p>
                       </div>
-                      {renderWalletGrid(EVM_WALLETS, isAnyActionInProgress)}
+                      {renderWalletGrid(dynamicEvmWallets, isAnyActionInProgress)}
                     </div>
                   )}
 
@@ -964,7 +1011,7 @@ export const WalletListModal: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      {renderWalletGrid(STELLAR_WALLETS, isAnyActionInProgress)}
+                      {renderWalletGrid(dynamicStellarWallets, isAnyActionInProgress)}
                     </div>
                   )}
                 </div>
@@ -1041,7 +1088,7 @@ export const WalletListModal: React.FC = () => {
                   }
                   onRetry={() => {
                     if (activeConnectingWalletId) {
-                      const w = [...EVM_WALLETS, ...STELLAR_WALLETS].find(
+                      const w = [...dynamicEvmWallets, ...dynamicStellarWallets].find(
                         x => x.id === activeConnectingWalletId
                       );
                       if (w) handleWalletClick(w);
