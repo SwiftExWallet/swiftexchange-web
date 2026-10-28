@@ -31,3 +31,7 @@ dist-ssr
 lint-report.html
 aster-finance-futures-api-v3.md
 .env*.local
+
+# agent customizations
+.agents/
+ASTER_AUDIT.md
