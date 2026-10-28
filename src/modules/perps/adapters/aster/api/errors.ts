@@ -10,6 +10,18 @@ export interface AsterErrorDetail {
   userMessage: string;
 }
 
+export class AsterRateLimitError extends Error {
+  readonly status: number;
+  readonly retryAfterSec: number;
+
+  constructor(status: number, retryAfterSec: number = 60) {
+    super(`Aster rate limit exceeded (HTTP ${status}). Back off for ${retryAfterSec}s.`);
+    this.name = 'AsterRateLimitError';
+    this.status = status;
+    this.retryAfterSec = retryAfterSec;
+  }
+}
+
 const ERROR_MAP: Record<number, { name: string; userMessage: string }> = {
   // 10xx - Server / Network / Auth
   '-1000': {
