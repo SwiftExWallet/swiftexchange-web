@@ -167,8 +167,8 @@ export class AsterMapper {
     const availBn = new BigNumber(asterAsset.availableBalance || '0');
     return {
       asset: asterAsset.asset,
-      total: totalBn.toString(),
-      available: availBn.toString(),
+      total: String(asterAsset.walletBalance ?? '0'),
+      available: String(asterAsset.availableBalance ?? '0'),
       locked: totalBn.minus(availBn).toString(),
     };
   }
