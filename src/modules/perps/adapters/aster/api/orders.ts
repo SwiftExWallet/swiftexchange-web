@@ -1,5 +1,6 @@
 import type { Signer } from 'ethers';
 
+import { generateClientOrderId } from '../../../utils/precision';
 import { ASTER_ENDPOINTS } from '../constants';
 import type {
   AsterOrderResponse,
@@ -96,16 +97,15 @@ export async function placeOrder(
 
   if (params.closePosition === true || String(params.closePosition).toLowerCase() === 'true') {
     p.closePosition = 'true';
+    delete p.quantity;
+    delete p.reduceOnly;
   }
 
   if (params.positionSide !== undefined && params.positionSide !== 'BOTH') {
     p.positionSide = params.positionSide;
   }
 
-  if (params.newClientOrderId !== undefined && params.newClientOrderId !== '') {
-    p.newClientOrderId = params.newClientOrderId;
-  }
-
+  p.newClientOrderId = params.newClientOrderId || generateClientOrderId();
   p.newOrderRespType = params.newOrderRespType || 'RESULT';
 
   return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.ORDER, p);
@@ -192,7 +192,12 @@ export async function cancelAllOpenOrders(
   userAddr: string,
   symbol: string
 ): Promise<{ code: number; msg: string }> {
-  return signedRequest(signer, userAddr, 'DELETE', ASTER_ENDPOINTS.ALL_OPEN_ORDERS, { symbol });
+  if (!symbol || !symbol.trim()) {
+    throw new Error('symbol parameter is mandatory for cancelAllOpenOrders on Aster API v3.');
+  }
+  return signedRequest(signer, userAddr, 'DELETE', ASTER_ENDPOINTS.ALL_OPEN_ORDERS, {
+    symbol: symbol.trim(),
+  });
 }
 
 //Cancel a batch of orders by ID lists.
@@ -235,14 +240,25 @@ export async function getOpenOrders(
 export async function getAllOrders(
   signer: Signer,
   userAddr: string,
-  params: Omit<GetAllOrdersParams, 'symbol'> & { symbol?: string }
+  params: GetAllOrdersParams
 ): Promise<AsterOrderResponse[]> {
-  const p: Record<string, string> = {};
-  if (params.symbol) p.symbol = params.symbol;
+  if (!params.symbol) {
+    throw new Error('symbol parameter is mandatory for getAllOrders on Aster API v3.');
+  }
+  const p: Record<string, string> = { symbol: params.symbol };
   if (params.orderId !== undefined) p.orderId = String(params.orderId);
   if (params.startTime !== undefined) p.startTime = String(params.startTime);
   if (params.endTime !== undefined) p.endTime = String(params.endTime);
   if (params.limit !== undefined) p.limit = String(params.limit);
+
+  if (
+    params.startTime &&
+    params.endTime &&
+    Number(params.endTime) - Number(params.startTime) > 7 * 24 * 3600 * 1000
+  ) {
+    throw new Error('Query time window cannot exceed 7 days for getAllOrders.');
+  }
+
   return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ALL_ORDERS, p);
 }
 

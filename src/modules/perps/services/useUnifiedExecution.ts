@@ -16,7 +16,9 @@ import {
 } from '../adapters/hyperliquid/api/orders';
 import { useHyperliquidAgentStore } from '../adapters/hyperliquid/hooks/useHyperliquidAgent';
 import { useExchangeManager } from '../core/ExchangeManager';
+import { useMarketStore } from '../core/stores/marketStore';
 import { useOrderStore } from '../core/stores/orderStore';
+import { formatPriceToTick, formatQuantityToStep, generateClientOrderId } from '../utils/precision';
 
 export interface UnifiedOrderParams {
   symbol: string;
@@ -69,9 +71,6 @@ export function useUnifiedExecution() {
             throw new Error('Aster session is not ready. Please connect your wallet.');
           }
 
-          const rawPrice =
-            typeof params.price === 'string' ? parseFloat(params.price) : params.price;
-          const cleanPrice = !isNaN(rawPrice) && rawPrice > 0 ? String(rawPrice) : undefined;
           const isMarket = params.type === 'MARKET';
           const isStopMarket =
             params.type === 'STOP_MARKET' || params.type === 'TAKE_PROFIT_MARKET';
@@ -82,12 +81,31 @@ export function useUnifiedExecution() {
             params.timeInForce === 'GTX';
           const asterType = params.type === 'POST_ONLY' ? 'LIMIT' : params.type;
 
+          const allMarkets = Object.values(useMarketStore.getState().markets);
+          const market = allMarkets.find(
+            m =>
+              m.symbol === params.symbol ||
+              m.symbol.replace('-', '') === params.symbol.replace('-', '')
+          );
+
+          const stepSize = market?.stepSize || '0.001';
+          const tickSize = market?.tickSize || '0.1';
+
+          const cleanSize = formatQuantityToStep(params.size, stepSize);
+          const cleanPrice =
+            !isMarket && !isStopMarket && !isTrailingStop && params.price
+              ? formatPriceToTick(params.price, tickSize)
+              : undefined;
+
+          const clientOrderId = generateClientOrderId();
+
           const asterRes = await placeAsterOrder(asterSigner, effectiveUserAddr, {
             symbol: params.symbol.replace('-', ''),
             side: params.side,
             type: asterType as any,
-            quantity: String(params.size),
-            price: !isMarket && !isStopMarket && !isTrailingStop ? cleanPrice : undefined,
+            quantity: cleanSize,
+            price: cleanPrice,
+            newClientOrderId: clientOrderId,
             reduceOnly: params.reduceOnly ? true : undefined,
             timeInForce:
               !isMarket && !isStopMarket && !isTrailingStop
@@ -97,11 +115,13 @@ export function useUnifiedExecution() {
                 : undefined,
             stopPrice:
               params.stopPrice && !isMarket && !isTrailingStop
-                ? String(params.stopPrice)
+                ? formatPriceToTick(params.stopPrice, tickSize)
                 : undefined,
             callbackRate: isTrailingStop ? String(params.callbackRate || '1.0') : undefined,
             activationPrice:
-              isTrailingStop && params.activationPrice ? String(params.activationPrice) : undefined,
+              isTrailingStop && params.activationPrice
+                ? formatPriceToTick(params.activationPrice, tickSize)
+                : undefined,
           });
 
           return asterRes;
@@ -176,11 +196,17 @@ export function useUnifiedExecution() {
           if (!asterSigner || !effectiveUserAddr) {
             throw new Error('Aster session is not ready.');
           }
-          await cancelAllAsterOrders(
-            asterSigner,
-            effectiveUserAddr,
-            symbol ? symbol.replace('-', '') : ''
-          );
+          if (symbol) {
+            await cancelAllAsterOrders(asterSigner, effectiveUserAddr, symbol.replace('-', ''));
+          } else {
+            const openOrders = useOrderStore.getState().getOpenOrders();
+            const openSymbols: string[] = Array.from(
+              new Set(openOrders.map(o => o.symbol.replace('-', '')))
+            );
+            await Promise.all(
+              openSymbols.map(s => cancelAllAsterOrders(asterSigner, effectiveUserAddr, s))
+            );
+          }
         } else {
           if (!hyperliquidSigner || !effectiveUserAddr) {
             throw new Error('Hyperliquid agent wallet is not initialized.');
