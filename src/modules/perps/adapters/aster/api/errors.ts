@@ -8,6 +8,7 @@ export interface AsterErrorDetail {
   name: string;
   message: string;
   userMessage: string;
+  isRetryable?: boolean;
 }
 
 export class AsterRateLimitError extends Error {
@@ -225,6 +226,10 @@ export function parseAsterError(err: any): AsterErrorDetail {
     };
   }
 
+  // Network / timeout codes are retryable; parameter, balance, and filter rejections are permanent (ERR-04)
+  const isRetryable =
+    code === -1001 || code === -1003 || code === -1007 || code === 429 || code === 503;
+
   const mapped = ERROR_MAP[code];
   if (mapped) {
     return {
@@ -232,6 +237,7 @@ export function parseAsterError(err: any): AsterErrorDetail {
       name: mapped.name,
       message: rawMsg,
       userMessage: mapped.userMessage,
+      isRetryable,
     };
   }
 
