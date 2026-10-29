@@ -1,10 +1,14 @@
 import { useEffect, useRef } from 'react';
 
+import BigNumber from 'bignumber.js';
 import { type ISeriesApi, LineStyle } from 'lightweight-charts';
 
+import { useAccountStore } from '../../../core/stores/accountStore';
+import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
+import { calculateLiquidationPrice } from '../../../utils/liquidationCalculator';
 
 interface UseChartTradeLinesProps {
   series: ISeriesApi<any> | null;
@@ -57,6 +61,10 @@ export function useChartTradeLines({ series, market }: UseChartTradeLinesProps) 
       parseFloat(o.price) > 0
   );
 
+  const balances = useAccountStore(state => state.balances);
+  const bracketsBySymbol = useLeverageStore(state => state.bracketsBySymbol);
+  const isMultiAsset = useAccountStore(state => state.multiAssetsMargin);
+
   // Manage Position Lines (Entry + Liq)
   const markPxStr = assetCtx?.markPx || activePosition?.markPrice;
 
@@ -75,9 +83,17 @@ export function useChartTradeLines({ series, market }: UseChartTradeLinesProps) 
       const isLong = size > 0;
       const absSize = Math.abs(size);
       const markPx = parseFloat(markPxStr || '0') || entryPx;
-      const pnl = isLong ? (markPx - entryPx) * absSize : (entryPx - markPx) * absSize;
-      const pnlPrefix = pnl >= 0 ? '+$' : '-$';
-      const pnlFormatted = `${pnlPrefix}${Math.abs(pnl).toFixed(2)}`;
+
+      // Exact financial PnL using BigNumber to prevent float artifacts
+      const bnMark = new BigNumber(markPx);
+      const bnEntry = new BigNumber(entryPx);
+      const bnAbsSize = new BigNumber(absSize);
+      const bnPnl = isLong
+        ? bnMark.minus(bnEntry).times(bnAbsSize)
+        : bnEntry.minus(bnMark).times(bnAbsSize);
+
+      const pnlPrefix = bnPnl.gte(0) ? '+$' : '-$';
+      const pnlFormatted = `${pnlPrefix}${bnPnl.abs().toFixed(2)}`;
       const coin = market.split('-')[0] || '';
       const title = `${absSize} ${coin} · ${isLong ? 'Long' : 'Short'} @ $${entryPx.toLocaleString()} · PnL: ${pnlFormatted}`;
       const color = isLong ? '#10b981' : '#f43f5e';
@@ -115,8 +131,19 @@ export function useChartTradeLines({ series, market }: UseChartTradeLinesProps) 
       }
     }
 
-    // 2. Liquidation Price Line
-    const liqPx = activePosition ? parseFloat(activePosition.liquidationPrice) : 0;
+    // 2. Liquidation Price Line (with fallback calculation if exchange returns 0)
+    let liqPx = activePosition ? parseFloat(activePosition.liquidationPrice || '0') : 0;
+    if (liqPx <= 0 && activePosition && size !== 0) {
+      const calcLiq = calculateLiquidationPrice({
+        position: activePosition,
+        allPositions: Object.values(positions),
+        balances,
+        isMultiAsset,
+        bracketsBySymbol,
+      });
+      liqPx = calcLiq ?? 0;
+    }
+
     if (liqPx > 0 && size !== 0) {
       const title = `Liquidation Price: $${liqPx.toLocaleString()}`;
       const color = '#f59e0b'; // Amber warning
@@ -153,7 +180,16 @@ export function useChartTradeLines({ series, market }: UseChartTradeLinesProps) 
         liqLineRef.current = null;
       }
     }
-  }, [series, activePosition, markPxStr]);
+  }, [
+    series,
+    activePosition,
+    markPxStr,
+    positions,
+    balances,
+    isMultiAsset,
+    bracketsBySymbol,
+    market,
+  ]);
 
   // Manage Limit Order Lines
   useEffect(() => {

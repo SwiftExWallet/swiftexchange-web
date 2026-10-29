@@ -1,6 +1,8 @@
 import { Layers } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 
+import BigNumber from 'bignumber.js';
+
 import { ConfirmationModal } from '../../../../../components/common/ConfirmationModal';
 import { fetchAsterSnapshot } from '../../../adapters/aster/hooks/useAsterDataSync';
 import { useAccountStore } from '../../../core/stores/accountStore';
@@ -92,26 +94,33 @@ const PositionRow = memo(
           ? storedLeverage
           : 20;
 
-    const notional = absSize * entryVal;
+    const bnEntry = new BigNumber(entryVal);
+    const bnAbsSize = new BigNumber(absSize);
+    const bnMark = new BigNumber(markVal);
+    const bnNotional = bnAbsSize.times(bnEntry);
+
     const marginCalc =
       position.marginType === 'isolated' && parseFloat(position.isolatedMargin || '0') > 0
         ? parseFloat(position.isolatedMargin)
         : position.initialMargin && parseFloat(position.initialMargin) > 0
           ? parseFloat(position.initialMargin)
-          : notional / leverage;
+          : bnNotional.dividedBy(leverage).toNumber();
 
-    const pnlVal =
+    const bnPnl =
       markVal > 0 && entryVal > 0
         ? isLong
-          ? (markVal - entryVal) * absSize
-          : (entryVal - markVal) * absSize
+          ? bnMark.minus(bnEntry).times(bnAbsSize)
+          : bnEntry.minus(bnMark).times(bnAbsSize)
         : position.unrealizedPnl != null && position.unrealizedPnl !== ''
-          ? parseFloat(position.unrealizedPnl)
-          : 0;
-    const marginDenom = marginCalc === 0 ? 1 : marginCalc;
-    const roe = (pnlVal / marginDenom) * 100;
+          ? new BigNumber(position.unrealizedPnl)
+          : new BigNumber(0);
 
-    const breakEven = isLong ? entryVal * 1.0008 : entryVal * 0.9992;
+    const pnlVal = bnPnl.toNumber();
+    const marginDenom = marginCalc === 0 ? 1 : marginCalc;
+    const roe = bnPnl.dividedBy(marginDenom).times(100).toNumber();
+
+    // Exchange taker fee adjusted break-even price (Aster default ~0.05% per leg = 0.1% round-trip)
+    const breakEven = isLong ? bnEntry.times(1.001).toNumber() : bnEntry.times(0.999).toNumber();
 
     const officialLiq = parseFloat(position.liquidationPrice || '0');
     const liqPrice = useMemo(() => {
@@ -145,7 +154,7 @@ const PositionRow = memo(
           className={`px-2.5 py-1.5 ${isLong ? 'text-success' : 'text-danger'} font-mono-tabular`}
         >
           <div className="flex flex-col">
-            <span className="font-medium">{notional.toFixed(2)} USDT</span>
+            <span className="font-medium">{bnNotional.toFixed(2)} USDT</span>
             <span className="text-[10px] text-secondary">
               {absSize} {baseSymbol}
             </span>
