@@ -76,6 +76,10 @@ export function useListenKey(
       cancelled = true;
       clearKeepalive();
       setListenKey(null);
+      // Explicitly delete listenKey on unmount (PROD-04)
+      if (signer && userAddr) {
+        deleteListenKey(signer, userAddr).catch(() => {});
+      }
     };
   }, [active, signer, userAddr]);
 

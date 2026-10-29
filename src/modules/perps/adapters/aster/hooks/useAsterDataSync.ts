@@ -221,10 +221,23 @@ export function useAsterDataSync(signer: Signer | null, userAddr: string | null)
       })
       .catch(() => {});
 
+    // Adaptive REST polling fallback when WebSocket is disconnected (PROD-02)
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    if (!connected) {
+      pollInterval = setInterval(() => {
+        if (!isMounted || !signer || !userAddr) return;
+        fetchAsterSnapshot(signer, userAddr).catch(() => {});
+      }, 8000);
+    }
+
     return () => {
       isMounted = false;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
     };
-  }, [signer, userAddr, currentExchange]);
+  }, [signer, userAddr, currentExchange, connected]);
 
   return { isRestSynced, connected };
 }
