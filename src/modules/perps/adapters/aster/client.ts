@@ -28,13 +28,28 @@ export class AsterClient implements PerpExchange {
     this.wsClient.disconnect();
   }
 
-  public async getMarkets(): Promise<Market[]> {
-    const [infoResponse, tickerResponse] = await Promise.all([
-      fetch(`${this.restUrl}${ASTER_ENDPOINTS.EXCHANGE_INFO}`),
-      fetch(`${this.restUrl}${ASTER_ENDPOINTS.TICKER_24HR}`),
-    ]);
+  private static cachedExchangeInfo: { data: any; timestamp: number } | null = null;
+  private static cachedTickerData: { data: any; timestamp: number } | null = null;
 
-    const [infoData, tickerData] = await Promise.all([infoResponse.json(), tickerResponse.json()]);
+  public async getMarkets(): Promise<Market[]> {
+    const now = Date.now();
+    let infoData = AsterClient.cachedExchangeInfo?.data;
+    if (!infoData || now - (AsterClient.cachedExchangeInfo?.timestamp || 0) > 15_000) {
+      const res = await fetch(`${this.restUrl}${ASTER_ENDPOINTS.EXCHANGE_INFO}`);
+      if (res.ok) {
+        infoData = await res.json();
+        AsterClient.cachedExchangeInfo = { data: infoData, timestamp: now };
+      }
+    }
+
+    let tickerData = AsterClient.cachedTickerData?.data;
+    if (!tickerData || now - (AsterClient.cachedTickerData?.timestamp || 0) > 3_000) {
+      const res = await fetch(`${this.restUrl}${ASTER_ENDPOINTS.TICKER_24HR}`);
+      if (res.ok) {
+        tickerData = await res.json();
+        AsterClient.cachedTickerData = { data: tickerData, timestamp: now };
+      }
+    }
 
     if (!infoData || !infoData.symbols) return [];
 

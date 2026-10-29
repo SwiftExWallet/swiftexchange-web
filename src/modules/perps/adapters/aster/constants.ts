@@ -116,7 +116,7 @@ export const ASTER_ENDPOINTS = {
   // Public
   TIME: '/fapi/v3/time',
   EXCHANGE_INFO: '/fapi/v3/exchangeInfo',
-  TICKER_24HR: '/fapi/v1/ticker/24hr',
+  TICKER_24HR: '/fapi/v3/ticker/24hr',
   DEPTH: '/fapi/v3/depth',
   KLINES: '/fapi/v3/klines',
   AGG_TRADES: '/fapi/v3/aggTrades',

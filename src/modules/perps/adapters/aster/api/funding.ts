@@ -19,6 +19,26 @@ export async function getFundingRates(
   symbol: string,
   limit: number = 336
 ): Promise<FundingRateData[]> {
+  const cleanSymbol = symbol.replace('-', '').replace('/', '');
+  try {
+    const restUrl = getAsterRestUrl();
+    const publicUrl = `${restUrl}${ASTER_ENDPOINTS.FUNDING_RATE}?symbol=${cleanSymbol}&limit=${Math.min(limit, 1000)}`;
+    const res = await fetch(publicUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map((item: any) => ({
+          symbol: item.symbol,
+          fundingRate: item.fundingRate,
+          fundingTime: item.fundingTime,
+        }));
+      }
+    }
+  } catch (e) {
+    console.warn('[Funding] Failed to fetch from /fapi/v3/fundingRate, falling back to BAPI:', e);
+  }
+
+  // Fallback to internal BAPI
   const url = `${getAsterBapiUrl()}${BAPI_ENDPOINTS.FUNDING_HISTORY}`;
   const response = await fetch(url, {
     method: 'POST',
