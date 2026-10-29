@@ -37,8 +37,9 @@ export function validateOrder(
 
   const baseAsset = market.baseAsset || 'ASSET';
   const quoteAsset = market.quoteAsset || 'USDT';
-  const price = parseFloat(priceStr);
-  const size = parseFloat(sizeStr);
+  const bnPrice = new BigNumber(priceStr || 'NaN');
+  const bnSize = new BigNumber(sizeStr || 'NaN');
+  const bnCurrentPrice = new BigNumber(currentPrice || 0);
 
   const isPriceRequired =
     orderType === 'LIMIT' ||
@@ -56,7 +57,7 @@ export function validateOrder(
     if (!priceStr || priceStr.trim() === '') {
       return { isValid: false, errorField: 'price' };
     }
-    if (isNaN(price) || price <= 0) {
+    if (bnPrice.isNaN() || bnPrice.lte(0)) {
       return { isValid: false, error: 'Enter a valid price', errorField: 'price' };
     }
     if (market.tickSize && market.tickSize > 0) {
@@ -74,8 +75,8 @@ export function validateOrder(
     if (!stopPriceStr || stopPriceStr.trim() === '') {
       return { isValid: false, errorField: 'stopPrice' };
     }
-    const stopPrice = parseFloat(stopPriceStr);
-    if (isNaN(stopPrice) || stopPrice <= 0) {
+    const bnStopPrice = new BigNumber(stopPriceStr);
+    if (bnStopPrice.isNaN() || bnStopPrice.lte(0)) {
       return { isValid: false, error: 'Enter a valid trigger price', errorField: 'stopPrice' };
     }
   }
@@ -84,8 +85,8 @@ export function validateOrder(
     if (!callbackRateStr || callbackRateStr.trim() === '') {
       return { isValid: false, errorField: 'callbackRate' };
     }
-    const rate = parseFloat(callbackRateStr);
-    if (isNaN(rate) || rate < 0.1 || rate > 5) {
+    const bnRate = new BigNumber(callbackRateStr);
+    if (bnRate.isNaN() || bnRate.lt(0.1) || bnRate.gt(5)) {
       return {
         isValid: false,
         error: 'Callback rate must be between 0.1% and 5%',
@@ -98,20 +99,29 @@ export function validateOrder(
     return { isValid: false };
   }
 
-  if (isNaN(size) || size <= 0) {
+  if (bnSize.isNaN() || bnSize.lte(0)) {
     return { isValid: false, error: 'Enter a valid size', errorField: 'size' };
   }
 
-  const effectivePrice = isPriceRequired && price > 0 ? price : currentPrice > 0 ? currentPrice : 1;
-  const baseDecimals = market.stepSize ? Math.max(0, -Math.floor(Math.log10(market.stepSize))) : 4;
+  const bnEffectivePrice =
+    isPriceRequired && bnPrice.gt(0)
+      ? bnPrice
+      : bnCurrentPrice.gt(0)
+        ? bnCurrentPrice
+        : new BigNumber(1);
+
+  const stepStr = market.stepSize ? String(market.stepSize) : '';
+  const baseDecimals = stepStr.includes('.') ? stepStr.split('.')[1].length : 4;
+
+  const bnMinNotional = new BigNumber(market.minNotional || 0);
+  const bnMinOrderSize = new BigNumber(market.minOrderSize || 0);
+  const bnMaxPossibleSize = new BigNumber(maxPossibleSize || 0);
 
   if (sizeAsset === 'quote') {
-    const quoteSize = size;
-    const minNotional = market.minNotional || 0;
-    const minQuoteFromLot = (market.minOrderSize || 0) * effectivePrice;
-    const minRequiredQuote = Math.max(minNotional, minQuoteFromLot);
+    const minQuoteFromLot = bnMinOrderSize.times(bnEffectivePrice);
+    const minRequiredQuote = BigNumber.max(bnMinNotional, minQuoteFromLot);
 
-    if (minRequiredQuote > 0 && quoteSize < minRequiredQuote) {
+    if (minRequiredQuote.gt(0) && bnSize.lt(minRequiredQuote)) {
       return {
         isValid: false,
         error: `Minimum order size is ${minRequiredQuote.toFixed(2)} ${quoteAsset}`,
@@ -119,21 +129,21 @@ export function validateOrder(
       };
     }
 
-    if (maxPossibleSize && maxPossibleSize > 0 && quoteSize > maxPossibleSize * 1.0001) {
+    if (bnMaxPossibleSize.gt(0) && bnSize.gt(bnMaxPossibleSize.times(1.0001))) {
       return {
         isValid: false,
-        error: `Exceeds max available size of ${maxPossibleSize.toFixed(2)} ${quoteAsset}`,
+        error: `Exceeds max available size of ${bnMaxPossibleSize.toFixed(2)} ${quoteAsset}`,
         errorField: 'size',
       };
     }
   } else {
-    const baseSize = size;
-    const minBaseFromLot = market.minOrderSize || 0;
     const minBaseFromNotional =
-      market.minNotional && effectivePrice > 0 ? market.minNotional / effectivePrice : 0;
-    const minRequiredBase = Math.max(minBaseFromLot, minBaseFromNotional);
+      bnMinNotional.gt(0) && bnEffectivePrice.gt(0)
+        ? bnMinNotional.div(bnEffectivePrice)
+        : new BigNumber(0);
+    const minRequiredBase = BigNumber.max(bnMinOrderSize, minBaseFromNotional);
 
-    if (minRequiredBase > 0 && baseSize < minRequiredBase) {
+    if (minRequiredBase.gt(0) && bnSize.lt(minRequiredBase)) {
       return {
         isValid: false,
         error: `Minimum order size is ${minRequiredBase.toFixed(baseDecimals)} ${baseAsset}`,
@@ -151,10 +161,10 @@ export function validateOrder(
       }
     }
 
-    if (maxPossibleSize && maxPossibleSize > 0 && baseSize > maxPossibleSize * 1.0001) {
+    if (bnMaxPossibleSize.gt(0) && bnSize.gt(bnMaxPossibleSize.times(1.0001))) {
       return {
         isValid: false,
-        error: `Exceeds max available size of ${maxPossibleSize.toFixed(baseDecimals)} ${baseAsset}`,
+        error: `Exceeds max available size of ${bnMaxPossibleSize.toFixed(baseDecimals)} ${baseAsset}`,
         errorField: 'size',
       };
     }
