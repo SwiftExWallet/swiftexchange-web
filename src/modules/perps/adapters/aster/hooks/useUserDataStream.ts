@@ -11,6 +11,7 @@ import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { getAsterWsUrl } from '../constants';
+import { fetchAsterSnapshot } from './useAsterDataSync';
 import { useListenKey } from './useListenKey';
 
 export interface MarginCallPosition {
@@ -104,7 +105,7 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
       useOrderStore.getState().updateOrder({
         id: orderId,
         symbol,
-        type: o.ot ? (String(o.ot).toLowerCase() as Order['type']) : 'market',
+        type: (o.o || o.ot ? String(o.o || o.ot).toLowerCase() : 'limit') as Order['type'],
         side: o.S ? (String(o.S).toLowerCase() as Order['side']) : 'buy',
         price: o.p,
         size: o.q,
@@ -225,86 +226,157 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
   useEffect(() => {
     if (!listenKey) return;
 
-    const ws = new WebSocket(`${getAsterWsUrl()}/${listenKey}`);
-    wsRef.current = ws;
+    let isDisposed = false;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+    let lastActivityTime = Date.now();
+    let reconnectAttempts = 0;
 
-    ws.onopen = () => {
-      console.log('[UserDataStream] Connected to', listenKey);
-      setConnected(true);
-    };
+    const connectWs = () => {
+      if (isDisposed) return;
 
-    ws.onmessage = event => {
-      let data: any;
-      try {
-        data = JSON.parse(event.data as string);
-      } catch {
-        return;
-      }
+      const ws = new WebSocket(`${getAsterWsUrl()}/${listenKey}`);
+      wsRef.current = ws;
 
-      console.log('[UserDataStream] Received event:', data.e, data);
+      const clearWatchdog = () => {
+        if (watchdogTimer) {
+          clearInterval(watchdogTimer);
+          watchdogTimer = null;
+        }
+      };
 
-      try {
-        switch (data.e) {
-          case 'ACCOUNT_UPDATE':
-            applyAccountUpdate(data.a);
-            break;
-          case 'ORDER_TRADE_UPDATE':
-            applyOrderUpdate(data.o);
-            break;
-          case 'ACCOUNT_CONFIG_UPDATE':
-            if (data.ac && data.ac.s) {
-              const symbol = String(data.ac.s).replace('USDT', '-USDT');
-              const existing = usePositionStore.getState().positions[symbol];
-              if (existing) {
-                usePositionStore.getState().updatePosition({
-                  ...existing,
-                  leverage: data.ac.l || existing.leverage,
-                });
-                if (data.ac.l) {
-                  useNotificationStore.getState().showToast({
-                    type: 'DYDX',
-                    title: 'Leverage Updated',
-                    message: `Leverage for ${symbol} set to ${data.ac.l}x`,
+      const startWatchdog = () => {
+        clearWatchdog();
+        lastActivityTime = Date.now();
+        // 30s watchdog to detect stale / half-open connections (WS-03)
+        watchdogTimer = setInterval(() => {
+          if (Date.now() - lastActivityTime > 60_000) {
+            console.warn(
+              '[UserDataStream] Watchdog timeout (no data for 60s), closing stale connection'
+            );
+            ws.close();
+          }
+        }, 15_000);
+      };
+
+      ws.onopen = () => {
+        if (isDisposed) {
+          ws.close();
+          return;
+        }
+        console.log('[UserDataStream] Connected');
+        setConnected(true);
+        reconnectAttempts = 0;
+        startWatchdog();
+
+        // Resync full account and positions on reconnection (WS-01)
+        if (signer && userAddr) {
+          fetchAsterSnapshot(signer, userAddr).catch(err => {
+            console.error('[UserDataStream] Resync on connect failed:', err);
+          });
+        }
+      };
+
+      ws.onmessage = event => {
+        lastActivityTime = Date.now();
+        let data: any;
+        try {
+          data = JSON.parse(event.data as string);
+        } catch {
+          return;
+        }
+
+        try {
+          switch (data.e) {
+            case 'ACCOUNT_UPDATE':
+              applyAccountUpdate(data.a);
+              break;
+            case 'ORDER_TRADE_UPDATE':
+              applyOrderUpdate(data.o);
+              break;
+            case 'ACCOUNT_CONFIG_UPDATE':
+              if (data.ac && data.ac.s) {
+                const symbol = String(data.ac.s).replace('USDT', '-USDT');
+                const existing = usePositionStore.getState().positions[symbol];
+                if (existing) {
+                  usePositionStore.getState().updatePosition({
+                    ...existing,
+                    leverage: data.ac.l || existing.leverage,
                   });
+                  if (data.ac.l) {
+                    useNotificationStore.getState().showToast({
+                      type: 'DYDX',
+                      title: 'Leverage Updated',
+                      message: `Leverage for ${symbol} set to ${data.ac.l}x`,
+                    });
+                  }
                 }
               }
-            }
-            break;
-          case 'listenKeyExpired':
-            ws.close();
-            refresh();
-            break;
-          case 'MARGIN_CALL':
-            // could toast margin call warning here
-            if (data.positions && data.positions.length > 0) {
-              const pos = data.positions[0];
-              const symbol = String(pos.symbol).replace('USDT', '-USDT');
-              useNotificationStore.getState().showToast({
-                type: 'SYSTEM',
-                title: 'Margin Call Warning',
-                message: `Your position on ${symbol} is close to liquidation. Margin Required: ${pos.maintenanceMarginRequired}`,
-              });
-            }
-            break;
+              break;
+            case 'listenKeyExpired':
+              ws.close();
+              refresh();
+              break;
+            case 'MARGIN_CALL':
+              if (data.positions && data.positions.length > 0) {
+                const pos = data.positions[0];
+                const symbol = String(pos.symbol).replace('USDT', '-USDT');
+                useNotificationStore.getState().showToast({
+                  type: 'SYSTEM',
+                  title: 'Margin Call Warning',
+                  message: `Your position on ${symbol} is close to liquidation. Margin Required: ${pos.maintenanceMarginRequired}`,
+                });
+              }
+              break;
+          }
+        } catch (err) {
+          console.error('[UserDataStream] Error processing event:', err);
         }
-      } catch (err) {
-        console.error('[UserDataStream] Error processing event:', err);
-      }
+      };
+
+      ws.onclose = () => {
+        clearWatchdog();
+        setConnected(false);
+        wsRef.current = null;
+        if (isDisposed) return;
+
+        console.log('[UserDataStream] Disconnected, scheduling reconnect...');
+        // Exponential backoff with jitter: 1s, 2s, 4s, 8s, up to 30s max (WS-01)
+        const delay =
+          Math.min(1000 * Math.pow(2, reconnectAttempts), 30_000) + Math.random() * 1000;
+        reconnectAttempts++;
+        reconnectTimeout = setTimeout(() => {
+          connectWs();
+        }, delay);
+      };
+
+      ws.onerror = err => {
+        console.error('[UserDataStream] WebSocket error:', err);
+      };
     };
 
-    ws.onclose = () => {
-      console.log('[UserDataStream] Disconnected');
-      setConnected(false);
-    };
+    connectWs();
 
     return () => {
-      ws.onopen = null;
-      ws.onmessage = null;
-      ws.onclose = null;
-      ws.close();
-      wsRef.current = null;
+      isDisposed = true;
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+      }
+      if (watchdogTimer) {
+        clearInterval(watchdogTimer);
+        watchdogTimer = null;
+      }
+      if (wsRef.current) {
+        wsRef.current.onopen = null;
+        wsRef.current.onmessage = null;
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
-  }, [listenKey, refresh]);
+  }, [listenKey, refresh, signer, userAddr]);
 
   return { connected };
 }

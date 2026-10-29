@@ -38,7 +38,7 @@ export class AsterUserDataWebSocket {
 
         this.ws.onopen = () => {
           this.isConnecting = false;
-          console.log(`[Aster UserData WS] Connected: ${fullUrl}`);
+          console.log('[Aster UserData WS] Connected');
           resolve();
         };
 
@@ -177,8 +177,8 @@ export class AsterUserDataWebSocket {
     const order: import('../../core/models').Order = {
       id: String(orderData.i),
       symbol,
-      type: orderData.ot.toLowerCase() as any,
-      side: orderData.S.toLowerCase() as any,
+      type: ((orderData.o || orderData.ot || 'LIMIT') as string).toLowerCase() as any,
+      side: ((orderData.S || 'BUY') as string).toLowerCase() as any,
       price: String(orderData.p),
       size: String(orderData.q),
       filledSize: String(orderData.z),
