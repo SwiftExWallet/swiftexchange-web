@@ -113,7 +113,19 @@ export async function signedRequest(
   params: Record<string, string> = {},
   baseUrl?: string
 ): Promise<any> {
-  const effectiveBaseUrl = baseUrl || getAsterRestUrl();
+  const defaultBaseUrl = getAsterRestUrl();
+  let effectiveBaseUrl = defaultBaseUrl;
+  if (baseUrl) {
+    const isAllowed =
+      baseUrl.startsWith('https://fapi.asterdex.com') ||
+      baseUrl.startsWith('https://fapi.asterdex-testnet.com') ||
+      baseUrl.startsWith('https://sapi.asterdex.com') ||
+      baseUrl.startsWith('https://www.asterdex.com');
+    if (!isAllowed) {
+      throw new Error(`Unauthorized base URL for signed request: ${baseUrl}`);
+    }
+    effectiveBaseUrl = baseUrl;
+  }
   const chainId = getAsterChainId();
   const signerAddr = await signer.getAddress();
   const serverTime = await getSyncedServerTime(effectiveBaseUrl);
