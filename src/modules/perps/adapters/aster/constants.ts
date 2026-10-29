@@ -119,6 +119,7 @@ export const ASTER_ENDPOINTS = {
   TICKER_24HR: '/fapi/v3/ticker/24hr',
   DEPTH: '/fapi/v3/depth',
   KLINES: '/fapi/v3/klines',
+  TRADES: '/fapi/v3/trades',
   AGG_TRADES: '/fapi/v3/aggTrades',
   FUNDING_RATE: '/fapi/v3/fundingRate',
   FUNDING_INFO: '/fapi/v3/fundingInfo',

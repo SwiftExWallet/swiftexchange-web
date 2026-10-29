@@ -3,7 +3,7 @@ import { usePositionStore } from '../../core/stores/positionStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { tradeStore } from '../../core/stores/tradeStore';
 import { OrderbookEngine } from './OrderbookEngine';
-import { getAggTrades } from './api/trades';
+import { getRecentTrades } from './api/trades';
 import { ASTER_WS_STREAMS, getAsterWsUrl } from './constants';
 import { AsterMapper } from './mapper';
 
@@ -390,18 +390,18 @@ export class AsterWebSocket {
   public async subscribeTrades(coin: string): Promise<void> {
     this.subscribe(`${coin.toLowerCase()}usdt@aggTrade`, this._noop);
 
-    // Fetch initial snapshot of trades
+    // Fetch initial snapshot of trades using 1-weight /fapi/v3/trades endpoint (MKT-04)
     try {
       const asterSymbol = `${coin.toUpperCase()}USDT`;
       const uiSymbol = `${coin.toUpperCase()}-USDT`;
-      const trades = await getAggTrades(asterSymbol, 80);
+      const trades = await getRecentTrades(asterSymbol, 50);
       const mappedTrades = trades.map(AsterMapper.mapTrade).map(t => {
         t.symbol = uiSymbol;
         return t;
       });
       tradeStore.addTrades(uiSymbol, mappedTrades);
     } catch (e) {
-      console.error('Failed to fetch initial aggTrades snapshot', e);
+      console.error('Failed to fetch initial trades snapshot', e);
     }
   }
 
