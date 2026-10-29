@@ -53,8 +53,8 @@ export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
           tickerCtxs[`${a.asset}USDC`]?.markPx;
         if (markPx && parseFloat(markPx) > 0) {
           usdVal = walletBal.times(markPx);
-        } else if (a.asset === 'ASTER') {
-          usdVal = walletBal.times('0.7483');
+        } else {
+          usdVal = walletBal;
         }
       }
 

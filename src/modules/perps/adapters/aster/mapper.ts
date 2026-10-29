@@ -1,3 +1,5 @@
+import BigNumber from 'bignumber.js';
+
 import type { Candle, Market, OrderBook, Trade } from '../../core/models';
 import type { AssetCtx } from '../../core/stores/tickerStore';
 
@@ -161,11 +163,13 @@ export class AsterMapper {
   }
 
   static mapAccountBalance(asterAsset: any): import('../../core/models').AccountBalance {
+    const totalBn = new BigNumber(asterAsset.walletBalance || '0');
+    const availBn = new BigNumber(asterAsset.availableBalance || '0');
     return {
       asset: asterAsset.asset,
-      total: String(asterAsset.walletBalance),
-      available: String(asterAsset.availableBalance),
-      locked: String(Number(asterAsset.walletBalance) - Number(asterAsset.availableBalance)),
+      total: totalBn.toString(),
+      available: availBn.toString(),
+      locked: totalBn.minus(availBn).toString(),
     };
   }
 
