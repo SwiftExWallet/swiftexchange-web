@@ -91,7 +91,18 @@ export class OrderbookEngine {
 
   private applyDiff(event: DiffEvent): void {
     // Discard diffs older than the applied snapshot
-    if (this.lastAppliedU !== -1 && event.u < this.lastAppliedU) {
+    if (this.lastAppliedU !== -1 && event.u <= this.lastAppliedU) {
+      return;
+    }
+
+    // Check continuous sequence: Aster v3 requires event.pu === previous event.u (WS-04)
+    if (this.lastAppliedU !== -1 && event.pu !== undefined && event.pu !== this.lastAppliedU) {
+      console.warn(
+        `[OrderbookEngine] Depth gap detected on ${this.symbol}: pu (${event.pu}) !== lastAppliedU (${this.lastAppliedU}). Re-syncing snapshot.`
+      );
+      this.hasSnapshot = false;
+      this.lastAppliedU = -1;
+      this.fetchSnapshot();
       return;
     }
 
