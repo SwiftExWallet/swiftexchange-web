@@ -74,15 +74,3 @@ export async function signEVMWithdraw(
 
   return await signer.signTypedData(domain, types, value);
 }
-
-export class AsterSigner {
-  privateKey?: string;
-
-  constructor(privateKey?: string) {
-    this.privateKey = privateKey;
-  }
-
-  public async signRequest(): Promise<any> {
-    throw new Error('Not implemented: trading is not enabled yet for Aster');
-  }
-}

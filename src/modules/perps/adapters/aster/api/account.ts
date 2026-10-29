@@ -139,13 +139,16 @@ export async function changePositionMargin(
   userAddr: string,
   symbol: string,
   amount: string,
-  type: 1 | 2
+  type: 1 | 2,
+  positionSide?: 'BOTH' | 'LONG' | 'SHORT'
 ): Promise<{ amount: number; code: number; msg: string; type: number }> {
-  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.POSITION_MARGIN, {
+  const p: Record<string, string> = {
     symbol,
     amount,
     type: String(type),
-  });
+  };
+  if (positionSide) p.positionSide = positionSide;
+  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.POSITION_MARGIN, p);
 }
 
 export async function getLeverageBracket(
