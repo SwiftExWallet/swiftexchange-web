@@ -24,6 +24,7 @@ const resetStore = () => {
     enabledTypes: { ...defaultEnabledTypes },
     isGlobalPanelOpen: false,
     permission: 'default',
+    soundEnabled: true,
   });
 };
 
@@ -192,13 +193,9 @@ describe('notificationStore', () => {
   });
 
   describe('disablePushNotifications', () => {
-    it('sets every notification type to false', () => {
+    it('disables notification sound', () => {
       useNotificationStore.getState().disablePushNotifications();
-
-      const { enabledTypes } = useNotificationStore.getState();
-      ALL_TYPES.forEach(type => {
-        expect(enabledTypes[type]).toBe(false);
-      });
+      expect(useNotificationStore.getState().soundEnabled).toBe(false);
     });
   });
 
@@ -407,6 +404,91 @@ describe('notificationStore', () => {
       await expect(
         useNotificationStore.getState().showBrowserNotification('Title')
       ).resolves.not.toThrow();
+    });
+  });
+
+  describe('24h expiration and max 50 items cap', () => {
+    it('prunes notifications older than 24 hours when adding a new notification', () => {
+      const now = Date.now();
+      const twentyFiveHoursAgo = now - 25 * 60 * 60 * 1000;
+      const oneHourAgo = now - 1 * 60 * 60 * 1000;
+
+      useNotificationStore.setState({
+        notifications: [
+          {
+            id: 'old-1',
+            type: 'SEND',
+            title: 'Stale',
+            message: 'Old',
+            timestamp: twentyFiveHoursAgo,
+            read: true,
+          },
+          {
+            id: 'recent-1',
+            type: 'RECEIVE',
+            title: 'Recent',
+            message: 'Recent',
+            timestamp: oneHourAgo,
+            read: false,
+          },
+        ],
+      });
+
+      useNotificationStore.getState().addNotification({
+        type: 'SEND',
+        title: 'New Notification',
+        message: 'Fresh',
+      });
+
+      const { notifications } = useNotificationStore.getState();
+      expect(notifications.some(n => n.id === 'old-1')).toBe(false);
+      expect(notifications.some(n => n.id === 'recent-1')).toBe(true);
+      expect(notifications[0].title).toBe('New Notification');
+    });
+
+    it('caps the stored notifications at max 50 items', () => {
+      const now = Date.now();
+      const existing = Array.from({ length: 55 }, (_, i) => ({
+        id: `notif-${i}`,
+        type: 'SEND' as const,
+        title: `Notification ${i}`,
+        message: `msg ${i}`,
+        timestamp: now,
+        read: false,
+      }));
+
+      useNotificationStore.setState({ notifications: existing });
+
+      useNotificationStore.getState().addNotification({
+        type: 'SEND',
+        title: 'New 56th Notification',
+        message: 'Fresh',
+      });
+
+      const { notifications } = useNotificationStore.getState();
+      expect(notifications.length).toBeLessThanOrEqual(50);
+      expect(notifications[0].title).toBe('New 56th Notification');
+    });
+
+    it('clearExpiredNotifications manually prunes expired items', () => {
+      const now = Date.now();
+      const thirtyHoursAgo = now - 30 * 60 * 60 * 1000;
+
+      useNotificationStore.setState({
+        notifications: [
+          {
+            id: 'stale-1',
+            type: 'SEND',
+            title: 'Very Old',
+            message: '30h ago',
+            timestamp: thirtyHoursAgo,
+            read: false,
+          },
+        ],
+      });
+
+      useNotificationStore.getState().clearExpiredNotifications();
+      expect(useNotificationStore.getState().notifications).toHaveLength(0);
     });
   });
 });

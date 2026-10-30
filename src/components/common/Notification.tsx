@@ -1,6 +1,8 @@
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
 import React, { useEffect } from 'react';
 
+import { playNotificationSound } from '@/utils/notificationSound';
+
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
 export interface NotificationProps {
@@ -11,6 +13,7 @@ export interface NotificationProps {
   autoClose?: boolean;
   autoCloseDuration?: number;
   className?: string;
+  playSound?: boolean;
 }
 
 export const Notification: React.FC<NotificationProps> = ({
@@ -21,7 +24,14 @@ export const Notification: React.FC<NotificationProps> = ({
   autoClose = true,
   autoCloseDuration = 5000,
   className = '',
+  playSound = true,
 }) => {
+  useEffect(() => {
+    if (playSound) {
+      playNotificationSound(type);
+    }
+  }, [type, playSound]);
+
   useEffect(() => {
     if (autoClose && onClose) {
       const timer = setTimeout(() => {
@@ -59,7 +69,7 @@ export const Notification: React.FC<NotificationProps> = ({
 
   return (
     <div
-      className={`fixed top-4 right-4 z-50 p-4 bg-secondary/95 backdrop-blur-md border border-white/10 ${current.borderAccent} border-l-[3px] rounded-2xl text-primary text-sm flex items-start gap-3.5 shadow-2xl max-w-md animate-slideIn transition-all ${className}`}
+      className={`fixed top-4 right-4 z-50 p-4 bg-[var(--color-bg-secondary)] border border-[var(--color-border)] ${current.borderAccent} border-l-[3px] rounded-2xl text-[var(--color-text-primary)] text-sm flex items-start gap-3.5 shadow-2xl max-w-md animate-slideIn transition-all ${className}`}
       role="alert"
     >
       <div
@@ -70,9 +80,11 @@ export const Notification: React.FC<NotificationProps> = ({
 
       <div className="flex-1 min-w-0 pt-0.5">
         {title && (
-          <div className="font-bold text-[13px] tracking-tight text-primary mb-0.5">{title}</div>
+          <div className="font-bold text-[13px] tracking-tight text-[var(--color-text-primary)] mb-0.5">
+            {title}
+          </div>
         )}
-        <div className="break-words text-[12px] text-muted font-medium leading-relaxed">
+        <div className="break-words text-[12px] text-[var(--color-text-secondary)] font-normal leading-relaxed">
           {message}
         </div>
       </div>
@@ -80,7 +92,7 @@ export const Notification: React.FC<NotificationProps> = ({
       {onClose && (
         <button
           onClick={onClose}
-          className="flex-shrink-0 p-1 text-muted hover:text-primary hover:bg-white/5 rounded-lg transition-all active:scale-90 cursor-pointer"
+          className="flex-shrink-0 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-all active:scale-90 cursor-pointer"
           aria-label="Close notification"
         >
           <X size={14} />

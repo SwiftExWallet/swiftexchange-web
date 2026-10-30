@@ -151,9 +151,9 @@ export const ExchangeTopBar: React.FC = () => {
           >
             <div className="relative shrink-0 flex flex-col items-center">
               <CoinIcon symbol={symbol} size={28} />
-              <span className="absolute -bottom-1.5 text-warning bg-warning/15 border border-warning/30 text-[7.5px] leading-tight px-1 py-[0.5px] rounded font-bold uppercase tracking-wider shadow-xs z-10 pointer-events-none">
+              {/* <span className="absolute -bottom-1.5 text-warning bg-warning/15 border border-warning/30 text-[7.5px] leading-tight px-1 py-[0.5px] rounded font-bold uppercase tracking-wider shadow-xs z-10 pointer-events-none">
                 BETA
-              </span>
+              </span> */}
             </div>
 
             <div className="flex flex-col items-start gap-0.5">

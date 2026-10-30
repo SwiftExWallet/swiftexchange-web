@@ -1,5 +1,6 @@
 import type React from 'react';
 
+import { playNotificationSound } from '@/utils/notificationSound';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
@@ -21,20 +22,35 @@ export interface AppNotification {
 
 export type ToastNotification = AppNotification;
 
+export const NOTIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours TTL
+export const MAX_STORED_NOTIFICATIONS = 50; // Cap to keep localStorage ultra-light
+
+export function pruneNotifications(notifications: AppNotification[]): AppNotification[] {
+  if (!Array.isArray(notifications)) return [];
+  const cutoff = Date.now() - NOTIFICATION_TTL_MS;
+  return notifications
+    .filter(n => n && typeof n.timestamp === 'number' && n.timestamp >= cutoff)
+    .slice(0, MAX_STORED_NOTIFICATIONS);
+}
+
 interface NotificationState {
   notifications: AppNotification[];
   activeToasts: ToastNotification[];
   enabledTypes: Record<NotificationType, boolean>;
   isGlobalPanelOpen: boolean;
+  soundEnabled: boolean;
   permission: NotificationPermission | 'default';
   addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) => void;
   removeNotification: (id: string) => void;
   clearAll: () => void;
+  clearExpiredNotifications: () => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   toggleType: (type: NotificationType, enabled: boolean) => void;
   setGlobalPanelOpen: (isOpen: boolean) => void;
+  setSoundEnabled: (enabled: boolean) => void;
   disablePushNotifications: () => void;
+  enableAllNotifications: () => void;
   removeToast: (id: string) => void;
   showToast: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) => void;
   requestPermission: () => Promise<NotificationPermission | undefined>;
@@ -46,6 +62,7 @@ export const useNotificationStore = create<NotificationState>()(
     (set, get) => ({
       notifications: [],
       activeToasts: [],
+      soundEnabled: true,
       enabledTypes: {
         EVM_SWAP: true,
         SEND: true,
@@ -100,7 +117,11 @@ export const useNotificationStore = create<NotificationState>()(
 
       addNotification: notif => {
         const state = get();
-        if (!state.enabledTypes[notif.type]) return;
+        if (state.enabledTypes && state.enabledTypes[notif.type] === false) {
+          // Check if all types were accidentally disabled
+          const allFalse = Object.values(state.enabledTypes).every(v => v === false);
+          if (!allFalse) return;
+        }
 
         const newNotif = {
           ...notif,
@@ -111,7 +132,7 @@ export const useNotificationStore = create<NotificationState>()(
 
         if (!notif.dontSave) {
           set(state => ({
-            notifications: [newNotif, ...state.notifications],
+            notifications: pruneNotifications([newNotif, ...state.notifications]),
           }));
 
           const bodyText =
@@ -136,6 +157,11 @@ export const useNotificationStore = create<NotificationState>()(
 
       clearAll: () => set({ notifications: [] }),
 
+      clearExpiredNotifications: () =>
+        set(state => ({
+          notifications: pruneNotifications(state.notifications),
+        })),
+
       markAsRead: id =>
         set(state => ({
           notifications: state.notifications.map(n => (n.id === id ? { ...n, read: true } : n)),
@@ -153,13 +179,25 @@ export const useNotificationStore = create<NotificationState>()(
 
       setGlobalPanelOpen: isOpen => set({ isGlobalPanelOpen: isOpen }),
 
+      setSoundEnabled: enabled => set({ soundEnabled: enabled }),
+
       disablePushNotifications: () =>
-        set(state => {
-          const disabled: Record<string, boolean> = {};
-          Object.keys(state.enabledTypes).forEach(key => {
-            disabled[key] = false;
-          });
-          return { enabledTypes: disabled as Record<NotificationType, boolean> };
+        set(() => ({
+          soundEnabled: false,
+        })),
+
+      enableAllNotifications: () =>
+        set(() => {
+          const all: Record<string, boolean> = {
+            EVM_SWAP: true,
+            SEND: true,
+            RECEIVE: true,
+            BRIDGE: true,
+            STELLAR: true,
+            DYDX: true,
+            SYSTEM: true,
+          };
+          return { enabledTypes: all as Record<NotificationType, boolean>, soundEnabled: true };
         }),
 
       removeToast: id =>
@@ -169,14 +207,13 @@ export const useNotificationStore = create<NotificationState>()(
 
       showToast: notif => {
         const state = get();
-        if (notif.type && state.enabledTypes && state.enabledTypes[notif.type] === false) return;
 
-        // Prevent duplicate toast spam within 2.0s (e.g. from both REST submit and WebSocket event)
+        // Prevent duplicate toast spam within 1.5s (e.g. from both REST submit and WebSocket event)
         const isDuplicate = state.activeToasts.some(
           t =>
             t.title === notif.title &&
             String(t.message) === String(notif.message) &&
-            Date.now() - t.timestamp < 2000
+            Date.now() - t.timestamp < 1500
         );
         if (isDuplicate) return;
 
@@ -187,12 +224,17 @@ export const useNotificationStore = create<NotificationState>()(
           read: false,
         };
 
+        // Play subtle premium notification sound if enabled
+        if (state.soundEnabled !== false) {
+          playNotificationSound(notif.status || notif.title || notif.type);
+        }
+
         set(state => {
           const updates: Partial<NotificationState> = {
             activeToasts: [...state.activeToasts, newNotif],
           };
           if (!notif.dontSave) {
-            updates.notifications = [newNotif, ...state.notifications];
+            updates.notifications = pruneNotifications([newNotif, ...state.notifications]);
           }
           return updates;
         });
@@ -220,7 +262,7 @@ export const useNotificationStore = create<NotificationState>()(
     {
       name: 'notification-storage',
       partialize: state => ({
-        notifications: state.notifications.map(n => ({
+        notifications: pruneNotifications(state.notifications).map(n => ({
           ...n,
           message:
             typeof n.message === 'string'
@@ -232,29 +274,57 @@ export const useNotificationStore = create<NotificationState>()(
                   : String(n.message || ''),
         })),
         enabledTypes: state.enabledTypes,
+        soundEnabled: state.soundEnabled,
       }),
       onRehydrateStorage: () => state => {
-        if (state && Array.isArray(state.notifications)) {
-          state.notifications = state.notifications.map(n => {
-            if (
-              typeof n.message === 'object' &&
-              n.message !== null &&
-              !('$$typeof' in (n.message as any))
-            ) {
-              const child = (n.message as any)?.props?.children;
-              const text =
-                typeof child === 'string'
-                  ? child
-                  : Array.isArray(child)
-                    ? child
-                        .map((c: any) => (typeof c === 'string' ? c : c?.props?.children || ''))
-                        .filter(Boolean)
-                        .join(' ')
-                    : 'Notification update';
-              return { ...n, message: text || 'Notification update' };
-            }
-            return n;
-          });
+        if (state) {
+          const defaultTypes: Record<NotificationType, boolean> = {
+            EVM_SWAP: true,
+            SEND: true,
+            RECEIVE: true,
+            BRIDGE: true,
+            STELLAR: true,
+            DYDX: true,
+            SYSTEM: true,
+          };
+
+          // Auto-heal enabledTypes if corrupt or all false from previous mute bug
+          const hasNoActiveTypes =
+            !state.enabledTypes || Object.values(state.enabledTypes).every(v => v === false);
+
+          if (hasNoActiveTypes) {
+            state.enabledTypes = { ...defaultTypes };
+            state.soundEnabled = true;
+          }
+
+          if (typeof state.soundEnabled !== 'boolean') {
+            state.soundEnabled = true;
+          }
+
+          if (Array.isArray(state.notifications)) {
+            state.notifications = pruneNotifications(
+              state.notifications.map(n => {
+                if (
+                  typeof n.message === 'object' &&
+                  n.message !== null &&
+                  !('$$typeof' in (n.message as any))
+                ) {
+                  const child = (n.message as any)?.props?.children;
+                  const text =
+                    typeof child === 'string'
+                      ? child
+                      : Array.isArray(child)
+                        ? child
+                            .map((c: any) => (typeof c === 'string' ? c : c?.props?.children || ''))
+                            .filter(Boolean)
+                            .join(' ')
+                        : 'Notification update';
+                  return { ...n, message: text || 'Notification update' };
+                }
+                return n;
+              })
+            );
+          }
         }
       },
     }
