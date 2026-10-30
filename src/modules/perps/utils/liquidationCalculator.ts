@@ -202,31 +202,49 @@ export function calculateLiquidationPrice({
 }
 
 /**
- * Formats a price with full accuracy matching exchange tick precision
- * Prevents premature truncation to 2 decimals on lower-priced assets (e.g. 0.60430)
+ * Formats a price with full accuracy matching exchange tick precision and commas.
+ * Prices >= 1 use at least 2 decimal places (e.g. 79,865.00) matching Aster's UI.
+ * Low-priced assets use the asset's full tick precision.
  */
 export function formatPricePrecision(
   price: number | string | null | undefined,
-  tickSize?: number | string
+  tickSize?: number | string,
+  explicitDecimals?: number
 ): string {
   if (price === null || price === undefined) return '--';
   const bn = new BigNumber(price);
   if (bn.isNaN() || bn.lte(0)) return '--';
 
-  // If explicit tickSize is provided, determine decimal count
-  if (tickSize) {
+  let decimals = 2;
+  if (explicitDecimals !== undefined) {
+    decimals = explicitDecimals;
+  } else if (tickSize) {
     const tickStr = String(tickSize);
     if (tickStr.includes('.')) {
-      const decimals = tickStr.split('.')[1].length;
-      return bn.toFixed(decimals);
+      const tickDecs = tickStr.split('.')[1].length;
+      decimals = bn.gte(1) ? Math.max(2, tickDecs) : tickDecs;
+    } else {
+      decimals = 2;
     }
+  } else {
+    if (bn.gte(100)) decimals = 2;
+    else if (bn.gte(10)) decimals = 3;
+    else if (bn.gte(1)) decimals = 4;
+    else if (bn.gte(0.01)) decimals = 5;
+    else decimals = 6;
   }
 
-  // Dynamic smart precision
-  if (bn.gte(1000)) return bn.toFixed(2);
-  if (bn.gte(100)) return bn.toFixed(2);
-  if (bn.gte(10)) return bn.toFixed(3);
-  if (bn.gte(1)) return bn.toFixed(4);
-  if (bn.gte(0.01)) return bn.toFixed(5);
-  return bn.toFixed(6);
+  const num = bn.toNumber();
+  const minDec =
+    explicitDecimals !== undefined
+      ? explicitDecimals
+      : bn.gte(1)
+        ? Math.max(2, decimals)
+        : decimals;
+  const maxDec = Math.max(minDec, decimals);
+
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: minDec,
+    maximumFractionDigits: maxDec,
+  });
 }

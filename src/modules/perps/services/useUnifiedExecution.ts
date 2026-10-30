@@ -8,6 +8,7 @@ import {
   placeOrder as placeAsterOrder,
 } from '../adapters/aster/api/orders';
 import { useAsterAgent } from '../adapters/aster/hooks/useAsterAgent';
+import { fetchAsterSnapshot } from '../adapters/aster/hooks/useAsterDataSync';
 import {
   cancelAllHyperliquidOrders,
   cancelHyperliquidOrder,
@@ -18,6 +19,7 @@ import { useHyperliquidAgentStore } from '../adapters/hyperliquid/hooks/useHyper
 import { useExchangeManager } from '../core/ExchangeManager';
 import { useMarketStore } from '../core/stores/marketStore';
 import { useOrderStore } from '../core/stores/orderStore';
+import { usePositionStore } from '../core/stores/positionStore';
 import { formatPriceToTick, formatQuantityToStep, generateClientOrderId } from '../utils/precision';
 
 export interface UnifiedOrderParams {
@@ -123,6 +125,33 @@ export function useUnifiedExecution() {
                 ? formatPriceToTick(params.activationPrice, tickSize)
                 : undefined,
           });
+
+          // Instantly reflect order in UI without waiting for WebSocket
+          if (asterRes && asterRes.orderId) {
+            const normSymbol = params.symbol.includes('-')
+              ? params.symbol
+              : params.symbol.replace('USDT', '-USDT');
+            if (asterRes.status === 'NEW' || asterRes.status === 'PARTIALLY_FILLED') {
+              useOrderStore.getState().updateOrder({
+                id: String(asterRes.orderId),
+                symbol: normSymbol,
+                type: (asterRes.type || asterType || 'LIMIT').toLowerCase() as any,
+                side: (asterRes.side || params.side).toLowerCase() as any,
+                price: asterRes.price || cleanPrice || '0',
+                size: asterRes.origQty || cleanSize,
+                filledSize: asterRes.executedQty || '0',
+                status: asterRes.status === 'PARTIALLY_FILLED' ? 'partially_filled' : 'new',
+                reduceOnly: asterRes.reduceOnly || Boolean(params.reduceOnly),
+                timestamp: asterRes.updateTime || Date.now(),
+              });
+            }
+          }
+
+          // Instantly sync positions and orders via REST so UI doesn't lag behind WebSocket
+          fetchAsterSnapshot(asterSigner, effectiveUserAddr).catch(() => {});
+          setTimeout(() => {
+            fetchAsterSnapshot(asterSigner, effectiveUserAddr).catch(() => {});
+          }, 400);
 
           return asterRes;
         } else {
@@ -231,7 +260,7 @@ export function useUnifiedExecution() {
       const absSize = Math.abs(parseFloat(size));
       if (isNaN(absSize) || absSize <= 0) return;
 
-      return executeOrder({
+      const res = await executeOrder({
         symbol,
         side: oppositeSide,
         type: 'MARKET',
@@ -240,6 +269,13 @@ export function useUnifiedExecution() {
         reduceOnly: true,
         currentPrice,
       });
+
+      // Optimistic instant position clear
+      usePositionStore.getState().removePosition(symbol);
+      usePositionStore.getState().removePosition(symbol.replace('-', ''));
+      usePositionStore.getState().removePosition(symbol.replace('USDT', '-USDT'));
+
+      return res;
     },
     [executeOrder]
   );

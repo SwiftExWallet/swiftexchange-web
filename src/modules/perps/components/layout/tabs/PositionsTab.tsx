@@ -39,6 +39,8 @@ const PositionRow = memo(
     const [closeModalOpen, setCloseModalOpen] = useState(false);
     const [reverseModalOpen, setReverseModalOpen] = useState(false);
     const [tpSlModalOpen, setTpSlModalOpen] = useState(false);
+    const [isClosingThis, setIsClosingThis] = useState(false);
+    const [isReversingThis, setIsReversingThis] = useState(false);
 
     const assetCtx = useTickerStore(
       state =>
@@ -59,19 +61,33 @@ const PositionRow = memo(
     );
 
     const handleConfirmClose = async () => {
-      if (!isReady) return;
-      const isLong = parseFloat(position.size) > 0;
-      const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
-      await closePosition(position.symbol, position.size, isLong, curPx);
-      setCloseModalOpen(false);
+      if (!isReady || isClosingThis) return;
+      setIsClosingThis(true);
+      try {
+        const isLong = parseFloat(position.size) > 0;
+        const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
+        await closePosition(position.symbol, position.size, isLong, curPx);
+        setCloseModalOpen(false);
+      } catch (err) {
+        console.error('Failed to close position:', err);
+      } finally {
+        setIsClosingThis(false);
+      }
     };
 
     const handleConfirmReverse = async () => {
-      if (!isReady) return;
-      const isLong = parseFloat(position.size) > 0;
-      const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
-      await reversePosition(position.symbol, position.size, isLong, curPx);
-      setReverseModalOpen(false);
+      if (!isReady || isReversingThis) return;
+      setIsReversingThis(true);
+      try {
+        const isLong = parseFloat(position.size) > 0;
+        const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
+        await reversePosition(position.symbol, position.size, isLong, curPx);
+        setReverseModalOpen(false);
+      } catch (err) {
+        console.error('Failed to reverse position:', err);
+      } finally {
+        setIsReversingThis(false);
+      }
     };
 
     const isLong = parseFloat(position.size) > 0;
@@ -119,8 +135,11 @@ const PositionRow = memo(
     const marginDenom = marginCalc === 0 ? 1 : marginCalc;
     const roe = bnPnl.dividedBy(marginDenom).times(100).toNumber();
 
-    // Exchange taker fee adjusted break-even price (Aster default ~0.05% per leg = 0.1% round-trip)
-    const breakEven = isLong ? bnEntry.times(1.001).toNumber() : bnEntry.times(0.999).toNumber();
+    // Aster Futures standard round-trip taker fee rate is 0.04% (0.0004)
+    const ASTER_TAKER_FEE_RATE = 0.0004;
+    const breakEven = isLong
+      ? bnEntry.times(1 + ASTER_TAKER_FEE_RATE).toNumber()
+      : bnEntry.times(1 - ASTER_TAKER_FEE_RATE).toNumber();
 
     const officialLiq = parseFloat(position.liquidationPrice || '0');
     const liqPrice = useMemo(() => {
@@ -135,6 +154,8 @@ const PositionRow = memo(
     }, [officialLiq, position, leverage, allPositions, balances, isMultiAsset, bracketsBySymbol]);
 
     const tickSize = market?.tickSize;
+    const tickDecimals =
+      tickSize && String(tickSize).includes('.') ? String(tickSize).split('.')[1].length : 1;
     const baseSymbol = position.symbol.replace('-USDT', '').replace('USDT', '');
 
     return (
@@ -154,7 +175,13 @@ const PositionRow = memo(
           className={`px-2.5 py-1.5 ${isLong ? 'text-success' : 'text-danger'} font-mono-tabular`}
         >
           <div className="flex flex-col">
-            <span className="font-medium">{bnNotional.toFixed(2)} USDT</span>
+            <span className="font-medium">
+              {bnNotional.toNumber().toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              USDT
+            </span>
             <span className="text-[10px] text-secondary">
               {absSize} {baseSymbol}
             </span>
@@ -168,7 +195,13 @@ const PositionRow = memo(
         </td>
         <td className="px-2.5 py-1.5 text-primary font-mono-tabular">
           <div className="flex flex-col">
-            <span>{marginCalc.toFixed(2)} USDT</span>
+            <span>
+              {marginCalc.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              USDT
+            </span>
             <span className="text-[10px] text-secondary">
               ({position.marginType === 'isolated' ? 'Isolated' : 'Cross'})
             </span>
@@ -178,7 +211,7 @@ const PositionRow = memo(
           {liqPrice != null && liqPrice > 0 ? formatPricePrecision(liqPrice, tickSize) : '--'}
         </td>
         <td className="px-2.5 py-1.5 text-primary font-mono-tabular">
-          {formatPricePrecision(breakEven, tickSize)}
+          {formatPricePrecision(breakEven, tickSize, tickDecimals)}
         </td>
         <td
           className={`px-2.5 py-1.5 font-mono-tabular ${pnlVal > 0 ? 'text-success' : pnlVal < 0 ? 'text-danger' : 'text-primary'}`}
@@ -186,7 +219,11 @@ const PositionRow = memo(
           <div className="flex flex-col">
             <span className="font-medium">
               {pnlVal > 0 ? '+' : ''}
-              {pnlVal.toFixed(2)} USDT
+              {pnlVal.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              USDT
             </span>
             <span className="text-[10px]">
               {roe > 0 ? '+' : ''}
@@ -282,9 +319,12 @@ const PositionRow = memo(
             </div>
           }
           onConfirm={handleConfirmClose}
-          onCancel={() => setCloseModalOpen(false)}
+          onCancel={() => {
+            if (!isClosingThis) setCloseModalOpen(false);
+          }}
           confirmText="Confirm Market Close"
           confirmButtonType="danger"
+          isLoading={isClosingThis}
         />
 
         <ConfirmationModal
@@ -341,9 +381,12 @@ const PositionRow = memo(
             </div>
           }
           onConfirm={handleConfirmReverse}
-          onCancel={() => setReverseModalOpen(false)}
+          onCancel={() => {
+            if (!isReversingThis) setReverseModalOpen(false);
+          }}
           confirmText="Confirm Reverse"
           confirmButtonType="primary"
+          isLoading={isReversingThis}
         />
 
         <PositionTpSlModal
@@ -363,7 +406,9 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
   const bracketsBySymbol = useLeverageStore(state => state.bracketsBySymbol);
 
   const [closeAllModalOpen, setCloseAllModalOpen] = useState(false);
-  const { isReady, loading: isClosingAll, closeAllPositions } = useUnifiedExecution();
+  const [isClosingAllLocal, setIsClosingAllLocal] = useState(false);
+  const { isReady, loading: isExecutionLoading, closeAllPositions } = useUnifiedExecution();
+  const isClosingAll = isClosingAllLocal || isExecutionLoading;
 
   const positionList = useMemo(() => Object.values(positions), [positions]);
 
@@ -374,9 +419,16 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
   }, [signer, userAddr]);
 
   const handleConfirmCloseAll = async () => {
-    if (!isReady) return;
-    await closeAllPositions(positionList);
-    setCloseAllModalOpen(false);
+    if (!isReady || isClosingAll) return;
+    setIsClosingAllLocal(true);
+    try {
+      await closeAllPositions(positionList);
+      setCloseAllModalOpen(false);
+    } catch (err) {
+      console.error('Failed to close all positions:', err);
+    } finally {
+      setIsClosingAllLocal(false);
+    }
   };
 
   if (positionList.length === 0) {
@@ -471,9 +523,12 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
           </div>
         }
         onConfirm={handleConfirmCloseAll}
-        onCancel={() => setCloseAllModalOpen(false)}
-        confirmText={isClosingAll ? 'Closing...' : 'Confirm Market Close All'}
+        onCancel={() => {
+          if (!isClosingAll) setCloseAllModalOpen(false);
+        }}
+        confirmText="Confirm Market Close All"
         confirmButtonType="danger"
+        isLoading={isClosingAll}
       />
     </div>
   );

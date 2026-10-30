@@ -71,6 +71,7 @@ function throwIfApiError(data: any): void {
 let serverTimeOffset = 0;
 let lastTimeSync = 0;
 let lastGeneratedNonce = 0n;
+let pendingTimeSyncPromise: Promise<number> | null = null;
 
 export function generateMonotonicNonce(serverTimeMs: number): string {
   const baseMicro = BigInt(Math.floor(serverTimeMs)) * 1000n;
@@ -83,26 +84,38 @@ export function generateMonotonicNonce(serverTimeMs: number): string {
 }
 
 export async function getSyncedServerTime(baseUrl?: string): Promise<number> {
-  const restUrl = baseUrl || getAsterRestUrl();
   const now = Date.now();
   if (now - lastTimeSync < 60000 && lastTimeSync > 0) {
     return now + serverTimeOffset;
   }
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(`${restUrl}/fapi/v3/time`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    const data = await res.json();
-    if (data && typeof data.serverTime === 'number') {
-      serverTimeOffset = data.serverTime - Date.now();
-      lastTimeSync = Date.now();
-      return data.serverTime;
-    }
-  } catch (err) {
-    console.warn('[aster] Failed to sync server time, falling back to local time', err);
+
+  if (pendingTimeSyncPromise) {
+    return pendingTimeSyncPromise;
   }
-  return Date.now();
+
+  const restUrl = baseUrl || getAsterRestUrl();
+  pendingTimeSyncPromise = (async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1500);
+      const res = await fetch(`${restUrl}/fapi/v3/time`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      const data = await res.json();
+      if (data && typeof data.serverTime === 'number') {
+        serverTimeOffset = data.serverTime - Date.now();
+        lastTimeSync = Date.now();
+        return data.serverTime;
+      }
+    } catch {
+      // Quiet fallback to local time without blocking the UI
+      lastTimeSync = Date.now();
+    } finally {
+      pendingTimeSyncPromise = null;
+    }
+    return Date.now() + serverTimeOffset;
+  })();
+
+  return pendingTimeSyncPromise;
 }
 
 export async function signedRequest(

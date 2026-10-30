@@ -420,49 +420,43 @@ export const ExchangeAccountPanel: React.FC = () => {
   return (
     <div className="bg-secondary border border-color rounded-lg p-3 space-y-2.5 h-full min-h-0 overflow-y-auto scrollbar-thin flex flex-col justify-between">
       <div className="space-y-2.5">
-        {/* Action Buttons */}
-        {currentNetwork === 'testnet' && isAster ? (
+        {/* Action Buttons: Aster Style Segmented Action Row */}
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => handleOpenAccount('deposit')}
+            className="flex-1 bg-brand hover:bg-brand-hover text-white py-1.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer text-center shadow-xs"
+          >
+            Deposit
+          </button>
+          <button
+            type="button"
+            onClick={() => handleOpenAccount('withdraw')}
+            className="flex-1 bg-tertiary hover:bg-hover border border-color text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+          >
+            Withdraw
+          </button>
+          <button
+            type="button"
+            onClick={() => handleOpenAccount('transfer')}
+            className="flex-1 bg-tertiary hover:bg-hover border border-color text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+          >
+            Transfer
+          </button>
+        </div>
+
+        {/* Testnet Faucet Quick Link if on Testnet */}
+        {currentNetwork === 'testnet' && isAster && (
           <a
             href="https://www.asterdex-testnet.com/en/faucet"
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full bg-gradient-to-r from-amber-500/20 to-brand/20 hover:from-amber-500/30 hover:to-brand/30 text-amber-300 border border-amber-500/40 py-2 rounded-md text-[12px] font-semibold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+            className="w-full bg-warning/10 hover:bg-warning/20 text-warning border border-warning/30 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5"
           >
-            <Sparkles size={14} className="text-amber-400" />
-            <span>Claim Aster Faucet</span>
-            <ExternalLink size={12} className="opacity-70" />
+            <Sparkles size={12} className="text-warning" />
+            <span>Claim Aster Testnet Faucet</span>
+            <ExternalLink size={10} className="opacity-70" />
           </a>
-        ) : (
-          <div className="flex gap-1.5">
-            <button
-              type="button"
-              onClick={() => handleOpenAccount('deposit')}
-              className="flex-1 bg-brand hover:bg-brand-hover text-white py-1.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer text-center"
-            >
-              Deposit
-            </button>
-            <button
-              type="button"
-              onClick={() => handleOpenAccount('withdraw')}
-              className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
-            >
-              Withdraw
-            </button>
-            <button
-              type="button"
-              onClick={() => handleOpenAccount('transfer')}
-              className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
-            >
-              Transfer
-            </button>
-            <button
-              type="button"
-              onClick={() => handleOpenAccount('history')}
-              className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
-            >
-              History
-            </button>
-          </div>
         )}
 
         {/* Account Equity Section */}

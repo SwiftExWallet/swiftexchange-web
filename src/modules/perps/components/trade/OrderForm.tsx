@@ -276,34 +276,38 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         </button>
       </div>
 
-      <div className="flex gap-2">
+      <div className="grid grid-cols-3 gap-1.5">
         <button
           type="button"
           onClick={onOpenMarginModal}
-          className="flex-1 bg-tertiary border border-color hover:border-border-dark rounded-md py-1.5 text-[12px] font-medium text-primary transition-colors cursor-pointer text-center"
+          className="bg-tertiary border border-color hover:border-border-dark hover:bg-hover rounded-md py-1.5 text-[11.5px] font-medium text-primary transition-colors cursor-pointer text-center"
         >
           {store.marginType === 'cross' ? 'Cross' : 'Isolated'}
         </button>
         <button
           type="button"
           onClick={onOpenLeverageModal}
-          className="flex-1 bg-tertiary border border-color hover:border-border-dark rounded-md py-1.5 text-[12px] font-medium text-primary transition-colors cursor-pointer text-center"
+          className="bg-tertiary border border-color hover:border-border-dark hover:bg-hover rounded-md py-1.5 text-[11.5px] font-medium text-primary transition-colors cursor-pointer text-center font-mono-tabular"
         >
           {store.leverage}x
         </button>
-        {currentExchange === 'aster' && (
+        {currentExchange === 'aster' ? (
           <button
             type="button"
             onClick={() => setIsAssetModeModalOpen(true)}
-            className={`w-9 border rounded-md py-1.5 text-[12px] font-bold transition-all flex items-center justify-center cursor-pointer ${
+            className={`border rounded-md py-1.5 text-[11.5px] font-bold transition-all flex items-center justify-center cursor-pointer ${
               multiAssetsMargin
-                ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 shadow-xs'
-                : 'bg-tertiary border-color hover:border-border-dark text-secondary hover:text-primary'
+                ? 'bg-brand/15 border-brand/40 text-brand shadow-xs'
+                : 'bg-tertiary border-color hover:border-border-dark hover:bg-hover text-secondary hover:text-primary'
             }`}
             title={multiAssetsMargin ? 'Multi-Asset Mode (Active)' : 'Single-Asset Mode (Active)'}
           >
             {multiAssetsMargin ? 'M' : 'S'}
           </button>
+        ) : (
+          <div className="bg-tertiary border border-color rounded-md py-1.5 text-[11.5px] text-muted text-center select-none">
+            —
+          </div>
         )}
       </div>
 
@@ -800,7 +804,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span>Max</span>
             <span className="text-primary font-medium">
               {maxPossibleSize > 0
-                ? `${maxPossibleSize.toFixed(store.sizeAsset === 'quote' ? 2 : baseDecimals)} ${currentCurrency}`
+                ? `${maxPossibleSize.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: store.sizeAsset === 'quote' ? 2 : baseDecimals,
+                  })} ${currentCurrency}`
                 : `0.00 ${quoteAsset}`}
             </span>
           </div>
@@ -808,7 +815,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span>Max</span>
             <span className="text-primary font-medium">
               {maxPossibleSize > 0
-                ? `${maxPossibleSize.toFixed(store.sizeAsset === 'quote' ? 2 : baseDecimals)} ${currentCurrency}`
+                ? `${maxPossibleSize.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: store.sizeAsset === 'quote' ? 2 : baseDecimals,
+                  })} ${currentCurrency}`
                 : `0.00 ${quoteAsset}`}
             </span>
           </div>
@@ -819,7 +829,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span>Liq.Price (Long)</span>
             <span className="text-success font-medium">
               {estimatedIsolatedLiqPrice.long && estimatedIsolatedLiqPrice.long > 0
-                ? `$${estimatedIsolatedLiqPrice.long.toFixed(2)}`
+                ? `$${estimatedIsolatedLiqPrice.long.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}`
                 : '--'}
             </span>
           </div>
@@ -827,7 +840,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span>Liq.Price (Short)</span>
             <span className="text-danger font-medium">
               {estimatedIsolatedLiqPrice.short && estimatedIsolatedLiqPrice.short > 0
-                ? `$${estimatedIsolatedLiqPrice.short.toFixed(2)}`
+                ? `$${estimatedIsolatedLiqPrice.short.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}`
                 : '--'}
             </span>
           </div>

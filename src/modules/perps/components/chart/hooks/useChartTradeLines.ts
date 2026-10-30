@@ -5,10 +5,14 @@ import { type ISeriesApi, LineStyle } from 'lightweight-charts';
 
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
+import { useMarketStore } from '../../../core/stores/marketStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
-import { calculateLiquidationPrice } from '../../../utils/liquidationCalculator';
+import {
+  calculateLiquidationPrice,
+  formatPricePrecision,
+} from '../../../utils/liquidationCalculator';
 
 interface UseChartTradeLinesProps {
   series: ISeriesApi<any> | null;
@@ -28,6 +32,12 @@ function matchesMarket(sym: string, market: string): boolean {
 export function useChartTradeLines({ series, market }: UseChartTradeLinesProps) {
   const positions = usePositionStore(state => state.positions);
   const orders = useOrderStore(state => state.orders);
+  const marketInfo = useMarketStore(
+    state =>
+      state.markets[market] ||
+      state.markets[market.replace('-', '')] ||
+      state.markets[market.replace('USDT', '-USDT')]
+  );
   const assetCtx = useTickerStore(
     state =>
       state.assetCtxByMarket[market] ||
@@ -95,7 +105,8 @@ export function useChartTradeLines({ series, market }: UseChartTradeLinesProps) 
       const pnlPrefix = bnPnl.gte(0) ? '+$' : '-$';
       const pnlFormatted = `${pnlPrefix}${bnPnl.abs().toFixed(2)}`;
       const coin = market.split('-')[0] || '';
-      const title = `${absSize} ${coin} · ${isLong ? 'Long' : 'Short'} @ $${entryPx.toLocaleString()} · PnL: ${pnlFormatted}`;
+      const entryFormatted = formatPricePrecision(entryPx, marketInfo?.tickSize);
+      const title = `${absSize} ${coin} · ${isLong ? 'Long' : 'Short'} @ $${entryFormatted} · PnL: ${pnlFormatted}`;
       const color = isLong ? '#10b981' : '#f43f5e';
 
       if (entryLineRef.current) {
@@ -145,7 +156,8 @@ export function useChartTradeLines({ series, market }: UseChartTradeLinesProps) 
     }
 
     if (liqPx > 0 && size !== 0) {
-      const title = `Liquidation Price: $${liqPx.toLocaleString()}`;
+      const liqFormatted = formatPricePrecision(liqPx, marketInfo?.tickSize);
+      const title = `Liquidation Price: $${liqFormatted}`;
       const color = '#f59e0b'; // Amber warning
 
       if (liqLineRef.current) {
@@ -213,7 +225,8 @@ export function useChartTradeLines({ series, market }: UseChartTradeLinesProps) 
       const px = parseFloat(order.price);
       const isBuy = order.side === 'buy';
       const color = isBuy ? '#10b981' : '#f43f5e';
-      const title = `${isBuy ? 'Limit Buy' : 'Limit Sell'} ${order.size} @ ${px.toLocaleString()}`;
+      const pxFormatted = formatPricePrecision(px, marketInfo?.tickSize);
+      const title = `${isBuy ? 'Limit Buy' : 'Limit Sell'} ${order.size} @ $${pxFormatted}`;
 
       const existingLine = orderLinesRef.current.get(order.id);
       if (existingLine) {

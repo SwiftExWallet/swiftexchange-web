@@ -123,6 +123,7 @@ export const ASTER_ENDPOINTS = {
   AGG_TRADES: '/fapi/v3/aggTrades',
   FUNDING_RATE: '/fapi/v3/fundingRate',
   FUNDING_INFO: '/fapi/v3/fundingInfo',
+  OPEN_INTEREST: '/fapi/v3/openInterest',
 
   // Account & Auth
   LISTEN_KEY: '/fapi/v3/listenKey',

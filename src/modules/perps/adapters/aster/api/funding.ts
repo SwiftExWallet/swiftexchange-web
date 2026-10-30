@@ -139,3 +139,25 @@ export async function getRealTimeFundingRate(symbol: string): Promise<any> {
   }
   return null;
 }
+
+export interface AsterOpenInterestResponse {
+  symbol: string;
+  openInterest: string;
+  time: number;
+}
+
+/**
+ * Official Aster Futures v3 Open Interest endpoint:
+ * GET /fapi/v3/openInterest?symbol=BTCUSDT
+ * Response: { symbol: "BTCUSDT", openInterest: "6403.294", time: 1793263722567 }
+ */
+export async function getAsterOpenInterest(symbol: string): Promise<string> {
+  const cleanSymbol = symbol.replace(/[-_/]/g, '').toUpperCase();
+  const restUrl = getAsterRestUrl();
+  const response = await fetch(`${restUrl}${ASTER_ENDPOINTS.OPEN_INTEREST}?symbol=${cleanSymbol}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch open interest: ${response.statusText}`);
+  }
+  const data: AsterOpenInterestResponse = await response.json();
+  return data.openInterest || '0';
+}

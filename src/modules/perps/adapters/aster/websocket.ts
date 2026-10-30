@@ -312,6 +312,9 @@ export class AsterWebSocket {
 
   private handleGlobalArray(items: Record<string, unknown>[]): void {
     const contexts: Record<string, Partial<import('../../core/stores/tickerStore').AssetCtx>> = {};
+    const posState = usePositionStore.getState();
+    const hasPositions = Object.keys(posState.positions).length > 0;
+    const updatedPositions: import('../../core/models').Position[] = [];
 
     for (const item of items) {
       const rawSymbol = item.s as string | undefined;
@@ -323,32 +326,37 @@ export class AsterWebSocket {
       } else if (item.e === 'markPriceUpdate') {
         contexts[uiSymbol] = { ...contexts[uiSymbol], ...AsterMapper.mapMarkPrice(item) };
 
-        // Live update position store on mark price tick
-        const markPxStr = item.p as string;
-        if (markPxStr) {
-          const posState = usePositionStore.getState();
-          const pos =
-            posState.positions[uiSymbol] ||
-            posState.positions[rawSymbol] ||
-            posState.positions[uiSymbol.replace('-', '')];
-          if (pos && parseFloat(pos.size || '0') !== 0) {
-            const markVal = parseFloat(markPxStr);
-            const entryVal = parseFloat(pos.entryPrice || '0');
-            const sizeVal = parseFloat(pos.size || '0');
-            if (markVal > 0 && entryVal > 0) {
-              const isLong = sizeVal > 0;
-              const livePnl = isLong
-                ? (markVal - entryVal) * Math.abs(sizeVal)
-                : (entryVal - markVal) * Math.abs(sizeVal);
-              posState.updatePosition({
-                ...pos,
-                markPrice: markPxStr,
-                unrealizedPnl: livePnl.toFixed(4),
-              });
+        // Live update position store on mark price tick (batched)
+        if (hasPositions) {
+          const markPxStr = item.p as string;
+          if (markPxStr) {
+            const pos =
+              posState.positions[uiSymbol] ||
+              posState.positions[rawSymbol] ||
+              posState.positions[uiSymbol.replace('-', '')];
+            if (pos && parseFloat(pos.size || '0') !== 0) {
+              const markVal = parseFloat(markPxStr);
+              const entryVal = parseFloat(pos.entryPrice || '0');
+              const sizeVal = parseFloat(pos.size || '0');
+              if (markVal > 0 && entryVal > 0) {
+                const isLong = sizeVal > 0;
+                const livePnl = isLong
+                  ? (markVal - entryVal) * Math.abs(sizeVal)
+                  : (entryVal - markVal) * Math.abs(sizeVal);
+                updatedPositions.push({
+                  ...pos,
+                  markPrice: markPxStr,
+                  unrealizedPnl: livePnl.toFixed(4),
+                });
+              }
             }
           }
         }
       }
+    }
+
+    if (updatedPositions.length > 0) {
+      posState.batchUpdatePositions({ upsert: updatedPositions });
     }
 
     if (Object.keys(contexts).length === 0) return;

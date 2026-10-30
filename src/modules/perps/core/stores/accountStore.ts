@@ -22,6 +22,7 @@ interface AccountStoreState {
   setBalances: (balances: AccountBalance[], summary?: AccountSummaryMetrics) => void;
   setMultiAssetsMargin: (isMultiAsset: boolean) => void;
   updateBalance: (balance: AccountBalance) => void;
+  updateBalances: (balances: AccountBalance[]) => void;
   getBalance: (asset: string) => AccountBalance | undefined;
   clear: () => void;
 }
@@ -63,6 +64,14 @@ export const useAccountStore = create<AccountStoreState>()(
             [balance.asset]: balance,
           },
         })),
+      updateBalances: balances =>
+        set(state => {
+          const next = { ...state.balances };
+          balances.forEach(b => {
+            next[b.asset] = b;
+          });
+          return { balances: next };
+        }),
       getBalance: asset => get().balances[asset],
       clear: () =>
         set({

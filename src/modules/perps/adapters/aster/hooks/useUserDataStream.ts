@@ -4,7 +4,7 @@ import BigNumber from 'bignumber.js';
 import type { Signer } from 'ethers';
 
 import { useNotificationStore } from '../../../../../store/notificationStore';
-import type { Order } from '../../../core/models';
+import type { AccountBalance, Order, Position } from '../../../core/models';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useHistoryStore } from '../../../core/stores/historyStore';
 import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
@@ -37,40 +37,48 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
   const wsRef = useRef<WebSocket | null>(null);
 
   const applyAccountUpdate = (a: any) => {
-    if (Array.isArray(a.B)) {
-      a.B.forEach((b: any) => {
+    // 1. Atomic batch balance update to prevent event loop blocking
+    if (Array.isArray(a.B) && a.B.length > 0) {
+      const balanceUpdates: AccountBalance[] = a.B.map((b: any) => {
         const wbBn = new BigNumber(b.wb || '0');
         const cwBn = new BigNumber(b.cw || '0');
-        useAccountStore.getState().updateBalance({
+        return {
           asset: b.a,
           total: b.wb,
           available: b.cw,
           locked: wbBn.minus(cwBn).toString(),
           marginBalance: b.cw,
-        });
+        };
       });
+      useAccountStore.getState().updateBalances(balanceUpdates);
     }
 
-    if (Array.isArray(a.P)) {
+    // 2. Atomic batch position update to eliminate layout thrashing
+    if (Array.isArray(a.P) && a.P.length > 0) {
+      const upsertList: Position[] = [];
+      const removeList: string[] = [];
+      const posMap = usePositionStore.getState().positions;
+      const orderEntryState = useOrderEntryStore.getState();
+
       a.P.forEach((p: any) => {
         const symbol = (p.s as string).replace('USDT', '-USDT');
         if (new BigNumber(p.pa || '0').isZero()) {
-          usePositionStore.getState().removePosition(symbol);
+          removeList.push(symbol);
         } else {
           const existing =
-            usePositionStore.getState().positions[symbol] ||
-            usePositionStore.getState().positions[symbol.replace('-', '')] ||
-            usePositionStore.getState().positions[symbol.replace('USDT', '-USDT')];
+            posMap[symbol] ||
+            posMap[symbol.replace('-', '')] ||
+            posMap[symbol.replace('USDT', '-USDT')];
 
           const storedLev =
             (existing?.leverage && existing.leverage > 0 ? existing.leverage : null) ||
-            useOrderEntryStore.getState().leverageBySymbol[symbol] ||
-            useOrderEntryStore.getState().leverageBySymbol[symbol.replace('-', '')] ||
-            useOrderEntryStore.getState().leverageBySymbol[symbol.replace('USDT', '-USDT')] ||
-            useOrderEntryStore.getState().leverage ||
+            orderEntryState.leverageBySymbol[symbol] ||
+            orderEntryState.leverageBySymbol[symbol.replace('-', '')] ||
+            orderEntryState.leverageBySymbol[symbol.replace('USDT', '-USDT')] ||
+            orderEntryState.leverage ||
             0;
 
-          usePositionStore.getState().updatePosition({
+          upsertList.push({
             symbol,
             size: p.pa,
             entryPrice: p.ep,
@@ -88,6 +96,13 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
           });
         }
       });
+
+      if (upsertList.length > 0 || removeList.length > 0) {
+        usePositionStore.getState().batchUpdatePositions({
+          upsert: upsertList,
+          remove: removeList,
+        });
+      }
     }
   };
 
@@ -248,15 +263,24 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
       const startWatchdog = () => {
         clearWatchdog();
         lastActivityTime = Date.now();
-        // 30s watchdog to detect stale / half-open connections (WS-03)
+        // Send a ping frame / keep-alive every 25s so proxy / cloudflare doesn't kill the socket
         watchdogTimer = setInterval(() => {
-          if (Date.now() - lastActivityTime > 60_000) {
+          if (ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({ method: 'ping' }));
+            } catch {
+              /* ignore */
+            }
+          }
+
+          // If no message received for >180s, then consider connection stale
+          if (Date.now() - lastActivityTime > 180_000) {
             console.warn(
-              '[UserDataStream] Watchdog timeout (no data for 60s), closing stale connection'
+              '[UserDataStream] Watchdog timeout (no data for 180s), closing stale connection'
             );
             ws.close();
           }
-        }, 15_000);
+        }, 25_000);
       };
 
       ws.onopen = () => {
@@ -345,6 +369,10 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
         const delay =
           Math.min(1000 * Math.pow(2, reconnectAttempts), 30_000) + Math.random() * 1000;
         reconnectAttempts++;
+        if (reconnectAttempts > 3) {
+          // If multiple reconnects failed, the listenKey may have expired on Aster server
+          refresh().catch(() => {});
+        }
         reconnectTimeout = setTimeout(() => {
           connectWs();
         }, delay);
@@ -357,8 +385,25 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
 
     connectWs();
 
+    // Resync data snapshot when tab becomes visible or comes back online
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && signer && userAddr) {
+        fetchAsterSnapshot(signer, userAddr).catch(() => {});
+      }
+    };
+    const handleOnline = () => {
+      if (signer && userAddr) {
+        fetchAsterSnapshot(signer, userAddr).catch(() => {});
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('online', handleOnline);
+
     return () => {
       isDisposed = true;
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleOnline);
       if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
         reconnectTimeout = null;

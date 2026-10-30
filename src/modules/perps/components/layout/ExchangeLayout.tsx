@@ -24,7 +24,7 @@ export const ExchangeLayout: React.FC<ExchangeLayoutProps> = ({ sidebar }) => {
       {sidebar}
 
       <div className="flex flex-col flex-1 p-1 gap-1 min-w-0 max-w-full h-full min-h-0">
-        <div className="flex gap-1 min-w-0 h-[70%] min-h-[560px] max-h-[70%]">
+        <div className="flex gap-1 min-w-0 h-[73%] min-h-[580px] max-h-[74%]">
           <div className="flex flex-col flex-1 bg-secondary rounded-lg overflow-hidden min-w-0 h-full min-h-0 border border-color">
             <ExchangeChartPanel />
           </div>
@@ -37,8 +37,8 @@ export const ExchangeLayout: React.FC<ExchangeLayoutProps> = ({ sidebar }) => {
           </div>
         </div>
 
-        <div className="flex gap-1 min-w-0 h-[38%] min-h-[220px] max-h-[38%]">
-          <div className="flex-1 bg-secondary rounded-lg overflow-hidden flex flex-col  min-w-0 h-full min-h-0">
+        <div className="flex gap-1 min-w-0 h-[27%] min-h-[190px] max-h-[27%]">
+          <div className="flex-1 bg-secondary rounded-lg overflow-hidden flex flex-col min-w-0 h-full min-h-0">
             <ExchangePositionsPanel />
           </div>
           <div className="w-[295px] shrink-0 h-full min-h-0 overflow-hidden">

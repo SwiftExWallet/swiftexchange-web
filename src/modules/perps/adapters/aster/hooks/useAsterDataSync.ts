@@ -23,6 +23,7 @@ import { useUserDataStream } from './useUserDataStream';
 export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
   useAccountStore.getState().setIsLoading(true);
   try {
+    const hasBrackets = Object.keys(useLeverageStore.getState().bracketsBySymbol).length > 0;
     const [
       accountInfo,
       positionRisk,
@@ -33,7 +34,7 @@ export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
       getAccountInfo(signer, userAddr),
       getPositionRisk(signer, userAddr),
       getOpenOrders(signer, userAddr),
-      getLeverageBracket(signer, userAddr),
+      hasBrackets ? Promise.resolve([]) : getLeverageBracket(signer, userAddr),
       getMultiAssetsMargin(signer, userAddr),
     ]);
 

@@ -3,8 +3,10 @@ import { memo } from 'react';
 
 import { indicatorRegistry } from 'lightweight-charts-indicators';
 
+import { useMarketStore } from '../../../core/stores/marketStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
+import { formatPricePrecision } from '../../../utils/liquidationCalculator';
 import type { ActiveIndicator, LegendData, ThemeColors } from '../types';
 import { findAt, formatNum } from '../utils/candles';
 
@@ -50,6 +52,12 @@ export const Legend = memo(function Legend({
 }: LegendProps) {
   // Active Position for Buying & Liquidation Price display
   const positions = usePositionStore(state => state.positions);
+  const marketInfo = useMarketStore(
+    state =>
+      state.markets[market] ||
+      state.markets[market.replace('-', '')] ||
+      state.markets[market.replace('USDT', '-USDT')]
+  );
   const assetCtx = useTickerStore(
     state =>
       state.assetCtxByMarket[market] ||
@@ -135,13 +143,14 @@ export const Legend = memo(function Legend({
       {entryPx > 0 && posSize !== 0 && (
         <div className="flex flex-wrap items-center gap-x-2 text-[10.5px] mt-0.5 px-2 py-0.5 rounded bg-secondary/90 border border-color backdrop-blur-sm pointer-events-auto">
           <span className={`font-semibold ${isLong ? 'text-success' : 'text-danger'}`}>
-            {isLong ? 'Buy / Long' : 'Sell / Short'} Entry: ${entryPx.toLocaleString()}
+            {isLong ? 'Buy / Long' : 'Sell / Short'} Entry: $
+            {formatPricePrecision(entryPx, marketInfo?.tickSize)}
           </span>
           <span className="text-secondary opacity-40">•</span>
           {liqPx > 0 && (
             <>
               <span className="text-amber-400 font-medium">
-                Liq Price: ${liqPx.toLocaleString()}
+                Liq Price: ${formatPricePrecision(liqPx, marketInfo?.tickSize)}
               </span>
               <span className="text-secondary opacity-40">•</span>
             </>

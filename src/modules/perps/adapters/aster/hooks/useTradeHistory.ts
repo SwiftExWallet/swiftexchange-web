@@ -3,6 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Signer } from 'ethers';
 
 import { useHistoryStore } from '../../../core/stores/historyStore';
+import { useMarketStore } from '../../../core/stores/marketStore';
+import { useOrderStore } from '../../../core/stores/orderStore';
+import { usePositionStore } from '../../../core/stores/positionStore';
 import { getUserTrades } from '../api/account';
 import type { AsterUserTrade } from '../types/account';
 
@@ -41,6 +44,37 @@ function buildTimeChunks(startMs: number, endMs: number): { startTime: number; e
     curEnd = curStart - 1;
   }
   return chunks;
+}
+
+function getTargetSymbols(specificSymbol?: string | null): string[] {
+  if (specificSymbol && specificSymbol.trim()) {
+    return [specificSymbol.replace('-', '').toUpperCase()];
+  }
+  const symbolSet = new Set<string>();
+  const cur = useMarketStore.getState().selectedSymbol;
+  if (cur) symbolSet.add(cur.replace('-', '').toUpperCase());
+
+  Object.keys(usePositionStore.getState().positions).forEach(s => {
+    symbolSet.add(s.replace('-', '').toUpperCase());
+  });
+
+  Object.values(useOrderStore.getState().orders).forEach(o => {
+    if (o.symbol) symbolSet.add(o.symbol.replace('-', '').toUpperCase());
+  });
+
+  useHistoryStore.getState().recentOrders.forEach(o => {
+    if (o.symbol) symbolSet.add(o.symbol.replace('-', '').toUpperCase());
+  });
+  useHistoryStore.getState().recentTrades.forEach(t => {
+    if (t.symbol) symbolSet.add(t.symbol.replace('-', '').toUpperCase());
+  });
+
+  const allMarkets = Object.keys(useMarketStore.getState().markets);
+  allMarkets.slice(0, 8).forEach(m => {
+    symbolSet.add(m.replace('-', '').toUpperCase());
+  });
+
+  return Array.from(symbolSet);
 }
 
 const deduplicateTrades = (existing: AsterUserTrade[], incoming: AsterUserTrade[]) => {
@@ -105,16 +139,19 @@ export const useTradeHistory = (
         const initialBatchEnd = now;
         const initialBatchStart = Math.max(minStartTime, now - BATCH_SPAN_MS);
         const chunks = buildTimeChunks(initialBatchStart, initialBatchEnd);
+        const targetSymbols = getTargetSymbols(symbol);
 
-        const results = await Promise.allSettled(
-          chunks.map(chunk =>
-            getUserTrades(signer, userAddr, symbol || undefined, {
+        const requests = chunks.flatMap(chunk =>
+          targetSymbols.map(sym =>
+            getUserTrades(signer, userAddr, sym, {
               startTime: chunk.startTime,
               endTime: chunk.endTime,
               limit: PAGE_LIMIT,
             })
           )
         );
+
+        const results = await Promise.allSettled(requests);
 
         if (!isMounted) return;
 
@@ -182,15 +219,17 @@ export const useTradeHistory = (
     setIsLoadingMore(true);
 
     try {
-      const results = await Promise.allSettled(
-        chunks.map(chunk =>
-          getUserTrades(signer, userAddr, symbol || undefined, {
+      const targetSymbols = getTargetSymbols(symbol);
+      const requests = chunks.flatMap(chunk =>
+        targetSymbols.map(sym =>
+          getUserTrades(signer, userAddr, sym, {
             startTime: chunk.startTime,
             endTime: chunk.endTime,
             limit: PAGE_LIMIT,
           })
         )
       );
+      const results = await Promise.allSettled(requests);
 
       const nextBatch: AsterUserTrade[] = [];
       for (const res of results) {
