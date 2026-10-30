@@ -1,6 +1,7 @@
 import BigNumber from 'bignumber.js';
 
 import type { Candle, Market, OrderBook, Trade } from '../../core/models';
+import { useLeverageStore } from '../../core/stores/leverageStore';
 import type { AssetCtx } from '../../core/stores/tickerStore';
 
 export class AsterMapper {
@@ -8,6 +9,7 @@ export class AsterMapper {
     const rawSymbol = asterExchangeInfoSymbol.symbol || '';
     const baseAsset = asterExchangeInfoSymbol.baseAsset || rawSymbol.replace('USDT', '');
     const quoteAsset = asterExchangeInfoSymbol.quoteAsset || 'USDT';
+    const pairSymbol = `${baseAsset}-${quoteAsset}`;
 
     let tickSize = 0;
     let stepSize = 0;
@@ -27,15 +29,25 @@ export class AsterMapper {
       }
     }
 
+    // Dynamic leverage lookup from leverageStore (MKT-05)
+    // If brackets are available, use their maximum initialLeverage; otherwise fallback to 50
+    const storedBrackets =
+      useLeverageStore.getState().bracketsBySymbol[pairSymbol] ||
+      useLeverageStore.getState().bracketsBySymbol[rawSymbol];
+    const maxLeverage =
+      storedBrackets && storedBrackets.length > 0
+        ? Math.max(...storedBrackets.map(b => b.initialLeverage))
+        : 50;
+
     return {
-      symbol: `${baseAsset}-${quoteAsset}`,
+      symbol: pairSymbol,
       baseAsset,
       quoteAsset,
       tickSize,
       stepSize,
       minOrderSize,
       minNotional,
-      maxLeverage: 50,
+      maxLeverage,
     };
   }
 

@@ -8,6 +8,7 @@ export interface ModalProps {
   title: string;
   children: React.ReactNode;
   width?: string;
+  isLocked?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -16,12 +17,13 @@ export const Modal: React.FC<ModalProps> = ({
   title,
   children,
   width = 'w-[420px]',
+  isLocked = false,
 }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !isLocked) onClose();
     };
     if (isOpen) {
       document.addEventListener('keydown', handleEscape);
@@ -31,32 +33,42 @@ export const Modal: React.FC<ModalProps> = ({
       document.removeEventListener('keydown', handleEscape);
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, isLocked]);
 
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div ref={overlayRef} className="absolute inset-0" onClick={onClose} />
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150">
       <div
-        className={`relative bg-secondary border border-color rounded-2xl shadow-2xl overflow-hidden flex flex-col ${width} max-h-[90vh] animate-in fade-in zoom-in-95 duration-200`}
+        ref={overlayRef}
+        className="absolute inset-0"
+        onClick={() => {
+          if (!isLocked) onClose();
+        }}
+      />
+      <div
+        className={`relative bg-secondary border border-color rounded-2xl shadow-2xl overflow-hidden flex flex-col ${width} max-h-[92vh] animate-in zoom-in-95 duration-200`}
       >
-        <div className="absolute top-0 left-0 overflow-hidden w-[90px] h-[90px] pointer-events-none z-10">
-          <div className="absolute top-[18px] -left-[26px] w-[130px] -rotate-45 bg-gradient-to-r from-yellow-400 to-amber-500 text-[9px] font-black text-yellow-950 py-0.5 text-center shadow-md uppercase tracking-[0.2em]">
-            BETA
-          </div>
-        </div>
-
-        <div className="relative z-20 flex justify-between items-center px-5 py-4 border-b border-color">
-          <h2 className="text-primary text-[15px] font-semibold pl-8">{title}</h2>
+        <div className="relative z-20 flex justify-between items-center px-5 py-4 border-b border-color bg-secondary">
+          <h2 className="text-primary text-[15px] font-semibold tracking-tight">{title}</h2>
           <button
-            onClick={onClose}
-            className="text-secondary hover:text-primary transition-colors p-1 rounded-md hover:bg-tertiary cursor-pointer"
+            onClick={() => {
+              if (!isLocked) onClose();
+            }}
+            disabled={isLocked}
+            className={`transition-colors p-1.5 rounded-lg ${
+              isLocked
+                ? 'opacity-30 cursor-not-allowed text-secondary'
+                : 'text-secondary hover:text-primary hover:bg-tertiary cursor-pointer'
+            }`}
+            title={isLocked ? 'Action in progress' : 'Close'}
           >
-            <X size={18} strokeWidth={2.5} />
+            <X size={18} strokeWidth={2} />
           </button>
         </div>
-        <div className="relative z-20 p-5 overflow-y-auto scrollbar-thin">{children}</div>
+        <div className="relative z-20 p-5 overflow-y-auto scrollbar-thin text-primary">
+          {children}
+        </div>
       </div>
     </div>,
     document.body

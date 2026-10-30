@@ -79,6 +79,41 @@ export function validateOrder(
     if (bnStopPrice.isNaN() || bnStopPrice.lte(0)) {
       return { isValid: false, error: 'Enter a valid trigger price', errorField: 'stopPrice' };
     }
+
+    // Pre-flight trigger price direction verification (TRD-07)
+    if (bnCurrentPrice.gt(0)) {
+      if (orderType === 'STOP' || orderType === 'STOP_MARKET') {
+        if (_side === 'BUY' && bnStopPrice.lt(bnCurrentPrice)) {
+          return {
+            isValid: false,
+            error: `Stop BUY trigger price must be ≥ current price (${bnCurrentPrice.toString()})`,
+            errorField: 'stopPrice',
+          };
+        }
+        if (_side === 'SELL' && bnStopPrice.gt(bnCurrentPrice)) {
+          return {
+            isValid: false,
+            error: `Stop SELL trigger price must be ≤ current price (${bnCurrentPrice.toString()})`,
+            errorField: 'stopPrice',
+          };
+        }
+      } else if (orderType === 'TAKE_PROFIT' || orderType === 'TAKE_PROFIT_MARKET') {
+        if (_side === 'BUY' && bnStopPrice.gt(bnCurrentPrice)) {
+          return {
+            isValid: false,
+            error: `Take Profit BUY trigger price must be ≤ current price (${bnCurrentPrice.toString()})`,
+            errorField: 'stopPrice',
+          };
+        }
+        if (_side === 'SELL' && bnStopPrice.lt(bnCurrentPrice)) {
+          return {
+            isValid: false,
+            error: `Take Profit SELL trigger price must be ≥ current price (${bnCurrentPrice.toString()})`,
+            errorField: 'stopPrice',
+          };
+        }
+      }
+    }
   }
 
   if (orderType === 'TRAILING_STOP_MARKET') {

@@ -5,6 +5,10 @@ import type { Signer } from 'ethers';
 
 import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useAccountStore } from '../../../core/stores/accountStore';
+import {
+  startDepositPolling,
+  useDepositTrackerStore,
+} from '../../../core/stores/depositTrackerStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
 import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
@@ -166,7 +170,7 @@ export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
       const bracketsMap: Record<string, any[]> = {};
       _leverageBracketResponse.forEach((lb: any) => {
         if (lb.symbol && Array.isArray(lb.brackets)) {
-          bracketsMap[lb.symbol] = lb.brackets.map((rb: any) => ({
+          const mapped = lb.brackets.map((rb: any) => ({
             bracket: rb.bracket,
             initialLeverage: rb.initialLeverage,
             notionalCap: rb.notionalCap,
@@ -174,6 +178,9 @@ export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
             maintMarginRatio: rb.maintMarginRatio,
             cum: rb.cum,
           }));
+          bracketsMap[lb.symbol] = mapped;
+          const hyphenated = lb.symbol.replace(/USDT$/, '-USDT');
+          bracketsMap[hyphenated] = mapped;
         }
       });
       useLeverageStore.getState().setAllBrackets(bracketsMap);
@@ -215,6 +222,10 @@ export function useAsterDataSync(signer: Signer | null, userAddr: string | null)
     }
 
     let isMounted = true;
+
+    if (useDepositTrackerStore.getState().hasActiveTransactions()) {
+      startDepositPolling(signer, userAddr);
+    }
 
     fetchAsterSnapshot(signer, userAddr)
       .then(() => {

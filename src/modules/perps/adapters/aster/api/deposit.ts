@@ -131,7 +131,16 @@ export async function depositAssetOnChain(
     !asset.contractAddress ||
     asset.contractAddress === '0x0000000000000000000000000000000000000000';
 
-  const decimals = asset.decimals || 18;
+  let decimals = asset.decimals || 18;
+  if (!isNative && asset.contractAddress) {
+    try {
+      const probeContract = new ethers.Contract(asset.contractAddress, ERC20_ABI, browserProvider);
+      decimals = Number(await probeContract.decimals());
+    } catch {
+      decimals = asset.decimals || 18;
+    }
+  }
+
   const parsedAmount = ethers.parseUnits(amount, decimals);
   const confirmations = REQUIRED_CONFIRMATIONS[chainId] || 2;
 

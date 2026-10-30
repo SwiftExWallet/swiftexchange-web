@@ -197,7 +197,7 @@ const ERROR_MAP: Record<number, { name: string; userMessage: string }> = {
 };
 
 export function parseAsterError(err: any): AsterErrorDetail {
-  let code = typeof err?.code === 'number' ? err.code : -1000;
+  let explicitCode: number | undefined = typeof err?.code === 'number' ? err.code : undefined;
   let rawMsg = err?.msg || err?.message || 'Unknown Aster API error';
 
   // Check if rawMsg contains a JSON string error like {"code": -2019, "msg": "..."}
@@ -207,7 +207,7 @@ export function parseAsterError(err: any): AsterErrorDetail {
       if (match) {
         const parsed = JSON.parse(match[0]);
         if (typeof parsed.code === 'number') {
-          code = parsed.code;
+          explicitCode = parsed.code;
           if (parsed.msg) rawMsg = parsed.msg;
         }
       }
@@ -223,12 +223,96 @@ export function parseAsterError(err: any): AsterErrorDetail {
       name: 'USER_REJECTED',
       message: rawMsg,
       userMessage: 'Transaction signature was rejected in your wallet.',
+      isRetryable: false,
     };
   }
 
+  // Text pattern matching (checked before defaulting to -1000 UNKNOWN)
+  if (/notional.*smaller than|min.*notional/i.test(rawMsg)) {
+    return {
+      code: -4164,
+      name: 'ORDER_NOTIONAL_TOO_SMALL',
+      message: rawMsg,
+      userMessage: 'Order value is below the minimum required amount ($5.00 USDT).',
+      isRetryable: false,
+    };
+  }
+
+  if (/margin.*insufficient|insufficient margin/i.test(rawMsg)) {
+    return {
+      code: -2019,
+      name: 'MARGIN_NOT_SUFFICIENT',
+      message: rawMsg,
+      userMessage:
+        'Insufficient margin balance. Please deposit funds or reduce order size/leverage.',
+      isRetryable: false,
+    };
+  }
+
+  if (/would immediately trigger/i.test(rawMsg)) {
+    return {
+      code: -2021,
+      name: 'ORDER_WOULD_IMMEDIATELY_TRIGGER',
+      message: rawMsg,
+      userMessage:
+        'Trigger price would immediately execute at current price. Please adjust stop price.',
+      isRetryable: false,
+    };
+  }
+
+  if (/reduceonly/i.test(rawMsg)) {
+    return {
+      code: -2022,
+      name: 'REDUCE_ONLY_REJECT',
+      message: rawMsg,
+      userMessage: 'Reduce-only order rejected because it would increase your position size.',
+      isRetryable: false,
+    };
+  }
+
+  if (/daily limit/i.test(rawMsg)) {
+    return {
+      code: explicitCode ?? -1000,
+      name: 'DAILY_LIMIT_EXCEEDED',
+      message: rawMsg,
+      userMessage: 'Withdrawal amount exceeds your 24-hour remaining limit.',
+      isRetryable: false,
+    };
+  }
+
+  if (/min.*amount/i.test(rawMsg)) {
+    return {
+      code: explicitCode ?? -1000,
+      name: 'BELOW_MIN_AMOUNT',
+      message: rawMsg,
+      userMessage: 'Amount is below the minimum allowed limit.',
+      isRetryable: false,
+    };
+  }
+
+  if (/insufficient/i.test(rawMsg)) {
+    return {
+      code: explicitCode ?? -2018,
+      name: 'INSUFFICIENT_FUNDS',
+      message: rawMsg,
+      userMessage: 'Insufficient account balance for this transaction.',
+      isRetryable: false,
+    };
+  }
+
+  const code = explicitCode !== undefined ? explicitCode : -1000;
+
   // Network / timeout codes are retryable; parameter, balance, and filter rejections are permanent (ERR-04)
   const isRetryable =
-    code === -1001 || code === -1003 || code === -1007 || code === 429 || code === 503;
+    code === -1000 ||
+    code === -1001 ||
+    code === -1003 ||
+    code === -1006 ||
+    code === -1007 ||
+    code === -1015 ||
+    code === -1016 ||
+    code === 429 ||
+    code === 503;
 
   const mapped = ERROR_MAP[code];
   if (mapped) {
@@ -241,76 +325,11 @@ export function parseAsterError(err: any): AsterErrorDetail {
     };
   }
 
-  // Text pattern matching
-  if (/notional.*smaller than|min.*notional/i.test(rawMsg)) {
-    return {
-      code: -4164,
-      name: 'ORDER_NOTIONAL_TOO_SMALL',
-      message: rawMsg,
-      userMessage: 'Order value is below the minimum required amount ($5.00 USDT).',
-    };
-  }
-
-  if (/margin.*insufficient|insufficient margin/i.test(rawMsg)) {
-    return {
-      code: -2019,
-      name: 'MARGIN_NOT_SUFFICIENT',
-      message: rawMsg,
-      userMessage:
-        'Insufficient margin balance. Please deposit funds or reduce order size/leverage.',
-    };
-  }
-
-  if (/would immediately trigger/i.test(rawMsg)) {
-    return {
-      code: -2021,
-      name: 'ORDER_WOULD_IMMEDIATELY_TRIGGER',
-      message: rawMsg,
-      userMessage:
-        'Trigger price would immediately execute at current price. Please adjust stop price.',
-    };
-  }
-
-  if (/reduceonly/i.test(rawMsg)) {
-    return {
-      code: -2022,
-      name: 'REDUCE_ONLY_REJECT',
-      message: rawMsg,
-      userMessage: 'Reduce-only order rejected because it would increase your position size.',
-    };
-  }
-
-  if (/daily limit/i.test(rawMsg)) {
-    return {
-      code,
-      name: 'DAILY_LIMIT_EXCEEDED',
-      message: rawMsg,
-      userMessage: 'Withdrawal amount exceeds your 24-hour remaining limit.',
-    };
-  }
-
-  if (/min.*amount/i.test(rawMsg)) {
-    return {
-      code,
-      name: 'BELOW_MIN_AMOUNT',
-      message: rawMsg,
-      userMessage: 'Amount is below the minimum allowed limit.',
-    };
-  }
-
-  if (/insufficient/i.test(rawMsg)) {
-    return {
-      code,
-      name: 'INSUFFICIENT_FUNDS',
-      message: rawMsg,
-      userMessage: 'Insufficient account balance for this transaction.',
-    };
-  }
-
   return {
     code,
     name: 'UNKNOWN',
     message: rawMsg,
     userMessage: rawMsg || 'An error occurred with Aster exchange.',
+    isRetryable,
   };
 }

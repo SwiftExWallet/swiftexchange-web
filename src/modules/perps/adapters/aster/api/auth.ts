@@ -52,6 +52,7 @@ export class AsterApiError extends Error {
   readonly code: number;
   readonly msg: string;
   readonly userMessage: string;
+  readonly isRetryable: boolean;
 
   constructor(raw: { code: number; msg: string }) {
     const detail = parseAsterError(raw);
@@ -59,6 +60,7 @@ export class AsterApiError extends Error {
     this.code = raw.code;
     this.msg = raw.msg;
     this.userMessage = detail.userMessage;
+    this.isRetryable = !!detail.isRetryable;
   }
 }
 

@@ -228,6 +228,74 @@ const depositAssetsCache: Record<string, { timestamp: number; data: DepositAsset
 const withdrawAssetsCache: Record<string, { timestamp: number; data: WithdrawAsset[] }> = {};
 const CACHE_TTL_MS = 180000;
 
+function getFallbackAssetsForChain(chainIds: string | number): DepositAsset[] {
+  const cid = Number(chainIds) || 56;
+  const isTestnet = cid === 97 || cid === 421614 || cid === 11155111;
+
+  let usdtContract = '0x55d398326f99059fF775485246999027B3197955';
+  let usdcContract = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d';
+  let usdtDecimals = 18;
+  let usdcDecimals = 18;
+  let netName = 'BSC';
+
+  if (cid === 42161) {
+    usdtContract = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
+    usdcContract = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+    usdtDecimals = 6;
+    usdcDecimals = 6;
+    netName = 'Arbitrum One';
+  } else if (cid === 1) {
+    usdtContract = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+    usdcContract = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+    usdtDecimals = 6;
+    usdcDecimals = 6;
+    netName = 'Ethereum';
+  } else if (cid === 97) {
+    usdtContract = '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd';
+    usdcContract = '0x64544969ed7EBf5f083679233325356EbE738930';
+    usdtDecimals = 18;
+    usdcDecimals = 18;
+    netName = 'BSC Testnet';
+  } else if (cid === 421614) {
+    usdtContract = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
+    usdcContract = '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d';
+    usdtDecimals = 6;
+    usdcDecimals = 6;
+    netName = 'Arb Sepolia';
+  } else if (cid === 11155111) {
+    usdtContract = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+    usdcContract = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
+    usdtDecimals = 6;
+    usdcDecimals = 6;
+    netName = 'Sepolia';
+  }
+
+  return [
+    {
+      name: 'USDT',
+      displayName: 'USDT',
+      contractAddress: usdtContract,
+      decimals: usdtDecimals,
+      network: isTestnet ? `${netName} Testnet` : netName,
+      chainId: cid,
+      isNative: false,
+      isProfit: true,
+      rank: 1,
+    },
+    {
+      name: 'USDC',
+      displayName: 'USDC',
+      contractAddress: usdcContract,
+      decimals: usdcDecimals,
+      network: isTestnet ? `${netName} Testnet` : netName,
+      chainId: cid,
+      isNative: false,
+      isProfit: false,
+      rank: 2,
+    },
+  ];
+}
+
 export async function getDepositAssets(
   chainIds: string = '56',
   accountType: 'spot' | 'perp' = 'perp',
@@ -254,43 +322,8 @@ export async function getDepositAssets(
     console.warn('[Deposit] Failed to fetch deposit assets from Aster bapi, using fallback:', err);
   }
 
-  // Fallback default assets for BSC Testnet (97) and BSC Mainnet (56)
-  const isTestnet = chainIds === '97' || chainIds === '421614' || chainIds === '11155111';
-  const fallback: DepositAsset[] = [
-    {
-      name: 'USDT',
-      displayName: 'USDT',
-      contractAddress:
-        chainIds === '97'
-          ? '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd'
-          : chainIds === '42161'
-            ? '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
-            : '0x55d398326f99059fF775485246999027B3197955',
-      decimals: 18,
-      network: isTestnet ? 'BSC Testnet' : 'BSC',
-      chainId: Number(chainIds) || 56,
-      isNative: false,
-      isProfit: true,
-      rank: 1,
-    },
-    {
-      name: 'USDC',
-      displayName: 'USDC',
-      contractAddress:
-        chainIds === '97'
-          ? '0x64544969ed7EBf5f083679233325356EbE738930'
-          : chainIds === '42161'
-            ? '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
-            : '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
-      decimals: 18,
-      network: isTestnet ? 'BSC Testnet' : 'BSC',
-      chainId: Number(chainIds) || 56,
-      isNative: false,
-      isProfit: false,
-      rank: 2,
-    },
-  ];
-  return fallback;
+  // Fallback assets tailored with accurate decimals for the requested chain
+  return getFallbackAssetsForChain(chainIds);
 }
 
 export async function getWithdrawAssets(
@@ -304,18 +337,26 @@ export async function getWithdrawAssets(
     return cached.data;
   }
 
-  const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
-  const res = await fetch(`${getAsterBapiUrl()}/aster/withdraw/assets?${qs}`);
-  const data = await res.json();
+  try {
+    const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
+    const res = await fetch(`${getAsterBapiUrl()}/aster/withdraw/assets?${qs}`);
+    const data = await res.json();
 
-  const isSuccess = data.success === true || data.code === '000000';
-  if (!isSuccess || !Array.isArray(data.data)) {
-    throw new Error(data.message || data.messageDetail || 'Failed to fetch withdraw assets');
+    const isSuccess = data.success === true || data.code === '000000';
+    if (isSuccess && Array.isArray(data.data) && data.data.length > 0) {
+      const result: WithdrawAsset[] = data.data;
+      withdrawAssetsCache[cacheKey] = { timestamp: Date.now(), data: result };
+      return result;
+    }
+  } catch (err) {
+    console.warn(
+      '[Withdraw] Failed to fetch withdraw assets from Aster bapi, using fallback:',
+      err
+    );
   }
 
-  const result: WithdrawAsset[] = data.data;
-  withdrawAssetsCache[cacheKey] = { timestamp: Date.now(), data: result };
-  return result;
+  //fallback so Withdraw tab never remains blank
+  return getFallbackAssetsForChain(chainIds);
 }
 
 export async function getUserWithdrawInfo(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { AsterMapper } from '../mapper';
 
 describe('AsterMapper', () => {
@@ -45,6 +46,37 @@ describe('AsterMapper', () => {
       expect(market.minOrderSize).toBe(0);
       expect(market.minNotional).toBe(0);
       expect(market.maxLeverage).toBe(50);
+    });
+
+    it('dynamically reads maxLeverage from leverageStore when brackets are populated (MKT-05)', () => {
+      useLeverageStore.getState().setBrackets('SOL-USDT', [
+        {
+          bracket: 1,
+          initialLeverage: 25,
+          notionalCap: 10000,
+          notionalFloor: 0,
+          maintMarginRatio: 0.02,
+          cum: 0,
+        },
+        {
+          bracket: 2,
+          initialLeverage: 10,
+          notionalCap: 50000,
+          notionalFloor: 10000,
+          maintMarginRatio: 0.05,
+          cum: 300,
+        },
+      ]);
+
+      const solSymbol = {
+        symbol: 'SOLUSDT',
+        baseAsset: 'SOL',
+        quoteAsset: 'USDT',
+      };
+
+      const market = AsterMapper.mapMarket(solSymbol);
+      expect(market.symbol).toBe('SOL-USDT');
+      expect(market.maxLeverage).toBe(25);
     });
   });
 

@@ -1,16 +1,12 @@
 import {
   ArrowDownToLine,
-  ArrowRightLeft,
   ArrowUpFromLine,
   Check,
   CheckCircle2,
   ChevronDown,
-  Copy,
   ExternalLink,
-  History,
   Info,
   Loader2,
-  QrCode,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -19,8 +15,8 @@ import {
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import BigNumber from 'bignumber.js';
 import { ethers } from 'ethers';
-import QRCode from 'qrcode';
 
 import { useNotificationStore } from '../../../../store/notificationStore';
 import { switchOrAddChain } from '../../../evm/utils/evmChainUtils';
@@ -39,7 +35,10 @@ import {
   submitWithdraw,
 } from '../../adapters/aster/api/account';
 import {
+  DEFAULT_BROKER_ID,
   type DepositProgress,
+  MAX_DEPOSIT_GAS_LIMIT,
+  REQUIRED_CONFIRMATIONS,
   depositAssetOnChain,
   fetchOnChainWalletBalance,
 } from '../../adapters/aster/api/deposit';
@@ -67,28 +66,6 @@ interface AccountModalProps {
   initialTab?: 'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet';
 }
 
-const AccountToggle: React.FC<{
-  value: 'perp' | 'spot';
-  onChange: (v: 'perp' | 'spot') => void;
-}> = ({ value, onChange }) => (
-  <div className="flex bg-tertiary border border-color rounded-lg p-0.5 h-9">
-    {(['perp', 'spot'] as const).map(opt => (
-      <button
-        key={opt}
-        type="button"
-        onClick={() => onChange(opt)}
-        className={`flex-1 text-[12px] font-medium rounded-md transition-all cursor-pointer ${
-          value === opt
-            ? 'bg-secondary text-primary shadow-sm border border-color'
-            : 'text-secondary hover:text-primary'
-        }`}
-      >
-        {opt === 'perp' ? 'Perpetual' : 'Spot'}
-      </button>
-    ))}
-  </div>
-);
-
 const ChainSelector: React.FC<{
   value: number;
   onChange: (v: number) => void;
@@ -96,35 +73,65 @@ const ChainSelector: React.FC<{
   const currentNetwork = useExchangeManager(state => state.currentNetwork);
   const supportedChains = useMemo(() => {
     if (currentNetwork === 'testnet') {
-      return [
-        EVM_CHAINS[97],
-        EVM_CHAINS[421614],
-        EVM_CHAINS[11155111],
-        EVM_CHAINS[56],
-        EVM_CHAINS[42161],
-        EVM_CHAINS[1],
-      ].filter(Boolean);
+      return [EVM_CHAINS[97], EVM_CHAINS[421614], EVM_CHAINS[11155111]].filter(Boolean);
     }
     return [EVM_CHAINS[56], EVM_CHAINS[42161], EVM_CHAINS[1]].filter(Boolean);
   }, [currentNetwork]);
 
+  useEffect(() => {
+    if (supportedChains.length > 0 && !supportedChains.some(c => c.id === value)) {
+      onChange(supportedChains[0].id);
+    }
+  }, [supportedChains, value, onChange]);
+
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    if (open) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const selectedChain = supportedChains.find(c => c.id === value) || supportedChains[0];
+
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={e => onChange(Number(e.target.value))}
-        className="w-full appearance-none bg-tertiary border border-color rounded-lg pl-3 pr-8 py-2 text-primary text-[12px] font-medium outline-none cursor-pointer h-9 hover:border-brand/40 transition-colors"
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between bg-tertiary border border-color rounded-xl px-3.5 py-2.5 text-primary text-[13px] font-medium outline-none cursor-pointer h-11 hover:border-brand/40 transition-colors"
       >
-        {supportedChains.map(c => (
-          <option key={c.id} value={c.id}>
-            {c.name} ({c.chainName}) {c.isTestnet ? '• Testnet' : ''}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        size={13}
-        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary pointer-events-none"
-      />
+        <span className="font-medium text-primary text-[13px] truncate">
+          {selectedChain?.name || 'Select Network'}
+        </span>
+        <ChevronDown size={14} className="text-secondary shrink-0 ml-1.5" />
+      </button>
+
+      {open && supportedChains.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 top-12 bg-secondary border border-color rounded-xl shadow-2xl py-1 max-h-52 overflow-y-auto">
+          {supportedChains.map(c => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => {
+                onChange(c.id);
+                setOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] text-left hover:bg-hover transition-colors cursor-pointer ${
+                c.id === value ? 'bg-brand/10 text-brand font-semibold' : 'text-primary'
+              }`}
+            >
+              <span className="truncate">{c.name}</span>
+              {c.id === value && <Check size={14} className="text-brand shrink-0 ml-2" />}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -147,7 +154,9 @@ const AssetOptionRow: React.FC<{ asset: DepositAsset }> = ({ asset }) => {
           {asset.name.slice(0, 1)}
         </div>
       )}
-      <span className="font-semibold">{asset.displayName || asset.name}</span>
+      <span className="font-semibold text-[13px] text-primary">
+        {asset.displayName || asset.name}
+      </span>
     </div>
   );
 };
@@ -178,18 +187,18 @@ const CustomAssetSelector: React.FC<{
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between bg-tertiary border border-color rounded-lg px-3 py-2 text-primary text-[12px] font-medium outline-none cursor-pointer h-9 hover:border-brand/40 transition-colors"
+        className="w-full flex items-center justify-between bg-tertiary border border-color rounded-xl px-3.5 py-2.5 text-primary text-[13px] font-medium outline-none cursor-pointer h-11 hover:border-brand/40 transition-colors"
       >
         {selectedAsset ? (
           <AssetOptionRow asset={selectedAsset} />
         ) : (
           <span className="text-secondary">{placeholder}</span>
         )}
-        <ChevronDown size={13} className="text-secondary shrink-0 ml-2" />
+        <ChevronDown size={14} className="text-secondary shrink-0 ml-1.5" />
       </button>
 
       {open && assets.length > 0 && (
-        <div className="absolute z-50 left-0 right-0 top-10 bg-secondary border border-color rounded-lg shadow-xl py-1 max-h-48 overflow-y-auto">
+        <div className="absolute z-50 left-0 right-0 top-12 bg-secondary border border-color rounded-xl shadow-2xl py-1 max-h-52 overflow-y-auto">
           {assets.map(a => (
             <button
               key={a.name}
@@ -198,12 +207,12 @@ const CustomAssetSelector: React.FC<{
                 onChange(a.name);
                 setOpen(false);
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 text-[12px] text-left hover:bg-hover transition-colors cursor-pointer ${
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] text-left hover:bg-hover transition-colors cursor-pointer ${
                 a.name === value ? 'bg-brand/10 text-brand font-semibold' : 'text-primary'
               }`}
             >
               <AssetOptionRow asset={a} />
-              {a.name === value && <Check size={12} className="text-brand" />}
+              {a.name === value && <Check size={14} className="text-brand shrink-0 ml-2" />}
             </button>
           ))}
         </div>
@@ -218,7 +227,7 @@ const AmountInput: React.FC<{
   placeholder?: string;
   suffix?: React.ReactNode;
 }> = ({ value, onChange, placeholder = '0.00', suffix }) => (
-  <div className="relative flex items-center bg-tertiary border border-color rounded-lg h-10 px-3 focus-within:border-brand transition-colors">
+  <div className="relative flex items-center bg-tertiary border border-color rounded-xl h-12 px-3.5 focus-within:border-brand transition-colors">
     <input
       type="text"
       inputMode="decimal"
@@ -228,7 +237,7 @@ const AmountInput: React.FC<{
         const v = e.target.value;
         if (v === '' || isValidDecimalInput(v)) onChange(v);
       }}
-      className="flex-1 bg-transparent text-primary text-[13px] font-mono outline-none placeholder:text-muted"
+      className="flex-1 bg-transparent text-primary text-sm font-mono outline-none placeholder:text-muted"
     />
     {suffix && <div className="shrink-0 ml-2">{suffix}</div>}
   </div>
@@ -238,13 +247,13 @@ const PctButtons: React.FC<{ total: number; onSelect: (val: string) => void }> =
   total,
   onSelect,
 }) => (
-  <div className="flex gap-1.5">
+  <div className="flex gap-2">
     {[25, 50, 75, 100].map(pct => (
       <button
         key={pct}
         type="button"
         onClick={() => onSelect(pctOf(total, pct))}
-        className="flex-1 py-1 bg-tertiary hover:bg-hover border border-color rounded text-[10px] text-secondary hover:text-primary transition-colors cursor-pointer font-medium"
+        className="flex-1 py-1.5 bg-tertiary hover:bg-hover border border-color rounded-lg text-xs text-secondary hover:text-primary transition-colors cursor-pointer font-medium"
       >
         {pct}%
       </button>
@@ -274,10 +283,15 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const pendingDeposits = useDepositTrackerStore(s => s.pendingDeposits);
   const addDepositRecord = useDepositTrackerStore(s => s.addDeposit);
   const removeDepositRecord = useDepositTrackerStore(s => s.removeDeposit);
+  const activeTx = useDepositTrackerStore(s => s.activeTransaction);
+  const setActiveTx = useDepositTrackerStore(s => s.setActiveTransaction);
+  const updateActiveTx = useDepositTrackerStore(s => s.updateActiveTransaction);
+  const clearActiveTx = useDepositTrackerStore(s => s.clearActiveTransaction);
+  const addWithdrawalRecord = useDepositTrackerStore(s => s.addWithdrawal);
 
-  // Resume targeted deposit polling if user has active uncredited deposits
+  // Resume targeted deposit & withdrawal polling if user has active transactions
   useEffect(() => {
-    if (asterSigner && userAddr && useDepositTrackerStore.getState().hasActiveDeposits()) {
+    if (asterSigner && userAddr && useDepositTrackerStore.getState().hasActiveTransactions()) {
       startDepositPolling(asterSigner, userAddr);
     }
   }, [asterSigner, userAddr]);
@@ -289,25 +303,27 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const evmAddress = connectedWallets.evm?.address;
   const openWalletModal = useWalletStore(state => state.openModal);
 
-  const [activeTab, setActiveTab] = useState<
-    'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet'
-  >(
-    currentNetwork === 'testnet'
-      ? 'faucet'
-      : initialTab === 'faucet'
-        ? 'deposit'
-        : initialTab || 'deposit'
+  const tabs = useMemo(() => {
+    const list = [
+      { key: 'deposit', label: 'Deposit' },
+      { key: 'withdraw', label: 'Withdraw' },
+      { key: 'history', label: 'History' },
+    ];
+    if (currentNetwork === 'testnet') {
+      list.push({ key: 'faucet', label: 'Faucet' });
+    }
+    return list;
+  }, [currentNetwork]);
+
+  const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history' | 'faucet'>(
+    initialTab === 'transfer' ? 'deposit' : initialTab || 'deposit'
   );
 
   useEffect(() => {
-    if (currentNetwork === 'testnet') {
-      setActiveTab('faucet');
-    } else {
-      setActiveTab(initialTab === 'faucet' ? 'deposit' : initialTab || 'deposit');
-    }
-  }, [initialTab, currentNetwork]);
+    setActiveTab(initialTab === 'transfer' ? 'deposit' : initialTab || 'deposit');
+  }, [initialTab]);
 
-  const [accountType, setAccountType] = useState<'perp' | 'spot'>('perp');
+  const accountType: 'perp' | 'spot' = 'perp';
   const [selectedChainId, setSelectedChainId] = useState<number>(
     currentExchange === 'hyperliquid'
       ? currentNetwork === 'testnet'
@@ -319,15 +335,44 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   );
 
   // Deposit State
-  const [depositMethod, setDepositMethod] = useState<'wallet' | 'qrcode'>('wallet');
   const [depositAssets, setDepositAssets] = useState<DepositAsset[]>([]);
   const [selectedDepositAsset, setSelectedDepositAsset] = useState<DepositAsset | null>(null);
   const [depositAmount, setDepositAmount] = useState('');
   const [walletTokenBalance, setWalletTokenBalance] = useState('0');
   const [isDepositing, setIsDepositing] = useState(false);
-  const [depositProgress, setDepositProgress] = useState<DepositProgress | null>(null);
-  const [copiedAddr, setCopiedAddr] = useState(false);
-  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [showDepositConfirm, setShowDepositConfirm] = useState(false);
+
+  // Derive progress from persistent store
+  const depositProgress: DepositProgress | null = useMemo(() => {
+    if (!activeTx || activeTx.type !== 'DEPOSIT') return null;
+    return {
+      step: activeTx.step,
+      message: activeTx.message || '',
+      txHash: activeTx.txHash,
+    };
+  }, [activeTx]);
+
+  const [depositElapsedSec, setDepositElapsedSec] = useState(0);
+
+  // Track deposit progress timer based on persisted transaction timestamp
+  useEffect(() => {
+    let timer: any;
+    if (
+      activeTx &&
+      activeTx.type === 'DEPOSIT' &&
+      activeTx.step !== 'SUCCESS' &&
+      activeTx.step !== 'FAILED'
+    ) {
+      const updateElapsed = () => {
+        setDepositElapsedSec(Math.max(0, Math.floor((Date.now() - activeTx.timestamp) / 1000)));
+      };
+      updateElapsed();
+      timer = setInterval(updateElapsed, 1000);
+    } else {
+      setDepositElapsedSec(0);
+    }
+    return () => clearInterval(timer);
+  }, [activeTx]);
 
   useEffect(() => {
     if (currentExchange === 'hyperliquid') {
@@ -350,27 +395,34 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
 
-  // Transfer State
-  const [transferDirection, setTransferDirection] = useState<'SPOT_TO_PERP' | 'PERP_TO_SPOT'>(
-    'SPOT_TO_PERP'
-  );
-  const [transferAsset, setTransferAsset] = useState('USDT');
-  const [transferAmount, setTransferAmount] = useState('');
-  const [isTransferring, setIsTransferring] = useState(false);
+  // Derive withdraw progress from persistent store
+  const withdrawProgress: DepositProgress | null = useMemo(() => {
+    if (!activeTx || activeTx.type !== 'WITHDRAW') return null;
+    return {
+      step: activeTx.step,
+      message: activeTx.message || '',
+    };
+  }, [activeTx]);
 
   // History State
   const [historyRecords, setHistoryRecords] = useState<DepositWithdrawRecord[]>([]);
   const [historyFilter, setHistoryFilter] = useState<'ALL' | 'DEPOSIT' | 'WITHDRAW'>('ALL');
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  // Reset when modal opens/closes
+  // Sync when modal opens/closes without wiping background transaction
   useEffect(() => {
     if (!isOpen) {
+      setShowDepositConfirm(false);
       setShowWithdrawConfirm(false);
-      setDepositProgress(null);
       return;
     }
-    setActiveTab(initialTab);
+    // If active transaction exists, open directly to corresponding tab!
+    const currentActive = useDepositTrackerStore.getState().activeTransaction;
+    if (currentActive) {
+      setActiveTab(currentActive.type === 'DEPOSIT' ? 'deposit' : 'withdraw');
+    } else {
+      setActiveTab(initialTab === 'transfer' ? 'deposit' : initialTab || 'deposit');
+    }
     if (userAddr && !destinationAddress) setDestinationAddress(userAddr);
   }, [isOpen, initialTab, userAddr]);
 
@@ -473,23 +525,6 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     }
   }, [selectedChainId]);
 
-  // QR Code Rendering
-  useEffect(() => {
-    if (
-      activeTab === 'deposit' &&
-      depositMethod === 'qrcode' &&
-      qrCanvasRef.current &&
-      depositBridgeAddress &&
-      currentExchange !== 'hyperliquid'
-    ) {
-      QRCode.toCanvas(qrCanvasRef.current, depositBridgeAddress, {
-        width: 140,
-        margin: 1,
-        color: { dark: '#FFFFFF', light: '#161922' },
-      }).catch(console.error);
-    }
-  }, [activeTab, depositMethod, depositBridgeAddress, currentExchange]);
-
   // History Fetcher
   const fetchHistory = useCallback(async () => {
     if (!asterSigner || !userAddr) return;
@@ -514,18 +549,25 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
   // Balance & Withdrawable limits
   const currentBalance = useMemo(() => {
-    const sym = activeTab === 'transfer' ? transferAsset : selectedWithdrawAsset?.name || 'USDT';
-    return parseFloat(balances[sym]?.available || '0');
-  }, [balances, selectedWithdrawAsset, activeTab, transferAsset]);
+    const sym = selectedWithdrawAsset?.name || 'USDT';
+    return balances[sym]?.available || '0';
+  }, [balances, selectedWithdrawAsset]);
 
   const maxWithdrawable = useMemo(() => {
-    const fromChain = chainWithdrawDetails.maxAmount;
-    return fromChain > 0 ? Math.min(currentBalance, fromChain) : currentBalance;
+    const fromChain = new BigNumber(chainWithdrawDetails.maxAmount || 0);
+    const bal = new BigNumber(currentBalance || 0);
+    if (fromChain.isGreaterThan(0)) {
+      return BigNumber.min(bal, fromChain).toString();
+    }
+    return bal.toString();
   }, [currentBalance, chainWithdrawDetails.maxAmount]);
 
   const netReceiveAmount = useMemo(() => {
-    const gross = parseFloat(withdrawAmount) || 0;
-    return Math.max(0, gross - (chainWithdrawDetails.fee || 0));
+    const gross = new BigNumber(withdrawAmount || 0);
+    const fee = new BigNumber(chainWithdrawDetails.fee || 0);
+    if (gross.isNaN() || gross.isLessThanOrEqualTo(0)) return '0';
+    const net = gross.minus(fee);
+    return net.isGreaterThan(0) ? net.toString() : '0';
   }, [withdrawAmount, chainWithdrawDetails.fee]);
 
   // Network Switch Handler
@@ -539,15 +581,29 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     }
   };
 
-  const handleCopyAddress = (addr: string) => {
-    navigator.clipboard.writeText(addr);
-    setCopiedAddr(true);
-    useNotificationStore.getState().showToast({
-      type: 'DYDX',
-      title: 'Copied',
-      message: 'Deposit address copied to clipboard',
-    });
-    setTimeout(() => setCopiedAddr(false), 2000);
+  // Open Deposit Confirmation Modal
+  const handleOpenDepositConfirm = () => {
+    if (!selectedDepositAsset || !isPositiveNumber(depositAmount)) {
+      useNotificationStore.getState().showToast({
+        type: 'DYDX',
+        title: 'Invalid Amount',
+        message: 'Please enter a valid deposit amount.',
+      });
+      return;
+    }
+
+    const num = new BigNumber(depositAmount);
+    const bal = new BigNumber(walletTokenBalance || '0');
+    if (num.isGreaterThan(bal)) {
+      useNotificationStore.getState().showToast({
+        type: 'DYDX',
+        title: 'Insufficient Wallet Balance',
+        message: `Your balance is ${formatDisplayAmount(walletTokenBalance)} ${selectedDepositAsset.name}`,
+      });
+      return;
+    }
+
+    setShowDepositConfirm(true);
   };
 
   // Direct On-Chain Deposit Handler
@@ -571,26 +627,39 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       return;
     }
 
+    setShowDepositConfirm(false);
     setIsDepositing(true);
-    setDepositProgress({
-      step: 'SWITCHING_NETWORK',
-      message: 'Initiating deposit transaction...',
+    setActiveTx({
+      id: `dep_${Date.now()}`,
+      type: 'DEPOSIT',
+      step: 'AWAITING_SIGNATURE',
+      asset: selectedDepositAsset.name,
+      amount: depositAmount,
+      chainId: selectedChainId,
+      chainName: EVM_CHAINS[selectedChainId]?.name || 'EVM',
+      message: 'Initiating deposit transaction in your wallet...',
+      timestamp: Date.now(),
     });
 
     try {
       if (currentExchange === 'hyperliquid') {
         // HYPERLIQUID NATIVE DEPOSIT FLOW
         if (selectedChainId !== 42161) {
-          setDepositProgress({
-            step: 'SWITCHING_NETWORK',
-            message: 'Please switch to Arbitrum One...',
+          updateActiveTx({
+            message: 'Please switch to Arbitrum One in your wallet...',
           });
           await switchOrAddChain(provider, 42161);
         }
 
-        const res = await depositToHyperliquid(provider, depositAmount, progress =>
-          setDepositProgress(progress as any)
-        );
+        const res = await depositToHyperliquid(provider, depositAmount, progress => {
+          if (progress.step === 'DEPOSITING') {
+            updateActiveTx({
+              step: 'CONFIRMING',
+              txHash: progress.txHash,
+              message: progress.message || 'Waiting for block confirmation on Arbitrum...',
+            });
+          }
+        });
 
         useNotificationStore.getState().showToast({
           type: 'DYDX',
@@ -598,7 +667,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           message: `Deposited ${res.amount} USDC to Hyperliquid Bridge.`,
         });
 
-        setDepositProgress({
+        updateActiveTx({
           step: 'SUCCESS',
           message: `Transaction confirmed! It will be credited by Hyperliquid shortly.`,
           txHash: res.txHash,
@@ -610,7 +679,15 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           selectedDepositAsset,
           depositAmount,
           selectedChainId,
-          progress => setDepositProgress(progress)
+          progress => {
+            if (progress.step === 'CONFIRMING') {
+              updateActiveTx({
+                step: 'CONFIRMING',
+                txHash: progress.txHash,
+                message: progress.message || 'Waiting for on-chain block confirmation...',
+              });
+            }
+          }
         );
 
         addDepositRecord({
@@ -633,7 +710,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           message: `Deposited ${res.amount} ${res.asset} to Aster. Tracking in progress.`,
         });
 
-        setDepositProgress({
+        updateActiveTx({
           step: 'SUCCESS',
           message: `Transaction confirmed on-chain! Aster is now indexing your ${res.amount} ${res.asset} deposit.`,
           txHash: res.txHash,
@@ -644,7 +721,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       refreshWalletBalance();
     } catch (err: any) {
       const info = parseAsterError(err);
-      setDepositProgress({
+      updateActiveTx({
         step: 'FAILED',
         message: info.userMessage || err?.message || 'Deposit transaction rejected.',
       });
@@ -676,8 +753,9 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       });
       return;
     }
-    const num = parseFloat(withdrawAmount);
-    if (maxWithdrawable > 0 && num > maxWithdrawable) {
+    const num = new BigNumber(withdrawAmount);
+    const max = new BigNumber(maxWithdrawable);
+    if (max.isGreaterThan(0) && num.isGreaterThan(max)) {
       useNotificationStore.getState().showToast({
         type: 'DYDX',
         title: 'Exceeds Maximum',
@@ -685,12 +763,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       });
       return;
     }
-    const remaining = withdrawInfo?.userRemainingDailyLimit ?? 999999999;
-    if (num > remaining) {
+    const remaining = new BigNumber(withdrawInfo?.userRemainingDailyLimit ?? '999999999');
+    if (num.isGreaterThan(remaining)) {
       useNotificationStore.getState().showToast({
         type: 'DYDX',
         title: 'Daily Limit Exceeded',
-        message: `Remaining: ${Number(remaining).toLocaleString()} USDT`,
+        message: `Remaining: ${remaining.toFormat()} USDT`,
       });
       return;
     }
@@ -699,7 +777,22 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
   const handleExecuteWithdraw = async () => {
     if (!selectedWithdrawAsset) return;
+    setShowWithdrawConfirm(false);
     setIsWithdrawing(true);
+    const withId = `with_${Date.now()}`;
+    setActiveTx({
+      id: withId,
+      type: 'WITHDRAW',
+      step: 'AWAITING_SIGNATURE',
+      asset: selectedWithdrawAsset.name,
+      amount: withdrawAmount,
+      chainId: selectedChainId,
+      chainName: EVM_CHAINS[selectedChainId]?.name || 'EVM',
+      destinationAddress,
+      message: 'Please sign the withdrawal authorization in your wallet...',
+      timestamp: Date.now(),
+    });
+
     try {
       const provider = walletService.getProvider('evm');
       if (!provider) throw new Error('EVM wallet not connected');
@@ -712,8 +805,13 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           userWalletSigner,
           destinationAddress,
           withdrawAmount,
-          false // Mainnet by default, could be derived from config
+          currentNetwork === 'testnet'
         );
+
+        updateActiveTx({
+          step: 'SUCCESS',
+          message: `${withdrawAmount} USDC withdrawal submitted to Hyperliquid bridge.`,
+        });
 
         useNotificationStore.getState().showToast({
           type: 'DYDX',
@@ -739,6 +837,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           currentNetwork === 'testnet' ? 'Testnet' : 'Mainnet'
         );
 
+        updateActiveTx({
+          step: 'CONFIRMING',
+          message: 'Aster risk engine validating withdrawal request...',
+        });
+
         await submitWithdraw(asterSigner, userAddr, {
           chainId: selectedChainId,
           asset: selectedWithdrawAsset.name,
@@ -750,6 +853,24 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           accountType,
         });
 
+        addWithdrawalRecord({
+          asset: selectedWithdrawAsset.name,
+          amount: withdrawAmount,
+          chainId: selectedChainId,
+          chainName: EVM_CHAINS[selectedChainId]?.name || 'EVM',
+          destination: destinationAddress,
+          status: 'PROCESSING',
+        });
+
+        updateActiveTx({
+          step: 'SUCCESS',
+          message: `Withdrawal of ${withdrawAmount} ${selectedWithdrawAsset.name} authorized! Aster settlement engine is dispatching funds to your destination wallet.`,
+        });
+
+        if (asterSigner && userAddr) {
+          startDepositPolling(asterSigner, userAddr);
+        }
+
         useNotificationStore.getState().showToast({
           type: 'DYDX',
           title: 'Withdrawal Submitted',
@@ -757,11 +878,13 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         });
       }
 
-      setShowWithdrawConfirm(false);
       setWithdrawAmount('');
-      onClose();
     } catch (err: any) {
       const info = parseAsterError(err);
+      updateActiveTx({
+        step: 'FAILED',
+        message: info.userMessage || err?.message || 'Withdrawal rejected.',
+      });
       useNotificationStore.getState().showToast({
         type: 'DYDX',
         title: 'Withdrawal Failed',
@@ -772,79 +895,47 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     }
   };
 
-  const handleExecuteTransfer = async () => {
-    if (!isPositiveNumber(transferAmount)) return;
-    setIsTransferring(true);
-    try {
-      await new Promise(r => setTimeout(r, 600));
-      useNotificationStore.getState().showToast({
-        type: 'DYDX',
-        title: 'Transfer Successful',
-        message: `${transferAmount} ${transferAsset} → ${
-          transferDirection === 'SPOT_TO_PERP' ? 'Perpetual' : 'Spot'
-        } Account`,
-      });
-      setTransferAmount('');
-      onClose();
-    } catch (err: any) {
-      useNotificationStore.getState().showToast({
-        type: 'DYDX',
-        title: 'Transfer Failed',
-        message: err?.message || 'Internal transfer failed.',
-      });
-    } finally {
-      setIsTransferring(false);
-    }
-  };
-
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={currentNetwork === 'testnet' ? 'Testnet Faucet' : 'Deposit & Withdraw'}
-      width="w-[450px]"
+      isLocked={false}
+      title={activeTab === 'faucet' ? 'Testnet Faucet' : 'Collateral & Account'}
+      width="w-[460px]"
     >
       <div className="space-y-4">
-        {/* ── Top Tabs (Mainnet Only) ─────────────────────────────────────────────── */}
-        {currentNetwork !== 'testnet' && (
-          <div className="flex bg-tertiary rounded-lg p-0.5 border border-color">
-            {[
-              { key: 'deposit', label: 'Deposit', icon: ArrowDownToLine },
-              { key: 'withdraw', label: 'Withdraw', icon: ArrowUpFromLine },
-              { key: 'transfer', label: 'Transfer', icon: ArrowRightLeft },
-              { key: 'history', label: 'History', icon: History },
-            ].map(({ key, label, icon: Icon }) => (
-              <button
-                key={key}
-                onClick={() => {
-                  setActiveTab(key as any);
-                  setShowWithdrawConfirm(false);
-                  setDepositProgress(null);
-                }}
-                className={`flex-1 py-1.5 text-[12px] font-medium rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                  activeTab === key
-                    ? 'bg-secondary text-primary shadow-sm border border-color font-semibold'
-                    : 'text-secondary hover:text-primary'
-                }`}
-              >
-                <Icon size={13} />
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex bg-tertiary rounded-xl p-1 border border-color">
+          {tabs.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                if (isDepositing || isWithdrawing) return;
+                setActiveTab(key as any);
+                setShowDepositConfirm(false);
+                setShowWithdrawConfirm(false);
+              }}
+              className={`flex-1 py-2 text-[13px] font-medium rounded-lg text-center transition-all cursor-pointer ${
+                activeTab === key
+                  ? 'bg-secondary text-primary shadow-sm border border-color font-semibold'
+                  : 'text-secondary hover:text-primary'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-        {/* ---------- FAUCET TAB (TESTNET ONLY) ---------- */}
-        {currentNetwork === 'testnet' && (
+        {activeTab === 'faucet' && (
           <div className="space-y-4">
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-amber-400 font-semibold text-[13px]">
+                <div className="flex items-center gap-2 text-amber-500 dark:text-amber-400 font-semibold text-[13px]">
                   <Sparkles size={16} />
                   <span>Testnet Faucet</span>
                 </div>
                 {isEvmConnected ? (
-                  <span className="text-[10px] font-mono bg-success/15 text-success border border-success/30 px-2 py-0.5 rounded-full font-medium">
+                  <span className="text-[10px] font-mono bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium">
                     {evmAddress?.slice(0, 6)}...{evmAddress?.slice(-4)}
                   </span>
                 ) : (
@@ -855,7 +946,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               </div>
               <p className="text-[12px] text-secondary leading-relaxed">
                 Get free testnet funds to trade risk-free on{' '}
-                <strong className="text-primary">
+                <strong className="text-primary font-semibold">
                   {currentExchange === 'hyperliquid' ? 'Hyperliquid Testnet' : 'Aster V3 Testnet'}
                 </strong>
                 . Claim tokens below using your connected EVM wallet:
@@ -871,7 +962,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   className="flex items-center justify-between p-3 bg-tertiary hover:bg-hover border border-color hover:border-brand/40 rounded-xl transition-all group"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-brand/15 flex items-center justify-center text-lg">
+                    <div className="w-9 h-9 rounded-lg bg-blue-500/15 flex items-center justify-center text-lg">
                       💧
                     </div>
                     <div>
@@ -948,7 +1039,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   className="flex items-center justify-between p-3 bg-tertiary hover:bg-hover border border-color hover:border-brand/40 rounded-xl transition-all group"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-brand/15 flex items-center justify-center text-lg">
+                    <div className="w-9 h-9 rounded-lg bg-blue-500/15 flex items-center justify-center text-lg">
                       ⛽
                     </div>
                     <div>
@@ -968,7 +1059,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               )}
             </div>
 
-            <div className="bg-secondary/60 border border-color/60 rounded-xl p-3 text-[11px] text-secondary leading-relaxed space-y-1">
+            <div className="bg-tertiary/60 border border-color rounded-xl p-3 text-[11px] text-secondary leading-relaxed space-y-1">
               <div className="flex items-center gap-1.5 font-medium text-primary">
                 <Info size={13} className="text-secondary shrink-0" />
                 <span>About Testnet Faucets</span>
@@ -981,8 +1072,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           </div>
         )}
 
-        {/* ---------- DEPOSIT TAB (MAINNET ONLY) ---------- */}
-        {activeTab === 'deposit' && currentNetwork !== 'testnet' && (
+        {activeTab === 'deposit' && (
           <div className="space-y-3.5">
             {pendingDeposits.length > 0 && (
               <div className="space-y-2">
@@ -993,9 +1083,9 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   return (
                     <div
                       key={dep.id}
-                      className={`p-3 rounded-lg border text-[11px] space-y-1.5 transition-all shadow-sm ${
+                      className={`p-3 rounded-xl border text-[11px] space-y-1.5 transition-all shadow-sm ${
                         isConfirmed
-                          ? 'bg-success/10 border-success/30'
+                          ? 'bg-emerald-500/10 border-emerald-500/30'
                           : 'bg-brand/10 border-brand/30'
                       }`}
                     >
@@ -1004,7 +1094,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                           {isIndexing ? (
                             <Loader2 size={13} className="animate-spin text-brand shrink-0" />
                           ) : (
-                            <CheckCircle2 size={13} className="text-success shrink-0" />
+                            <CheckCircle2
+                              size={13}
+                              className="text-emerald-500 dark:text-emerald-400 shrink-0"
+                            />
                           )}
                           <span className="text-primary font-medium">
                             {dep.amount} {dep.asset} on {dep.chainName}
@@ -1013,7 +1106,9 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                         <div className="flex items-center gap-2">
                           <span
                             className={`text-[9px] px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider ${
-                              isConfirmed ? 'bg-success/20 text-success' : 'bg-brand/20 text-brand'
+                              isConfirmed
+                                ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                                : 'bg-brand/20 text-brand'
                             }`}
                           >
                             {isConfirmed ? 'Credited' : 'Indexing'}
@@ -1035,7 +1130,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                           : 'Deposit fully confirmed and credited to your trading balance.'}
                       </p>
 
-                      <div className="flex items-center justify-between pt-1 border-t border-color/40 text-[10px]">
+                      <div className="flex items-center justify-between pt-1 border-t border-color text-[10px]">
                         <span className="font-mono text-secondary">
                           Tx: {dep.txHash.slice(0, 8)}...{dep.txHash.slice(-6)}
                         </span>
@@ -1054,53 +1149,25 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               </div>
             )}
 
-            {/* Account & Network Selectors */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
                 <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
-                  Account
-                </p>
-                <AccountToggle value={accountType} onChange={setAccountType} />
-              </div>
-              <div>
-                <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
-                  Network
+                  Deposit Network
                 </p>
                 <ChainSelector value={selectedChainId} onChange={handleNetworkChange} />
               </div>
-            </div>
-
-            {/* Asset Selector */}
-            <div>
-              <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
-                Deposit Asset
-              </p>
-              <CustomAssetSelector
-                assets={depositAssets}
-                value={selectedDepositAsset?.name || ''}
-                onChange={name =>
-                  setSelectedDepositAsset(depositAssets.find(a => a.name === name) || null)
-                }
-              />
-            </div>
-
-            {/* Deposit Method Sub-Tab */}
-            <div className="flex bg-tertiary p-0.5 rounded-lg border border-color text-[11px]">
-              {(['wallet', 'qrcode'] as const).map(m => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setDepositMethod(m)}
-                  className={`flex-1 py-1.5 rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    depositMethod === m
-                      ? 'bg-secondary text-primary font-semibold border border-color shadow-sm'
-                      : 'text-secondary hover:text-primary'
-                  }`}
-                >
-                  {m === 'wallet' ? <WalletIcon size={12} /> : <QrCode size={12} />}
-                  {m === 'wallet' ? 'Direct Deposit' : 'Deposit Address / QR'}
-                </button>
-              ))}
+              <div>
+                <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
+                  Deposit Asset
+                </p>
+                <CustomAssetSelector
+                  assets={depositAssets}
+                  value={selectedDepositAsset?.name || ''}
+                  onChange={name =>
+                    setSelectedDepositAsset(depositAssets.find(a => a.name === name) || null)
+                  }
+                />
+              </div>
             </div>
 
             {depositProgress ? (
@@ -1122,60 +1189,51 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center">
                       <div
-                        style={{
-                          borderColor:
-                            depositProgress.step === 'CONFIRMING' ||
-                            depositProgress.step === 'SUCCESS'
-                              ? '#10b981'
-                              : depositProgress.step === 'FAILED'
-                                ? 'var(--color-danger)'
-                                : 'var(--color-brand-primary)',
-                          background:
-                            depositProgress.step === 'CONFIRMING' ||
-                            depositProgress.step === 'SUCCESS'
-                              ? '#10b981'
-                              : 'transparent',
-                        }}
-                        className="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors"
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                          depositProgress.step === 'CONFIRMING' ||
+                          depositProgress.step === 'SUCCESS'
+                            ? 'border-emerald-500 bg-emerald-500 text-white'
+                            : depositProgress.step === 'FAILED'
+                              ? 'border-danger bg-danger/10 text-danger'
+                              : 'border-brand'
+                        }`}
                       >
                         {depositProgress.step === 'CONFIRMING' ||
                         depositProgress.step === 'SUCCESS' ? (
-                          <Check className="w-3 h-3 text-black stroke-[3]" />
+                          <Check className="w-3 h-3 text-white stroke-[3]" />
                         ) : depositProgress.step === 'FAILED' ? (
-                          <X className="w-3 h-3 text-red-400" />
+                          <X className="w-3 h-3 text-danger" />
                         ) : (
-                          <div className="w-2.5 h-2.5 border-2 border-[var(--color-brand-primary)] border-t-transparent rounded-full animate-spin" />
+                          <div className="w-2.5 h-2.5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
                         )}
                       </div>
                       <div
-                        style={{
-                          background:
-                            depositProgress.step === 'CONFIRMING' ||
-                            depositProgress.step === 'SUCCESS'
-                              ? '#10b981'
-                              : 'var(--color-border)',
-                        }}
-                        className="w-0.5 h-12 my-1 transition-colors"
+                        className={`w-0.5 h-12 my-1 transition-colors ${
+                          depositProgress.step === 'CONFIRMING' ||
+                          depositProgress.step === 'SUCCESS'
+                            ? 'bg-emerald-500'
+                            : 'bg-tertiary'
+                        }`}
                       />
                     </div>
 
                     <div className="flex-1 pb-4 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span
-                          style={{
-                            color:
-                              depositProgress.step === 'CONFIRMING' ||
-                              depositProgress.step === 'SUCCESS'
-                                ? '#10b981'
-                                : 'var(--color-text-primary)',
-                          }}
-                          className="text-sm font-medium"
+                          className={`text-sm font-medium ${
+                            depositProgress.step === 'CONFIRMING' ||
+                            depositProgress.step === 'SUCCESS'
+                              ? 'text-emerald-500 dark:text-emerald-400'
+                              : 'text-primary'
+                          }`}
                         >
                           Confirm in Wallet
                         </span>
                         {depositProgress.step === 'CONFIRMING' ||
                         depositProgress.step === 'SUCCESS' ? (
-                          <span className="text-xs font-semibold text-emerald-400">Signed</span>
+                          <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
+                            Signed
+                          </span>
                         ) : depositProgress.step !== 'FAILED' ? (
                           <span className="text-xs text-secondary">Awaiting signature...</span>
                         ) : null}
@@ -1189,50 +1247,44 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center">
                       <div
-                        style={{
-                          borderColor:
-                            depositProgress.step === 'SUCCESS'
-                              ? '#10b981'
-                              : depositProgress.step === 'CONFIRMING'
-                                ? 'var(--color-brand-primary)'
-                                : 'var(--color-border)',
-                          background:
-                            depositProgress.step === 'SUCCESS' ? '#10b981' : 'transparent',
-                        }}
-                        className="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors"
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                          depositProgress.step === 'SUCCESS'
+                            ? 'border-emerald-500 bg-emerald-500 text-white'
+                            : depositProgress.step === 'CONFIRMING'
+                              ? 'border-brand'
+                              : 'border-color'
+                        }`}
                       >
                         {depositProgress.step === 'SUCCESS' ? (
-                          <Check className="w-3 h-3 text-black stroke-[3]" />
+                          <Check className="w-3 h-3 text-white stroke-[3]" />
                         ) : depositProgress.step === 'CONFIRMING' ? (
-                          <div className="w-2.5 h-2.5 border-2 border-[var(--color-brand-primary)] border-t-transparent rounded-full animate-spin" />
+                          <div className="w-2.5 h-2.5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
                         ) : null}
                       </div>
                       <div
-                        style={{
-                          background:
-                            depositProgress.step === 'SUCCESS' ? '#10b981' : 'var(--color-border)',
-                        }}
-                        className="w-0.5 h-12 my-1 transition-colors"
+                        className={`w-0.5 h-12 my-1 transition-colors ${
+                          depositProgress.step === 'SUCCESS' ? 'bg-emerald-500' : 'bg-tertiary'
+                        }`}
                       />
                     </div>
 
                     <div className="flex-1 pb-4 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span
-                          style={{
-                            color:
-                              depositProgress.step === 'SUCCESS'
-                                ? '#10b981'
-                                : depositProgress.step === 'CONFIRMING'
-                                  ? 'var(--color-text-primary)'
-                                  : 'var(--color-text-muted)',
-                          }}
-                          className="text-sm font-medium"
+                          className={`text-sm font-medium ${
+                            depositProgress.step === 'SUCCESS'
+                              ? 'text-emerald-500 dark:text-emerald-400'
+                              : depositProgress.step === 'CONFIRMING'
+                                ? 'text-primary'
+                                : 'text-secondary'
+                          }`}
                         >
                           On-Chain Confirmation
                         </span>
                         {depositProgress.step === 'SUCCESS' ? (
-                          <span className="text-xs font-semibold text-emerald-400">Confirmed</span>
+                          <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
+                            Confirmed
+                          </span>
                         ) : depositProgress.step === 'CONFIRMING' ? (
                           <span className="text-xs text-secondary">Broadcasting...</span>
                         ) : null}
@@ -1258,16 +1310,14 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center">
                       <div
-                        style={{
-                          borderColor:
-                            depositProgress.step === 'SUCCESS' ? '#10b981' : 'var(--color-border)',
-                          background:
-                            depositProgress.step === 'SUCCESS' ? '#10b981' : 'transparent',
-                        }}
-                        className="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors"
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                          depositProgress.step === 'SUCCESS'
+                            ? 'border-emerald-500 bg-emerald-500 text-white'
+                            : 'border-color'
+                        }`}
                       >
                         {depositProgress.step === 'SUCCESS' ? (
-                          <Check className="w-3 h-3 text-black stroke-[3]" />
+                          <Check className="w-3 h-3 text-white stroke-[3]" />
                         ) : null}
                       </div>
                     </div>
@@ -1275,18 +1325,18 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span
-                          style={{
-                            color:
-                              depositProgress.step === 'SUCCESS'
-                                ? '#10b981'
-                                : 'var(--color-text-muted)',
-                          }}
-                          className="text-sm font-medium"
+                          className={`text-sm font-medium ${
+                            depositProgress.step === 'SUCCESS'
+                              ? 'text-emerald-500 dark:text-emerald-400'
+                              : 'text-secondary'
+                          }`}
                         >
                           Indexing & Crediting
                         </span>
                         {depositProgress.step === 'SUCCESS' && (
-                          <span className="text-xs font-semibold text-emerald-400">Credited</span>
+                          <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
+                            Credited
+                          </span>
                         )}
                       </div>
                       <p className="text-xs text-secondary mt-0.5 leading-relaxed">
@@ -1296,8 +1346,25 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   </div>
                 </div>
 
+                {depositElapsedSec > 15 &&
+                  depositProgress.step !== 'SUCCESS' &&
+                  depositProgress.step !== 'FAILED' && (
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] text-amber-500 dark:text-amber-400 space-y-1 animate-in fade-in">
+                      <div className="flex items-center gap-1.5 font-semibold">
+                        <Info size={13} />
+                        <span>
+                          Confirming on {EVM_CHAINS[selectedChainId]?.name} ({depositElapsedSec}s)
+                        </span>
+                      </div>
+                      <p className="text-secondary text-[10px] leading-relaxed">
+                        Transaction has been submitted on-chain. Aster off-chain indexer confirms
+                        block depth before crediting collateral. Your funds are 100% safe.
+                      </p>
+                    </div>
+                  )}
+
                 {depositProgress.step === 'FAILED' && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
+                  <div className="p-3 bg-danger/10 border border-danger/30 rounded-xl text-xs text-danger">
                     {depositProgress.message}
                   </div>
                 )}
@@ -1307,10 +1374,10 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        setDepositProgress(null);
+                        clearActiveTx();
                         onClose();
                       }}
-                      className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-sm rounded-xl transition-opacity cursor-pointer"
+                      className="w-full h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-sm rounded-xl transition-colors cursor-pointer"
                     >
                       Done
                     </button>
@@ -1318,15 +1385,15 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => setDepositProgress(null)}
-                        className="flex-1 py-2 bg-secondary hover:bg-tertiary text-primary text-xs font-semibold rounded-xl border border-color cursor-pointer"
+                        onClick={() => clearActiveTx()}
+                        className="flex-1 h-11 bg-tertiary hover:bg-hover text-primary text-xs font-semibold rounded-xl border border-color cursor-pointer transition-colors"
                       >
                         Back
                       </button>
                       <button
                         type="button"
                         onClick={handleDirectDeposit}
-                        className="flex-1 py-2 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl cursor-pointer"
+                        className="flex-1 h-11 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl cursor-pointer transition-colors"
                       >
                         Retry
                       </button>
@@ -1334,15 +1401,122 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setDepositProgress(null)}
-                      className="w-full py-1 text-xs text-secondary hover:opacity-80 transition-opacity cursor-pointer"
+                      onClick={onClose}
+                      className="w-full py-1 text-xs text-secondary hover:text-primary transition-colors cursor-pointer"
                     >
                       Close (Deposit will continue in background)
                     </button>
                   )}
                 </div>
               </div>
-            ) : depositMethod === 'wallet' ? (
+            ) : showDepositConfirm ? (
+              <div className="space-y-4">
+                <div className="text-center py-1">
+                  <ShieldCheck size={28} className="text-brand mx-auto mb-1.5" />
+                  <h3 className="text-[14px] font-semibold text-primary">Confirm Deposit</h3>
+                  <p className="text-[11px] text-secondary mt-0.5">
+                    Review on-chain smart contract deposit details before signing.
+                  </p>
+                </div>
+
+                <div className="bg-tertiary rounded-xl p-3.5 border border-color space-y-2 text-[12px]">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-secondary shrink-0">Network</span>
+                    <span className="text-primary font-medium text-right">
+                      {EVM_CHAINS[selectedChainId]?.name} ({selectedChainId})
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-secondary shrink-0">Asset & Amount</span>
+                    <span className="text-brand font-semibold text-right font-mono">
+                      {depositAmount} {selectedDepositAsset?.name}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-secondary shrink-0">Treasury Bridge</span>
+                    <div className="text-right">
+                      <span className="text-primary font-mono text-[11px] break-all">
+                        {depositBridgeAddress}
+                      </span>
+                      {EVM_CHAINS[selectedChainId]?.explorer && (
+                        <a
+                          href={`${EVM_CHAINS[selectedChainId]?.explorer}/address/${depositBridgeAddress}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-brand hover:underline flex items-center justify-end gap-1 mt-0.5"
+                        >
+                          View Contract <ExternalLink size={10} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-secondary shrink-0">Target Contract</span>
+                    <span className="text-primary font-medium text-right">
+                      {selectedDepositAsset?.isNative
+                        ? 'Native ETH/BNB Transfer'
+                        : 'ERC-20 Token Deposit'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-secondary shrink-0">Broker ID</span>
+                    <span className="text-primary font-mono font-medium text-right">
+                      {DEFAULT_BROKER_ID.toString()} (Aster Official)
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-secondary shrink-0">Block Confirmations</span>
+                    <span className="text-primary font-mono text-right">
+                      {REQUIRED_CONFIRMATIONS[selectedChainId] || 2} blocks
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-secondary shrink-0">Gas Limit Ceiling</span>
+                    <span className="text-primary font-mono text-right">
+                      {MAX_DEPOSIT_GAS_LIMIT.toLocaleString()} gas
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-brand/10 border border-brand/30 rounded-xl text-[11px] text-secondary space-y-1">
+                  <div className="flex items-center gap-1.5 text-brand font-medium">
+                    <Info size={12} className="shrink-0" />
+                    <span>Smart Contract Security Verification</span>
+                  </div>
+                  <p>
+                    This transaction executes directly against the verified Aster Perpetual
+                    Treasury. The off-chain indexer will automatically credit your collateral upon
+                    block confirmation.
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDepositConfirm(false)}
+                    disabled={isDepositing}
+                    className="flex-1 h-11 bg-tertiary hover:bg-hover border border-color rounded-xl text-[13px] font-medium text-primary transition-colors cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDirectDeposit}
+                    disabled={isDepositing}
+                    className="flex-1 h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors disabled:opacity-50 cursor-pointer shadow-sm flex items-center justify-center gap-2"
+                  >
+                    {isDepositing ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Confirming...</span>
+                      </>
+                    ) : (
+                      <span>Confirm & Sign in Wallet</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
               <div className="space-y-3">
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
@@ -1379,19 +1553,23 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 {isEvmConnected ? (
                   <button
                     type="button"
-                    onClick={handleDirectDeposit}
+                    onClick={handleOpenDepositConfirm}
                     disabled={
                       isDepositing ||
                       !isPositiveNumber(depositAmount) ||
-                      parseFloat(depositAmount) > parseFloat(walletTokenBalance || '0')
+                      new BigNumber(depositAmount || 0).isGreaterThan(
+                        new BigNumber(walletTokenBalance || 0)
+                      )
                     }
-                    className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                    className="w-full h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors disabled:opacity-50 cursor-pointer shadow-sm flex items-center justify-center"
                   >
                     {isDepositing
                       ? 'Processing Deposit...'
-                      : parseFloat(depositAmount) > parseFloat(walletTokenBalance || '0')
+                      : new BigNumber(depositAmount || 0).isGreaterThan(
+                            new BigNumber(walletTokenBalance || 0)
+                          )
                         ? 'Insufficient Wallet Balance'
-                        : `Deposit ${selectedDepositAsset?.name || ''}`}
+                        : `Review Deposit ${selectedDepositAsset?.name || ''}`}
                   </button>
                 ) : (
                   <button
@@ -1400,7 +1578,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                       onClose();
                       openWalletModal();
                     }}
-                    className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-2"
+                    className="w-full h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-2"
                   >
                     <WalletIcon size={15} />
                     Connect EVM Wallet to Deposit
@@ -1411,378 +1589,458 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   <Info size={11} className="text-secondary shrink-0" />
                   <span>
                     {selectedChainId === 1
-                      ? 'Ethereum deposits require 12 block confirmations (~1–2 mins) to credit.'
+                      ? 'Ethereum deposits require 2 block confirmations (~30s) to credit.'
                       : `${EVM_CHAINS[selectedChainId]?.name} deposits credit in ~15–30 seconds.`}
                   </span>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex flex-col items-center p-3.5 bg-tertiary rounded-lg border border-color gap-2.5">
-                  <div className="bg-white p-2 rounded-lg shadow-sm">
-                    <canvas ref={qrCanvasRef} />
-                  </div>
-                  <p className="text-[10px] text-secondary uppercase tracking-wider font-semibold">
-                    Official Aster Deposit Bridge
+            )}
+          </div>
+        )}
+
+        {activeTab === 'withdraw' && (
+          <div>
+            {withdrawProgress ? (
+              <div className="space-y-6 pt-1">
+                <div>
+                  <h4 className="text-sm font-semibold text-primary">
+                    Withdraw {selectedWithdrawAsset?.name || 'Asset'}
+                  </h4>
+                  <p className="text-xs text-secondary mt-0.5">
+                    {withdrawProgress.step === 'SUCCESS'
+                      ? 'Withdrawal authorized and queued for settlement.'
+                      : withdrawProgress.step === 'FAILED'
+                        ? 'Withdrawal request rejected or failed.'
+                        : 'Sign the withdrawal authorization in your wallet to proceed.'}
                   </p>
-                  <div className="flex items-center gap-2 bg-secondary px-3 py-2 rounded-lg border border-color w-full">
-                    <span className="text-[11px] font-mono text-primary truncate flex-1">
-                      {depositBridgeAddress}
-                    </span>
+                </div>
+
+                <div className="space-y-0">
+                  <div className="flex items-start gap-3">
+                    <div className="flex flex-col items-center">
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                          withdrawProgress.step === 'CONFIRMING' ||
+                          withdrawProgress.step === 'SUCCESS'
+                            ? 'bg-emerald-500 border-emerald-500 text-white'
+                            : withdrawProgress.step === 'FAILED'
+                              ? 'border-danger text-danger'
+                              : 'border-brand'
+                        }`}
+                      >
+                        {withdrawProgress.step === 'CONFIRMING' ||
+                        withdrawProgress.step === 'SUCCESS' ? (
+                          <Check className="w-3 h-3 text-white stroke-[3]" />
+                        ) : withdrawProgress.step === 'FAILED' ? (
+                          <X className="w-3 h-3 text-danger" />
+                        ) : (
+                          <div className="w-2.5 h-2.5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                        )}
+                      </div>
+                      <div
+                        className={`w-0.5 h-12 my-1 transition-colors ${
+                          withdrawProgress.step === 'CONFIRMING' ||
+                          withdrawProgress.step === 'SUCCESS'
+                            ? 'bg-emerald-500'
+                            : 'bg-tertiary'
+                        }`}
+                      />
+                    </div>
+                    <div className="flex-1 pb-4 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`text-sm font-medium ${
+                            withdrawProgress.step === 'CONFIRMING' ||
+                            withdrawProgress.step === 'SUCCESS'
+                              ? 'text-emerald-500 dark:text-emerald-400'
+                              : 'text-primary'
+                          }`}
+                        >
+                          Wallet Authorization
+                        </span>
+                        {withdrawProgress.step === 'CONFIRMING' ||
+                        withdrawProgress.step === 'SUCCESS' ? (
+                          <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
+                            Signed
+                          </span>
+                        ) : withdrawProgress.step !== 'FAILED' ? (
+                          <span className="text-xs text-secondary">Awaiting signature...</span>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-secondary mt-0.5">
+                        EIP-712 cryptographic signature to authorize withdrawal
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="flex flex-col items-center">
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                          withdrawProgress.step === 'SUCCESS'
+                            ? 'bg-emerald-500 border-emerald-500 text-white'
+                            : withdrawProgress.step === 'CONFIRMING'
+                              ? 'border-brand'
+                              : 'border-color'
+                        }`}
+                      >
+                        {withdrawProgress.step === 'SUCCESS' ? (
+                          <Check className="w-3 h-3 text-white stroke-[3]" />
+                        ) : withdrawProgress.step === 'CONFIRMING' ? (
+                          <div className="w-2.5 h-2.5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                        ) : null}
+                      </div>
+                      <div
+                        className={`w-0.5 h-12 my-1 transition-colors ${
+                          withdrawProgress.step === 'SUCCESS' ? 'bg-emerald-500' : 'bg-tertiary'
+                        }`}
+                      />
+                    </div>
+                    <div className="flex-1 pb-4 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`text-sm font-medium ${
+                            withdrawProgress.step === 'SUCCESS'
+                              ? 'text-emerald-500 dark:text-emerald-400'
+                              : 'text-primary'
+                          }`}
+                        >
+                          Aster Risk Verification
+                        </span>
+                        {withdrawProgress.step === 'SUCCESS' ? (
+                          <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
+                            Approved
+                          </span>
+                        ) : withdrawProgress.step === 'CONFIRMING' ? (
+                          <span className="text-xs text-secondary">Validating margin...</span>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-secondary mt-0.5">
+                        Verifying margin health ratio and remaining 24-hour limits
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="flex flex-col items-center">
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                          withdrawProgress.step === 'SUCCESS'
+                            ? 'bg-emerald-500 border-emerald-500 text-white'
+                            : 'border-color'
+                        }`}
+                      >
+                        {withdrawProgress.step === 'SUCCESS' ? (
+                          <Check className="w-3 h-3 text-white stroke-[3]" />
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`text-sm font-medium ${
+                            withdrawProgress.step === 'SUCCESS'
+                              ? 'text-emerald-500 dark:text-emerald-400'
+                              : 'text-secondary'
+                          }`}
+                        >
+                          On-Chain Settlement
+                        </span>
+                        {withdrawProgress.step === 'SUCCESS' && (
+                          <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
+                            Dispatched
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-secondary mt-0.5 leading-relaxed">
+                        Funds dispatched to destination address (settles in 1–3 min)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {withdrawProgress.step === 'SUCCESS' && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-600 dark:text-emerald-400 space-y-1">
+                    <div className="flex items-center gap-1.5 font-semibold">
+                      <CheckCircle2 size={14} />
+                      <span>Withdrawal Accepted</span>
+                    </div>
+                    <p className="text-secondary text-[11px] leading-relaxed">
+                      Your withdrawal request has been accepted by Aster DEX. Settlement engines are
+                      dispatching the tokens to {destinationAddress.slice(0, 6)}...
+                      {destinationAddress.slice(-4)} on {EVM_CHAINS[selectedChainId]?.name}.
+                    </p>
+                  </div>
+                )}
+
+                {withdrawProgress.step === 'FAILED' && (
+                  <div className="p-3 bg-danger/10 border border-danger/30 rounded-xl text-xs text-danger">
+                    {withdrawProgress.message}
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  {withdrawProgress.step === 'SUCCESS' ? (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearActiveTx();
+                          setActiveTab('history');
+                        }}
+                        className="flex-1 h-11 bg-tertiary hover:bg-hover text-primary text-xs font-semibold rounded-xl border border-color cursor-pointer transition-colors"
+                      >
+                        View in History
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearActiveTx();
+                          onClose();
+                        }}
+                        className="flex-1 h-11 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  ) : withdrawProgress.step === 'FAILED' ? (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => clearActiveTx()}
+                        className="flex-1 h-11 bg-tertiary hover:bg-hover text-primary text-xs font-semibold rounded-xl border border-color cursor-pointer"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExecuteWithdraw}
+                        className="flex-1 h-11 bg-brand hover:bg-brand-hover text-white text-xs font-semibold rounded-xl cursor-pointer"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => handleCopyAddress(depositBridgeAddress)}
-                      className="text-secondary hover:text-primary shrink-0 cursor-pointer"
-                      title="Copy Address"
+                      onClick={onClose}
+                      className="w-full py-1 text-xs text-secondary hover:text-primary transition-colors cursor-pointer text-center"
                     >
-                      {copiedAddr ? (
-                        <Check size={13} className="text-success" />
-                      ) : (
-                        <Copy size={13} />
-                      )}
+                      Close (Withdrawal will continue in background)
                     </button>
+                  )}
+                </div>
+              </div>
+            ) : showWithdrawConfirm ? (
+              <div className="space-y-4">
+                <div className="text-center py-1">
+                  <ShieldCheck size={28} className="text-brand mx-auto mb-1.5" />
+                  <h3 className="text-[14px] font-semibold text-primary">Confirm Withdrawal</h3>
+                  <p className="text-[11px] text-secondary mt-0.5">
+                    Please verify the withdrawal details carefully before signing.
+                  </p>
+                </div>
+
+                <div className="bg-tertiary rounded-xl p-3.5 border border-color space-y-2 text-[12px]">
+                  {[
+                    [
+                      'Network',
+                      `${EVM_CHAINS[selectedChainId]?.name} (${EVM_CHAIN_NAME_MAP[selectedChainId]})`,
+                    ],
+                    [
+                      'Asset',
+                      selectedWithdrawAsset?.displayName || selectedWithdrawAsset?.name || '',
+                    ],
+                    ['Destination', destinationAddress],
+                    ['Gross Amount', `${withdrawAmount} ${selectedWithdrawAsset?.name}`],
+                    ['Gas Fee', `${chainWithdrawDetails.fee} ${selectedWithdrawAsset?.name}`],
+                  ].map(([label, val]) => (
+                    <div key={label} className="flex justify-between gap-3">
+                      <span className="text-secondary shrink-0">{label}</span>
+                      <span
+                        className={`text-primary font-medium text-right break-all ${label === 'Destination' ? 'font-mono text-[11px]' : ''}`}
+                      >
+                        {val}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="border-t border-color pt-2 flex justify-between font-semibold">
+                    <span className="text-secondary">Net To Receive</span>
+                    <span className="text-brand font-mono">
+                      {formatDisplayAmount(netReceiveAmount)} {selectedWithdrawAsset?.name}
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-2 p-2.5 bg-info/10 border border-info/30 rounded-lg text-[11px] text-info">
-                  <Info size={14} className="shrink-0 mt-0.5" />
-                  <span>
-                    Send <strong>{selectedDepositAsset?.name}</strong> from your connected wallet (
-                    <strong>
-                      {userAddr?.slice(0, 6)}...{userAddr?.slice(-4)}
-                    </strong>
-                    ) on <strong>{EVM_CHAIN_NAME_MAP[selectedChainId]}</strong> to this bridge
-                    address. Deposits credit automatically within 1–3 minutes.
-                  </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowWithdrawConfirm(false)}
+                    disabled={isWithdrawing}
+                    className="flex-1 h-11 bg-tertiary hover:bg-hover border border-color rounded-xl text-[13px] font-medium text-primary transition-colors cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExecuteWithdraw}
+                    disabled={isWithdrawing}
+                    className="flex-1 h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                  >
+                    {isWithdrawing ? 'Signing & Submitting...' : 'Confirm & Sign'}
+                  </button>
                 </div>
               </div>
-            )}
-          </div>
-        )}
+            ) : (
+              <div className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
+                      Withdraw Network
+                    </p>
+                    <ChainSelector value={selectedChainId} onChange={handleNetworkChange} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
+                      Withdraw Asset
+                    </p>
+                    <CustomAssetSelector
+                      assets={withdrawAssets}
+                      value={selectedWithdrawAsset?.name || ''}
+                      onChange={name =>
+                        setSelectedWithdrawAsset(withdrawAssets.find(a => a.name === name) || null)
+                      }
+                    />
+                  </div>
+                </div>
 
-        {/* ---------- WITHDRAW TAB ----------*/}
-        {activeTab === 'withdraw' && currentNetwork !== 'testnet' && !showWithdrawConfirm && (
-          <div className="space-y-3.5">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
-                  Account
-                </p>
-                <AccountToggle value={accountType} onChange={setAccountType} />
-              </div>
-              <div>
-                <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
-                  Network
-                </p>
-                <ChainSelector value={selectedChainId} onChange={handleNetworkChange} />
-              </div>
-            </div>
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <p className="text-[10px] text-secondary font-medium uppercase tracking-wide">
+                      Destination EVM Address
+                    </p>
+                    {destinationAddress &&
+                      (ethers.isAddress(destinationAddress) ? (
+                        <span className="text-[10px] text-emerald-500 dark:text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 size={10} /> Valid EVM
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-danger">Invalid Address</span>
+                      ))}
+                  </div>
+                  <div
+                    className={`flex items-center bg-tertiary border rounded-xl h-12 px-3.5 transition-colors focus-within:border-brand ${
+                      destinationAddress && !ethers.isAddress(destinationAddress)
+                        ? 'border-danger/60'
+                        : 'border-color'
+                    }`}
+                  >
+                    <input
+                      type="text"
+                      placeholder="0x..."
+                      value={destinationAddress}
+                      onChange={e => setDestinationAddress(e.target.value.trim())}
+                      className="flex-1 bg-transparent text-primary font-mono text-[12px] outline-none placeholder:text-muted"
+                    />
+                  </div>
+                </div>
 
-            <div>
-              <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
-                Withdraw Asset
-              </p>
-              <CustomAssetSelector
-                assets={withdrawAssets}
-                value={selectedWithdrawAsset?.name || ''}
-                onChange={name =>
-                  setSelectedWithdrawAsset(withdrawAssets.find(a => a.name === name) || null)
-                }
-              />
-            </div>
-
-            <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <p className="text-[10px] text-secondary font-medium uppercase tracking-wide">
-                  Destination EVM Address
-                </p>
-                {destinationAddress &&
-                  (ethers.isAddress(destinationAddress) ? (
-                    <span className="text-[10px] text-success flex items-center gap-1">
-                      <CheckCircle2 size={10} /> Valid EVM
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <p className="text-[10px] text-secondary font-medium uppercase tracking-wide">
+                      Amount
+                    </p>
+                    <span className="text-[11px] text-secondary">
+                      Max:{' '}
+                      <span className="text-primary font-mono font-medium">
+                        {isLoadingWithdrawInfo
+                          ? '...'
+                          : `${formatDisplayAmount(maxWithdrawable)} ${selectedWithdrawAsset?.name || ''}`}
+                      </span>
                     </span>
-                  ) : (
-                    <span className="text-[10px] text-danger">Invalid Address</span>
-                  ))}
-              </div>
-              <div
-                className={`flex items-center bg-tertiary border rounded-lg h-10 px-3 transition-colors focus-within:border-brand ${
-                  destinationAddress && !ethers.isAddress(destinationAddress)
-                    ? 'border-danger/60'
-                    : 'border-color'
-                }`}
-              >
-                <input
-                  type="text"
-                  placeholder="0x..."
-                  value={destinationAddress}
-                  onChange={e => setDestinationAddress(e.target.value.trim())}
-                  className="flex-1 bg-transparent text-primary font-mono text-[11px] outline-none placeholder:text-muted"
-                />
-              </div>
-            </div>
+                  </div>
+                  <AmountInput
+                    value={withdrawAmount}
+                    onChange={setWithdrawAmount}
+                    suffix={
+                      <button
+                        type="button"
+                        onClick={() => setWithdrawAmount(String(maxWithdrawable || currentBalance))}
+                        className="text-brand text-[11px] font-semibold hover:underline cursor-pointer"
+                      >
+                        MAX
+                      </button>
+                    }
+                  />
+                </div>
 
-            <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <p className="text-[10px] text-secondary font-medium uppercase tracking-wide">
-                  Amount
-                </p>
-                <span className="text-[11px] text-secondary">
-                  Max:{' '}
-                  <span className="text-primary font-mono font-medium">
-                    {isLoadingWithdrawInfo
-                      ? '...'
-                      : `${formatDisplayAmount(maxWithdrawable)} ${selectedWithdrawAsset?.name || ''}`}
-                  </span>
-                </span>
-              </div>
-              <AmountInput
-                value={withdrawAmount}
-                onChange={setWithdrawAmount}
-                suffix={
+                <div className="bg-tertiary rounded-xl p-3 border border-color space-y-1.5 text-[11px]">
+                  <div className="flex justify-between text-secondary">
+                    <span>Network Gas Fee</span>
+                    <span className="text-primary font-mono font-medium">
+                      {isLoadingWithdrawInfo
+                        ? '...'
+                        : `${chainWithdrawDetails.fee} ${selectedWithdrawAsset?.name || ''}`}
+                    </span>
+                  </div>
+                  {withdrawInfo && (
+                    <div className="flex justify-between text-secondary">
+                      <span>24h Remaining Limit</span>
+                      <span className="text-primary font-mono font-medium">
+                        {Number(withdrawInfo.userRemainingDailyLimit).toLocaleString('en-US', {
+                          maximumFractionDigits: 0,
+                        })}{' '}
+                        USDT
+                      </span>
+                    </div>
+                  )}
+                  {chainWithdrawDetails.chainLimit > 0 && (
+                    <div className="flex justify-between text-secondary">
+                      <span>Chain Limit</span>
+                      <span className="text-primary font-mono font-medium">
+                        {formatDisplayAmount(chainWithdrawDetails.chainLimit)}{' '}
+                        {selectedWithdrawAsset?.name}
+                      </span>
+                    </div>
+                  )}
+                  <div className="border-t border-color pt-2 flex justify-between font-semibold">
+                    <span className="text-secondary">Net To Receive</span>
+                    <span className="text-brand font-mono">
+                      {formatDisplayAmount(netReceiveAmount)} {selectedWithdrawAsset?.name}
+                    </span>
+                  </div>
+                </div>
+
+                {isEvmConnected ? (
                   <button
                     type="button"
-                    onClick={() => setWithdrawAmount(String(maxWithdrawable || currentBalance))}
-                    className="text-brand text-[11px] font-semibold hover:underline cursor-pointer"
+                    onClick={handleOpenWithdrawConfirm}
+                    disabled={
+                      !isPositiveNumber(withdrawAmount) || !ethers.isAddress(destinationAddress)
+                    }
+                    className="w-full h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors disabled:opacity-50 cursor-pointer shadow-sm flex items-center justify-center"
                   >
-                    MAX
+                    Review Withdrawal
                   </button>
-                }
-              />
-            </div>
-
-            {/* Fee Breakdown */}
-            <div className="bg-tertiary rounded-lg p-3 border border-color space-y-1.5 text-[11px]">
-              <div className="flex justify-between text-secondary">
-                <span>Network Gas Fee</span>
-                <span className="text-primary font-mono font-medium">
-                  {isLoadingWithdrawInfo
-                    ? '...'
-                    : `${chainWithdrawDetails.fee} ${selectedWithdrawAsset?.name || ''}`}
-                </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      openWalletModal();
+                    }}
+                    className="w-full h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-2"
+                  >
+                    <WalletIcon size={15} />
+                    Connect EVM Wallet to Withdraw
+                  </button>
+                )}
               </div>
-              {withdrawInfo && (
-                <div className="flex justify-between text-secondary">
-                  <span>24h Remaining Limit</span>
-                  <span className="text-primary font-mono font-medium">
-                    {Number(withdrawInfo.userRemainingDailyLimit).toLocaleString('en-US', {
-                      maximumFractionDigits: 0,
-                    })}{' '}
-                    USDT
-                  </span>
-                </div>
-              )}
-              {chainWithdrawDetails.chainLimit > 0 && (
-                <div className="flex justify-between text-secondary">
-                  <span>Chain Limit</span>
-                  <span className="text-primary font-mono font-medium">
-                    {formatDisplayAmount(chainWithdrawDetails.chainLimit)}{' '}
-                    {selectedWithdrawAsset?.name}
-                  </span>
-                </div>
-              )}
-              <div className="border-t border-color pt-2 flex justify-between font-semibold">
-                <span className="text-secondary">Net To Receive</span>
-                <span className="text-brand font-mono">
-                  {formatDisplayAmount(netReceiveAmount)} {selectedWithdrawAsset?.name}
-                </span>
-              </div>
-            </div>
-
-            {isEvmConnected ? (
-              <button
-                type="button"
-                onClick={handleOpenWithdrawConfirm}
-                disabled={
-                  !isPositiveNumber(withdrawAmount) || !ethers.isAddress(destinationAddress)
-                }
-                className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-              >
-                Review Withdrawal
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  openWalletModal();
-                }}
-                className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-2"
-              >
-                <WalletIcon size={15} />
-                Connect EVM Wallet to Withdraw
-              </button>
             )}
           </div>
         )}
 
-        {/* ---------- WITHDRAW CONFIRMATION STEP ---------- */}
-        {activeTab === 'withdraw' && currentNetwork !== 'testnet' && showWithdrawConfirm && (
-          <div className="space-y-4">
-            <div className="text-center py-1">
-              <ShieldCheck size={28} className="text-brand mx-auto mb-1.5" />
-              <h3 className="text-[14px] font-semibold text-primary">Confirm Withdrawal</h3>
-              <p className="text-[11px] text-secondary mt-0.5">
-                Please verify the withdrawal details carefully.
-              </p>
-            </div>
-
-            <div className="bg-tertiary rounded-lg p-3.5 border border-color space-y-2 text-[12px]">
-              {[
-                [
-                  'Network',
-                  `${EVM_CHAINS[selectedChainId]?.name} (${EVM_CHAIN_NAME_MAP[selectedChainId]})`,
-                ],
-                ['Asset', selectedWithdrawAsset?.displayName || selectedWithdrawAsset?.name || ''],
-                ['Destination', destinationAddress],
-                ['Gross Amount', `${withdrawAmount} ${selectedWithdrawAsset?.name}`],
-                ['Gas Fee', `${chainWithdrawDetails.fee} ${selectedWithdrawAsset?.name}`],
-              ].map(([label, val]) => (
-                <div key={label} className="flex justify-between gap-3">
-                  <span className="text-secondary shrink-0">{label}</span>
-                  <span
-                    className={`text-primary font-medium text-right break-all ${label === 'Destination' ? 'font-mono text-[11px]' : ''}`}
-                  >
-                    {val}
-                  </span>
-                </div>
-              ))}
-              <div className="border-t border-color pt-2 flex justify-between font-semibold">
-                <span className="text-secondary">Net To Receive</span>
-                <span className="text-brand font-mono">
-                  {formatDisplayAmount(netReceiveAmount)} {selectedWithdrawAsset?.name}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setShowWithdrawConfirm(false)}
-                disabled={isWithdrawing}
-                className="flex-1 py-2.5 bg-tertiary hover:bg-hover border border-color rounded-lg text-[13px] font-medium text-primary transition-colors cursor-pointer"
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteWithdraw}
-                disabled={isWithdrawing}
-                className="flex-1 py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-              >
-                {isWithdrawing ? 'Signing & Submitting...' : 'Confirm & Sign'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ---------- TRANSFER TAB ---------- */}
-        {activeTab === 'transfer' && currentNetwork !== 'testnet' && (
-          <div className="space-y-3.5">
-            <div className="flex items-center gap-2 bg-tertiary border border-color rounded-lg p-3">
-              <div className="flex-1">
-                <p className="text-[10px] text-secondary mb-0.5 uppercase tracking-wide">From</p>
-                <p className="text-primary font-semibold text-[13px]">
-                  {transferDirection === 'SPOT_TO_PERP' ? 'Spot Account' : 'Perpetual Account'}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  setTransferDirection(prev =>
-                    prev === 'SPOT_TO_PERP' ? 'PERP_TO_SPOT' : 'SPOT_TO_PERP'
-                  )
-                }
-                className="w-8 h-8 rounded-full bg-secondary border border-color flex items-center justify-center hover:bg-hover transition-colors cursor-pointer"
-                title="Switch Direction"
-              >
-                <ArrowRightLeft size={13} className="text-secondary" />
-              </button>
-              <div className="flex-1 text-right">
-                <p className="text-[10px] text-secondary mb-0.5 uppercase tracking-wide">To</p>
-                <p className="text-primary font-semibold text-[13px]">
-                  {transferDirection === 'SPOT_TO_PERP' ? 'Perpetual Account' : 'Spot Account'}
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-[10px] text-secondary font-medium mb-1 uppercase tracking-wide">
-                Asset
-              </p>
-              <div className="relative">
-                <select
-                  value={transferAsset}
-                  onChange={e => setTransferAsset(e.target.value)}
-                  className="w-full appearance-none bg-tertiary border border-color rounded-lg pl-3 pr-8 py-2 text-primary text-[12px] font-medium outline-none cursor-pointer h-9 hover:border-brand/40 transition-colors"
-                >
-                  {['USDT', 'USDC', 'ETH', 'BNB', 'BTC'].map(a => (
-                    <option key={a} value={a}>
-                      {a}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  size={13}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary pointer-events-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <p className="text-[10px] text-secondary font-medium uppercase tracking-wide">
-                  Amount
-                </p>
-                <span className="text-[11px] text-secondary">
-                  Available:{' '}
-                  <span className="text-primary font-mono font-medium">
-                    {formatDisplayAmount(currentBalance)} {transferAsset}
-                  </span>
-                </span>
-              </div>
-              <AmountInput
-                value={transferAmount}
-                onChange={setTransferAmount}
-                suffix={
-                  <button
-                    type="button"
-                    onClick={() => setTransferAmount(String(currentBalance))}
-                    className="text-brand text-[11px] font-semibold hover:underline cursor-pointer"
-                  >
-                    MAX
-                  </button>
-                }
-              />
-            </div>
-
-            {isEvmConnected ? (
-              <button
-                type="button"
-                onClick={handleExecuteTransfer}
-                disabled={!isPositiveNumber(transferAmount) || isTransferring}
-                className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-              >
-                {isTransferring ? 'Processing Transfer...' : 'Transfer Asset'}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  openWalletModal();
-                }}
-                className="w-full py-2.5 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-lg transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-2"
-              >
-                <WalletIcon size={15} />
-                Connect EVM Wallet to Transfer
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* ---------- HISTORY TAB ---------- */}
-        {activeTab === 'history' && currentNetwork !== 'testnet' && (
+        {activeTab === 'history' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex bg-tertiary p-0.5 rounded-lg border border-color text-[11px]">
@@ -1805,14 +2063,14 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 type="button"
                 onClick={fetchHistory}
                 disabled={isLoadingHistory}
-                className="text-secondary hover:text-primary transition-colors p-1.5 rounded-lg hover:bg-tertiary cursor-pointer"
+                className="text-secondary hover:text-primary transition-colors p-1.5 rounded-lg hover:bg-hover cursor-pointer"
                 title="Refresh History"
               >
                 <RefreshCw size={13} className={isLoadingHistory ? 'animate-spin' : ''} />
               </button>
             </div>
 
-            <div className="max-h-[320px] overflow-y-auto scrollbar-thin border border-color rounded-lg">
+            <div className="max-h-[320px] overflow-y-auto scrollbar-thin border border-color rounded-xl bg-tertiary/40">
               {historyRecords.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-2 text-secondary text-[12px]">
                   {isLoadingHistory ? (
@@ -1846,12 +2104,14 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     return (
                       <div
                         key={r.id || r.txHash}
-                        className="px-3 py-2.5 hover:bg-hover flex items-center justify-between gap-2 text-[11px]"
+                        className="px-3 py-2.5 hover:bg-hover flex items-center justify-between gap-2 text-[11px] transition-colors"
                       >
                         <div className="flex items-center gap-2.5">
                           <div
                             className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                              isDeposit ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
+                              isDeposit
+                                ? 'bg-emerald-500/10 text-emerald-500 dark:text-emerald-400'
+                                : 'bg-danger/10 text-danger'
                             }`}
                           >
                             {isDeposit ? (
@@ -1863,11 +2123,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                           <div>
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <span className="font-semibold text-primary">{r.asset}</span>
-                              <span className="text-[10px] text-secondary bg-tertiary px-1.5 py-0.2 rounded border border-color">
+                              <span className="text-[10px] text-secondary bg-secondary px-1.5 py-0.2 rounded border border-color">
                                 {chain.name}
                               </span>
                               {r.accountType && (
-                                <span className="text-[10px] text-secondary bg-tertiary px-1.5 py-0.2 rounded border border-color capitalize">
+                                <span className="text-[10px] text-secondary bg-secondary px-1.5 py-0.2 rounded border border-color capitalize">
                                   {r.accountType}
                                 </span>
                               )}
@@ -1879,7 +2139,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                         <div className="flex items-center gap-2 text-right shrink-0">
                           <div>
                             <div
-                              className={`font-mono font-semibold ${isDeposit ? 'text-success' : 'text-danger'}`}
+                              className={`font-mono font-semibold ${isDeposit ? 'text-emerald-500 dark:text-emerald-400' : 'text-danger'}`}
                             >
                               {isDeposit ? '+' : '-'}
                               {parseFloat(r.amount).toFixed(4)}
