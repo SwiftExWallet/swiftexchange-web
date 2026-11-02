@@ -301,6 +301,58 @@ export class AquariusService {
     const server = new StellarSDK.Horizon.Server(this.horizonUrl);
     const account = await server.loadAccount(userAddress);
 
+    // Validate that user has a trustline for the destination asset before simulating Soroban swap
+    const toAsset: any = quote.toAsset;
+    const isToNative =
+      toAsset instanceof StellarSDK.Asset
+        ? toAsset.isNative()
+        : toAsset === 'native' ||
+          toAsset === 'XLM' ||
+          (typeof toAsset === 'object' &&
+            Boolean(
+              (typeof toAsset?.isNative === 'function' ? toAsset.isNative() : toAsset?.isNative) ||
+              toAsset?.code === 'XLM' ||
+              toAsset?.symbol === 'XLM'
+            ));
+
+    if (!isToNative) {
+      let toCode = '';
+      let toIssuer: string | undefined;
+
+      if (toAsset instanceof StellarSDK.Asset) {
+        toCode = toAsset.getCode();
+        toIssuer = toAsset.getIssuer();
+      } else if (typeof toAsset === 'object' && toAsset) {
+        toCode = toAsset.code || toAsset.symbol || '';
+        toIssuer =
+          toAsset.issuer ||
+          (typeof toAsset.asset?.getIssuer === 'function'
+            ? toAsset.asset.getIssuer()
+            : undefined) ||
+          (toAsset.address?.startsWith('G') ? toAsset.address : undefined);
+      } else if (typeof toAsset === 'string') {
+        const parts = toAsset.split(/[:-]/);
+        toCode = parts[0];
+        toIssuer = parts[1]?.startsWith('G') ? parts[1] : undefined;
+      }
+
+      const hasTrustline = account.balances.some((b: any) => {
+        if (b.asset_type === 'native') return false;
+        if (toIssuer && b.asset_issuer) {
+          return (
+            b.asset_code?.toUpperCase() === toCode.toUpperCase() && b.asset_issuer === toIssuer
+          );
+        }
+        return b.asset_code?.toUpperCase() === toCode.toUpperCase();
+      });
+
+      if (!hasTrustline) {
+        throw new Error(
+          `Trustline required for ${toCode || 'asset'}. Please establish a trustline in your wallet before swapping on Aquarius.`
+        );
+      }
+    }
+
     const routerContract = new StellarSDK.Contract(this.routerContractId);
     const userScVal = new StellarSDK.Address(userAddress).toScVal();
 

@@ -34,4 +34,6 @@ aster-finance-futures-api-v3.md
 
 # agent customizations
 .agents/
+.agent/
+.agent
 ASTER_AUDIT.md

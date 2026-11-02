@@ -685,22 +685,30 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
       const isBuyClassic =
         selectedBuyAsset &&
         !(selectedBuyAsset as any).isNative &&
+        (typeof (selectedBuyAsset as any).asset?.isNative === 'function'
+          ? !(selectedBuyAsset as any).asset.isNative()
+          : true) &&
         Boolean(
           (selectedBuyAsset as any).issuer?.startsWith('G') ||
+          (typeof (selectedBuyAsset as any).asset?.getIssuer === 'function' &&
+            (selectedBuyAsset as any).asset.getIssuer()?.startsWith('G')) ||
           ((selectedBuyAsset as any).address?.startsWith('G') &&
             !(selectedBuyAsset as any).address?.startsWith('C')) ||
           ((selectedBuyAsset as any).contract?.startsWith('C') &&
-            (selectedBuyAsset as any).issuer?.startsWith('G'))
+            (selectedBuyAsset as any).issuer?.startsWith('G')) ||
+          (typeof quoteSnapshot.data?.toAsset?.getIssuer === 'function' &&
+            quoteSnapshot.data.toAsset.getIssuer()?.startsWith('G'))
         );
 
       const isSoroswap = quoteSnapshot.data?.source === 'SOROSWAP';
+      const isAquarius = quoteSnapshot.data?.source === 'AQUARIUS';
 
       const isSettingTrustline =
         isStellar(toChainId) &&
         isStellarAccountActive !== false &&
         isBuyClassic &&
         !(selectedBuyAsset as any).hasTrustline &&
-        (isSoroswap || !isStellar(fromChainId));
+        (isSoroswap || isAquarius || !isStellar(fromChainId));
 
       if (isSettingTrustline) {
         setExecutionCurrentStep('setting_trustline');
@@ -712,17 +720,28 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
           const stellarProvider = getProvider(WalletType.STELLAR);
           const buyAssetIssuer =
             (selectedBuyAsset as any)?.issuer ||
+            (typeof (selectedBuyAsset as any)?.asset?.getIssuer === 'function'
+              ? (selectedBuyAsset as any).asset.getIssuer()
+              : undefined) ||
             ((selectedBuyAsset as any)?.address?.startsWith('G')
               ? (selectedBuyAsset as any).address
+              : undefined) ||
+            (typeof quoteSnapshot.data?.toAsset?.getIssuer === 'function'
+              ? quoteSnapshot.data.toAsset.getIssuer()
               : undefined);
 
           if (!buyAssetIssuer) {
             throw new Error('Missing issuer for Stellar asset trustline.');
           }
 
-          const rawCode = buyAssetSymbol.includes('-')
-            ? buyAssetSymbol.split('-')[0]
-            : buyAssetSymbol;
+          const rawCode = (
+            selectedBuyAsset?.symbol ||
+            (typeof (selectedBuyAsset as any)?.asset?.getCode === 'function'
+              ? (selectedBuyAsset as any).asset.getCode()
+              : '') ||
+            buyAssetSymbol ||
+            ''
+          ).split(/[:-]/)[0];
 
           const xdr = await buildTrustlineTransaction({
             server,

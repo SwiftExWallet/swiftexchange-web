@@ -261,6 +261,78 @@ describe('getButtonLabel', () => {
     expect(getButtonLabel({ ...baseParams, errorMessage: longMsg })).toBe('SWAP FAILED');
   });
 
+  it('returns "ADD TRUSTLINE & SWAP" when Stellar destination asset is missing a trustline (Stellar to Stellar)', () => {
+    const stellarParams = {
+      ...baseParams,
+      fromChainId: 'pubnet',
+      toChainId: 'pubnet',
+      isStellarAccountActive: true,
+      selectedBuyAsset: {
+        symbol: 'USDC',
+        isNative: false,
+        issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        hasTrustline: false,
+      } as any,
+    };
+    expect(getButtonLabel(stellarParams)).toBe('ADD TRUSTLINE & SWAP');
+  });
+
+  it('returns "ADD TRUSTLINE" when Stellar destination asset is missing a trustline (Cross-chain to Stellar)', () => {
+    const crossChainParams = {
+      ...baseParams,
+      fromChainId: 1,
+      toChainId: 'pubnet',
+      isStellarAccountActive: true,
+      selectedBuyAsset: {
+        symbol: 'USDC',
+        isNative: false,
+        issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        hasTrustline: false,
+      } as any,
+    };
+    expect(getButtonLabel(crossChainParams)).toBe('ADD TRUSTLINE');
+  });
+
+  it('returns "SWAP" when Stellar destination asset already has a trustline', () => {
+    const stellarParams = {
+      ...baseParams,
+      fromChainId: 'pubnet',
+      toChainId: 'pubnet',
+      isStellarAccountActive: true,
+      selectedBuyAsset: {
+        symbol: 'USDC',
+        isNative: false,
+        issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        hasTrustline: true,
+      } as any,
+    };
+    expect(getButtonLabel(stellarParams)).toBe('SWAP');
+  });
+
+  it('returns "SWAP" when Stellar destination asset is native XLM even without trustline flag', () => {
+    const stellarParams = {
+      ...baseParams,
+      fromChainId: 'pubnet',
+      toChainId: 'pubnet',
+      isStellarAccountActive: true,
+      selectedBuyAsset: {
+        symbol: 'XLM',
+        isNative: true,
+        hasTrustline: false,
+      } as any,
+    };
+    expect(getButtonLabel(stellarParams)).toBe('SWAP');
+  });
+
+  it('returns "ACTIVATE ACCOUNT" when Stellar account is not activated', () => {
+    const stellarParams = {
+      ...baseParams,
+      toChainId: 'pubnet',
+      isStellarAccountActive: false,
+    };
+    expect(getButtonLabel(stellarParams)).toBe('ACTIVATE ACCOUNT');
+  });
+
   it('returns "SWAP" when everything is valid', () => {
     expect(getButtonLabel(baseParams)).toBe('SWAP');
   });

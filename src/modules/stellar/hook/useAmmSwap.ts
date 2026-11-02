@@ -477,6 +477,12 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
       }
 
       if (quote.source === 'AQUARIUS' && aquariusService) {
+        const isToNative = toToken?.asset ? toToken.asset.isNative() : toToken?.code === 'XLM';
+        if (toToken && !isToNative && toToken.hasTrustline === false) {
+          throw new Error(
+            `Trustline required for ${toToken.code}. Please establish a trustline in your wallet before swapping.`
+          );
+        }
         const tx = await aquariusService.buildSwapTransaction(userAddress, quote, {
           slippageTolerance,
         });

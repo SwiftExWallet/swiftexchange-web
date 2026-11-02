@@ -231,10 +231,17 @@ export function getButtonLabel(params: ButtonLabelParams): string {
   const isBuyClassic =
     selectedBuyAsset &&
     !selectedBuyAsset.isNative &&
+    (typeof (selectedBuyAsset as any).asset?.isNative === 'function'
+      ? !(selectedBuyAsset as any).asset.isNative()
+      : true) &&
     Boolean(
       (selectedBuyAsset as any).issuer?.startsWith('G') ||
+      (typeof (selectedBuyAsset as any).asset?.getIssuer === 'function' &&
+        (selectedBuyAsset as any).asset.getIssuer()?.startsWith('G')) ||
       ((selectedBuyAsset as any).address?.startsWith('G') &&
-        !(selectedBuyAsset as any).address?.startsWith('C'))
+        !(selectedBuyAsset as any).address?.startsWith('C')) ||
+      ((selectedBuyAsset as any).contract?.startsWith('C') &&
+        (selectedBuyAsset as any).issuer?.startsWith('G'))
     );
 
   if (
