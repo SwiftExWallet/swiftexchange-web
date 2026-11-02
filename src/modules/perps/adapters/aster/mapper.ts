@@ -3,6 +3,7 @@ import BigNumber from 'bignumber.js';
 import type { Candle, Market, OrderBook, Trade } from '../../core/models';
 import { useLeverageStore } from '../../core/stores/leverageStore';
 import type { AssetCtx } from '../../core/stores/tickerStore';
+import { getCurrentPerpNetwork } from './constants';
 
 export class AsterMapper {
   static mapMarket(asterExchangeInfoSymbol: any): Market {
@@ -30,14 +31,17 @@ export class AsterMapper {
     }
 
     // Dynamic leverage lookup from leverageStore (MKT-05)
-    // If brackets are available, use their maximum initialLeverage; otherwise fallback to 50
+    // If brackets are available, use their maximum initialLeverage; otherwise fallback to 20 on testnet / 50 on mainnet
+    const isTestnet = getCurrentPerpNetwork() === 'testnet';
+    const fallbackMax = isTestnet ? 20 : 50;
+
     const storedBrackets =
       useLeverageStore.getState().bracketsBySymbol[pairSymbol] ||
       useLeverageStore.getState().bracketsBySymbol[rawSymbol];
     const maxLeverage =
       storedBrackets && storedBrackets.length > 0
         ? Math.max(...storedBrackets.map(b => b.initialLeverage))
-        : 50;
+        : fallbackMax;
 
     return {
       symbol: pairSymbol,

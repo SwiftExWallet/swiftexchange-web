@@ -680,7 +680,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           depositAmount,
           selectedChainId,
           progress => {
-            if (progress.step === 'CONFIRMING') {
+            if (progress.step === 'SWITCHING_NETWORK') {
+              updateActiveTx({
+                message: progress.message,
+              });
+            } else if (progress.step === 'CONFIRMING') {
               updateActiveTx({
                 step: 'CONFIRMING',
                 txHash: progress.txHash,
@@ -796,10 +800,17 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     try {
       const provider = walletService.getProvider('evm');
       if (!provider) throw new Error('EVM wallet not connected');
-      const ep = new ethers.BrowserProvider(provider as any);
-      const userWalletSigner = await ep.getSigner();
 
       if (currentExchange === 'hyperliquid') {
+        if (selectedChainId !== 42161) {
+          updateActiveTx({
+            message: 'Please switch your wallet to Arbitrum One...',
+          });
+          await switchOrAddChain(provider, 42161);
+        }
+        const ep = new ethers.BrowserProvider(provider as any);
+        const userWalletSigner = await ep.getSigner();
+
         // HYPERLIQUID WITHDRAW FLOW
         await withdrawFromHyperliquid(
           userWalletSigner,
@@ -820,9 +831,21 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         });
       } else {
         // ASTER WITHDRAW FLOW
+        updateActiveTx({
+          message: `Please switch your wallet to ${EVM_CHAINS[selectedChainId]?.name || 'target chain'}...`,
+        });
+        await switchOrAddChain(provider, selectedChainId);
+
+        const ep = new ethers.BrowserProvider(provider as any);
+        const userWalletSigner = await ep.getSigner();
+
         if (!asterSigner || !userAddr) return;
         const nonce = Date.now() * 1000;
         const fee = String(chainWithdrawDetails.fee || '0');
+
+        updateActiveTx({
+          message: 'Please sign the withdrawal authorization in your wallet...',
+        });
 
         const userSignature = await signEVMWithdraw(
           userWalletSigner,

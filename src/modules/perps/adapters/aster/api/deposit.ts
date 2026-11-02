@@ -2,6 +2,7 @@ import BigNumber from 'bignumber.js';
 import { ethers } from 'ethers';
 
 import { switchOrAddChain } from '../../../../evm/utils/evmChainUtils';
+import { rpcManager } from '../../../../evm/utils/rpcProvider';
 import { EVM_CHAINS, getAsterDepositBridge } from '../constants';
 import type { DepositAsset } from './account';
 
@@ -64,19 +65,31 @@ export async function fetchOnChainWalletBalance(
   userAddress: string,
   asset: DepositAsset
 ): Promise<string> {
-  if (!provider || !userAddress || !asset) return '0';
+  if (!userAddress || !asset) return '0';
   try {
-    const browserProvider = new ethers.BrowserProvider(provider);
+    let readProvider: ethers.AbstractProvider | null = null;
+    if (asset.chainId) {
+      try {
+        readProvider = rpcManager.getProviders(asset.chainId)[0] || null;
+      } catch {
+        readProvider = null;
+      }
+    }
+    if (!readProvider && provider) {
+      readProvider = new ethers.BrowserProvider(provider);
+    }
+    if (!readProvider) return '0';
+
     const isNative =
       asset.isNative ||
       !asset.contractAddress ||
       asset.contractAddress === '0x0000000000000000000000000000000000000000';
 
     if (isNative) {
-      const bal = await browserProvider.getBalance(userAddress);
+      const bal = await readProvider.getBalance(userAddress);
       return ethers.formatEther(bal);
     } else {
-      const contract = new ethers.Contract(asset.contractAddress, ERC20_ABI, browserProvider);
+      const contract = new ethers.Contract(asset.contractAddress, ERC20_ABI, readProvider);
       const bal = await contract.balanceOf(userAddress);
       return ethers.formatUnits(bal, asset.decimals || 18);
     }
