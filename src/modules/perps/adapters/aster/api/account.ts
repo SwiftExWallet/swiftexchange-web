@@ -164,7 +164,8 @@ export async function getLeverageBracket(
 export async function getIncomeHistory(
   signer: Signer,
   userAddr: string,
-  params: GetIncomeHistoryParams = {}
+  params: GetIncomeHistoryParams = {},
+  signal?: AbortSignal
 ): Promise<IncomeRecord[]> {
   const p: Record<string, string> = {};
   if (params.symbol) p.symbol = params.symbol;
@@ -172,7 +173,7 @@ export async function getIncomeHistory(
   if (params.startTime !== undefined) p.startTime = String(params.startTime);
   if (params.endTime !== undefined) p.endTime = String(params.endTime);
   if (params.limit !== undefined) p.limit = String(params.limit);
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.INCOME, p);
+  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.INCOME, p, undefined, signal);
 }
 
 export async function changeMultiAssetsMargin(
@@ -213,7 +214,8 @@ export async function getUserTrades(
   signer: Signer,
   userAddr: string,
   symbol?: string,
-  opts: { startTime?: number; endTime?: number; limit?: number; fromId?: number } = {}
+  opts: { startTime?: number; endTime?: number; limit?: number; fromId?: number } = {},
+  signal?: AbortSignal
 ): Promise<AsterUserTrade[]> {
   const p: Record<string, string> = {};
   if (symbol) p.symbol = symbol;
@@ -221,7 +223,7 @@ export async function getUserTrades(
   if (opts.endTime !== undefined) p.endTime = String(opts.endTime);
   if (opts.limit !== undefined) p.limit = String(opts.limit);
   if (opts.fromId !== undefined) p.fromId = String(opts.fromId);
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.USER_TRADES, p);
+  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.USER_TRADES, p, undefined, signal);
 }
 
 const depositAssetsCache: Record<string, { timestamp: number; data: DepositAsset[] }> = {};

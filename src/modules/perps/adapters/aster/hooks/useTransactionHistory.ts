@@ -10,14 +10,6 @@ export type TimeRange = '1d' | '1w' | '1m' | '3m';
 
 const PAGE_LIMIT = 100;
 const CACHE_TTL = 30000; // 30 seconds
-const SEVEN_DAYS_MS = 6.9 * 24 * 60 * 60 * 1000; // Safely under Aster's 7-day query interval limit
-const BATCH_SPAN_MS = 30 * 24 * 60 * 60 * 1000; // 30 days per pagination batch
-const TIME_RANGE_MS: Record<TimeRange, number> = {
-  '1d': 24 * 60 * 60 * 1000,
-  '1w': 7 * 24 * 60 * 60 * 1000,
-  '1m': 30 * 24 * 60 * 60 * 1000,
-  '3m': 90 * 24 * 60 * 60 * 1000,
-};
 
 interface CacheEntry {
   data: IncomeRecord[];
@@ -35,17 +27,6 @@ const sortDesc = (items: IncomeRecord[]) => {
 const getRecordKey = (item: IncomeRecord) => {
   return `${item.tranId || ''}_${item.time || ''}_${item.incomeType || ''}_${item.symbol || ''}`;
 };
-
-function buildTimeChunks(startMs: number, endMs: number): { startTime: number; endTime: number }[] {
-  const chunks: { startTime: number; endTime: number }[] = [];
-  let curEnd = endMs;
-  while (curEnd > startMs) {
-    const curStart = Math.max(startMs, curEnd - SEVEN_DAYS_MS);
-    chunks.push({ startTime: Math.floor(curStart), endTime: Math.floor(curEnd) });
-    curEnd = curStart - 1;
-  }
-  return chunks;
-}
 
 const deduplicateIncome = (existing: IncomeRecord[], incoming: IncomeRecord[]) => {
   const seen = new Set<string>();
@@ -70,7 +51,7 @@ export const useTransactionHistory = (
   const cachedEntry = cacheKey ? globalIncomeCache[cacheKey] : undefined;
 
   const [income, setIncome] = useState<IncomeRecord[]>(() => cachedEntry?.data || []);
-  const [isLoading, setIsLoading] = useState(() => !cachedEntry);
+  const [isLoading, setIsLoading] = useState(() => !cachedEntry || cachedEntry.data.length === 0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(() => (cachedEntry ? cachedEntry.hasMore : true));
 
@@ -88,7 +69,12 @@ export const useTransactionHistory = (
     let isMounted = true;
     const currentCached = globalIncomeCache[cacheKey];
 
-    if (currentCached && Date.now() - currentCached.timestamp < CACHE_TTL) {
+    // Only skip fetching if we have valid non-empty cached data within TTL
+    if (
+      currentCached &&
+      currentCached.data.length > 0 &&
+      Date.now() - currentCached.timestamp < CACHE_TTL
+    ) {
       setIncome(currentCached.data);
       setHasMore(currentCached.hasMore);
       oldestQueriedRef.current = currentCached.oldestQueried;
@@ -96,60 +82,45 @@ export const useTransactionHistory = (
       return;
     }
 
-    if (!currentCached) {
-      setIsLoading(true);
-    }
+    setIsLoading(true);
 
     const fetchHistory = async () => {
       try {
         const now = Date.now();
-        const duration = TIME_RANGE_MS[timeRange] || TIME_RANGE_MS['1m'];
-        const minStartTime = now - duration;
 
-        const initialBatchEnd = now;
-        const initialBatchStart = Math.max(minStartTime, now - BATCH_SPAN_MS);
-        const chunks = buildTimeChunks(initialBatchStart, initialBatchEnd);
-
-        const results = await Promise.allSettled(
-          chunks.map(chunk =>
-            getIncomeHistory(signer, userAddr, {
-              symbol: symbol || undefined,
-              startTime: chunk.startTime,
-              endTime: chunk.endTime,
-              limit: PAGE_LIMIT,
-            })
-          )
-        );
+        // Fetch recent income up to `now` without specifying a 30-day startTime
+        const records = await getIncomeHistory(signer, userAddr, {
+          symbol: symbol || undefined,
+          endTime: now,
+          limit: PAGE_LIMIT,
+        });
 
         if (!isMounted) return;
 
-        const collected: IncomeRecord[] = [];
-        for (const res of results) {
-          if (res.status === 'fulfilled' && Array.isArray(res.value)) {
-            collected.push(...res.value);
-          }
-        }
-
         const sorted = sortDesc(
-          collected.filter((item, idx, arr) => {
+          records.filter((item, idx, arr) => {
             const key = getRecordKey(item);
             return arr.findIndex(x => getRecordKey(x) === key) === idx;
           })
         );
 
-        oldestQueriedRef.current = initialBatchStart;
-        const more = initialBatchStart > minStartTime;
+        const oldest = sorted.length > 0 ? sorted[sorted.length - 1].time || now : now;
+        const more = sorted.length >= PAGE_LIMIT;
 
         setIncome(sorted);
         setHasMore(more);
-        globalIncomeCache[cacheKey] = {
-          data: sorted,
-          timestamp: Date.now(),
-          hasMore: more,
-          oldestQueried: initialBatchStart,
-        };
-      } catch (err) {
-        console.error('Failed to load transaction history:', err);
+        oldestQueriedRef.current = oldest;
+
+        if (sorted.length > 0) {
+          globalIncomeCache[cacheKey] = {
+            data: sorted,
+            timestamp: Date.now(),
+            hasMore: more,
+            oldestQueried: oldest,
+          };
+        }
+      } catch (err: any) {
+        console.error('[Aster Transaction History] Failed to load transaction history:', err);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -165,21 +136,10 @@ export const useTransactionHistory = (
   const loadMore = useCallback(async () => {
     if (!signer || !userAddr || isLoadingMore || !hasMore || isFetchingMoreRef.current) return;
 
-    const now = Date.now();
-    const duration = TIME_RANGE_MS[timeRange] || TIME_RANGE_MS['1m'];
-    const minStartTime = now - duration;
-
     const curEnd = oldestQueriedRef.current - 1;
-    if (curEnd <= minStartTime) {
+    if (curEnd <= 0) {
       setHasMore(false);
       if (globalIncomeCache[cacheKey]) globalIncomeCache[cacheKey].hasMore = false;
-      return;
-    }
-
-    const curStart = Math.max(minStartTime, curEnd - BATCH_SPAN_MS);
-    const chunks = buildTimeChunks(curStart, curEnd);
-    if (chunks.length === 0) {
-      setHasMore(false);
       return;
     }
 
@@ -187,42 +147,34 @@ export const useTransactionHistory = (
     setIsLoadingMore(true);
 
     try {
-      const results = await Promise.allSettled(
-        chunks.map(chunk =>
-          getIncomeHistory(signer, userAddr, {
-            symbol: symbol || undefined,
-            startTime: chunk.startTime,
-            endTime: chunk.endTime,
-            limit: PAGE_LIMIT,
-          })
-        )
-      );
+      const nextBatch = await getIncomeHistory(signer, userAddr, {
+        symbol: symbol || undefined,
+        endTime: curEnd,
+        limit: PAGE_LIMIT,
+      });
 
-      const nextBatch: IncomeRecord[] = [];
-      for (const res of results) {
-        if (res.status === 'fulfilled' && Array.isArray(res.value)) {
-          nextBatch.push(...res.value);
-        }
-      }
+      const sortedNext = sortDesc(nextBatch);
+      const oldest =
+        sortedNext.length > 0 ? sortedNext[sortedNext.length - 1].time || curEnd : curEnd;
+      const more = sortedNext.length >= PAGE_LIMIT;
 
-      oldestQueriedRef.current = curStart;
-      const more = curStart > minStartTime;
+      oldestQueriedRef.current = oldest;
 
       setIncome(prev => {
-        const combined = deduplicateIncome(prev, nextBatch);
+        const combined = deduplicateIncome(prev, sortedNext);
         if (globalIncomeCache[cacheKey]) {
           globalIncomeCache[cacheKey] = {
             data: combined,
             timestamp: Date.now(),
             hasMore: more,
-            oldestQueried: curStart,
+            oldestQueried: oldest,
           };
         }
         return combined;
       });
       setHasMore(more);
     } catch (err) {
-      console.error('Failed to load more transaction history:', err);
+      console.error('[Aster Transaction History] Failed to load more transaction history:', err);
     } finally {
       setIsLoadingMore(false);
       isFetchingMoreRef.current = false;

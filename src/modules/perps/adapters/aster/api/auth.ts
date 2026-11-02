@@ -126,7 +126,8 @@ export async function signedRequest(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   params: Record<string, string> = {},
-  baseUrl?: string
+  baseUrl?: string,
+  signal?: AbortSignal
 ): Promise<any> {
   const defaultBaseUrl = getAsterRestUrl();
   let effectiveBaseUrl = defaultBaseUrl;
@@ -167,6 +168,14 @@ export async function signedRequest(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timeoutId);
+      throw new Error('Request aborted');
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
   if (method === 'GET') {
     url = `${effectiveBaseUrl}${path}?${finalQs}`;
     fetchOptions = { method: 'GET', signal: controller.signal };
@@ -185,7 +194,10 @@ export async function signedRequest(
     res = await fetch(url, fetchOptions);
   } catch (err: any) {
     clearTimeout(timeoutId);
-    if (err?.name === 'AbortError') {
+    if (signal?.aborted || err?.name === 'AbortError') {
+      if (signal?.aborted) {
+        throw new Error('Request aborted');
+      }
       throw new Error(`Aster API request timed out after 15s: ${method} ${path}`);
     }
     throw err;

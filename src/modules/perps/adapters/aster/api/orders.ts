@@ -240,7 +240,8 @@ export async function getOpenOrders(
 export async function getAllOrders(
   signer: Signer,
   userAddr: string,
-  params: GetAllOrdersParams
+  params: GetAllOrdersParams,
+  signal?: AbortSignal
 ): Promise<AsterOrderResponse[]> {
   if (!params.symbol) {
     throw new Error('symbol parameter is mandatory for getAllOrders on Aster API v3.');
@@ -259,7 +260,7 @@ export async function getAllOrders(
     throw new Error('Query time window cannot exceed 7 days for getAllOrders.');
   }
 
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ALL_ORDERS, p);
+  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ALL_ORDERS, p, undefined, signal);
 }
 
 /**

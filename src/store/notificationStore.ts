@@ -208,6 +208,11 @@ export const useNotificationStore = create<NotificationState>()(
       showToast: notif => {
         const state = get();
 
+        // Do not show toast if this notification type is disabled
+        if (state.enabledTypes && state.enabledTypes[notif.type] === false) {
+          return;
+        }
+
         // Prevent duplicate toast spam within 1.5s (e.g. from both REST submit and WebSocket event)
         const isDuplicate = state.activeToasts.some(
           t =>
