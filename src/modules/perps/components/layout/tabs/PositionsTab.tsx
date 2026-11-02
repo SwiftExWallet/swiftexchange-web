@@ -1,4 +1,4 @@
-import { Layers } from 'lucide-react';
+import { Layers, Plus } from 'lucide-react';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 
 import BigNumber from 'bignumber.js';
@@ -9,6 +9,7 @@ import { useAccountStore } from '../../../core/stores/accountStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
 import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
+import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
 import { useUnifiedExecution } from '../../../services/useUnifiedExecution';
@@ -41,6 +42,34 @@ const PositionRow = memo(
     const [tpSlModalOpen, setTpSlModalOpen] = useState(false);
     const [isClosingThis, setIsClosingThis] = useState(false);
     const [isReversingThis, setIsReversingThis] = useState(false);
+    const [optimisticTp, setOptimisticTp] = useState<string | null>(null);
+    const [optimisticSl, setOptimisticSl] = useState<string | null>(null);
+
+    const orders = useOrderStore(state => state.orders);
+    const posCleanSym = position.symbol.replace('-', '').toUpperCase();
+
+    const { tpOrder, slOrder } = useMemo(() => {
+      const activeOrders = Object.values(orders).filter(o => {
+        if (o.status !== 'new' && o.status !== 'partially_filled') return false;
+        const oSym = o.symbol.replace('-', '').toUpperCase();
+        return oSym === posCleanSym;
+      });
+
+      const tp = activeOrders.find(o => {
+        const raw = (o.rawType || o.origType || o.type || '').toUpperCase();
+        return raw.includes('PROFIT');
+      });
+
+      const sl = activeOrders.find(o => {
+        const raw = (o.rawType || o.origType || o.type || '').toUpperCase();
+        return raw.includes('STOP');
+      });
+
+      return { tpOrder: tp, slOrder: sl };
+    }, [orders, posCleanSym]);
+
+    const effectiveTp = tpOrder?.stopPrice || optimisticTp;
+    const effectiveSl = slOrder?.stopPrice || optimisticSl;
 
     const assetCtx = useTickerStore(
       state =>
@@ -232,27 +261,41 @@ const PositionRow = memo(
           </div>
         </td>
         <td className="px-2.5 py-1.5 text-primary">
-          <button
-            type="button"
-            onClick={() => setTpSlModalOpen(true)}
-            className="flex items-center space-x-1 text-secondary hover:text-primary transition-colors text-[11px] cursor-pointer"
-          >
-            <span>Add</span>
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {effectiveTp || effectiveSl ? (
+            <div className="flex items-center gap-1.5 font-mono">
+              <div className="flex flex-col text-[10px] leading-tight">
+                <span className={effectiveTp ? 'text-success font-medium' : 'text-muted'}>
+                  TP:{' '}
+                  {effectiveTp
+                    ? formatPricePrecision(parseFloat(effectiveTp), tickSize, tickDecimals)
+                    : '--'}
+                </span>
+                <span className={effectiveSl ? 'text-danger font-medium' : 'text-muted'}>
+                  SL:{' '}
+                  {effectiveSl
+                    ? formatPricePrecision(parseFloat(effectiveSl), tickSize, tickDecimals)
+                    : '--'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTpSlModalOpen(true)}
+                className="p-1 rounded text-secondary hover:text-primary hover:bg-tertiary transition-colors cursor-pointer"
+                title="Edit TP/SL"
+              >
+                <Plus size={11} strokeWidth={2.5} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setTpSlModalOpen(true)}
+              className="flex items-center gap-1 text-secondary hover:text-primary transition-colors text-[11px] cursor-pointer"
             >
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
-          </button>
+              <span>Add</span>
+              <Plus size={11} strokeWidth={2.5} />
+            </button>
+          )}
         </td>
         <td className="px-2.5 py-1.5">
           <button
@@ -291,31 +334,56 @@ const PositionRow = memo(
           </button>
         </td>
 
-        {/* Modals */}
         <ConfirmationModal
           isOpen={closeModalOpen}
           title="Close Position"
           message={
-            <div className="flex flex-col gap-2 p-3 bg-secondary rounded-lg border border-color text-xs mt-2">
-              <div className="flex justify-between items-center text-secondary">
-                <span>Symbol</span>
-                <span className="text-primary font-bold">{position.symbol.replace('-', '')}</span>
+            <div className="space-y-3 pt-0.5">
+              <div className="bg-tertiary rounded-xl p-3 border border-color space-y-2 text-[11px]">
+                <div className="flex justify-between text-secondary">
+                  <span>Symbol</span>
+                  <span className="text-primary font-mono font-semibold">
+                    {position.symbol.replace('-', '')}
+                  </span>
+                </div>
+                <div className="flex justify-between text-secondary">
+                  <span>Position Size</span>
+                  <div className="flex items-center gap-1.5 font-mono">
+                    <span
+                      className={
+                        isLong ? 'text-success font-semibold' : 'text-danger font-semibold'
+                      }
+                    >
+                      {isLong ? 'LONG' : 'SHORT'} {leverage}x
+                    </span>
+                    <span className="text-primary font-medium">
+                      {absSize} {baseSymbol}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex justify-between text-secondary">
+                  <span>Entry Price</span>
+                  <span className="text-primary font-mono font-medium">
+                    $
+                    {parseFloat(position.entryPrice || '0').toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-secondary border-t border-color pt-2 font-semibold">
+                  <span>Estimated PnL</span>
+                  <span
+                    className={`font-mono ${pnlVal > 0 ? 'text-success' : pnlVal < 0 ? 'text-danger' : 'text-primary'}`}
+                  >
+                    {pnlVal > 0 ? '+' : ''}
+                    {pnlVal.toFixed(2)} USDT
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between items-center text-secondary">
-                <span>Size</span>
-                <span className="text-primary font-medium">
-                  {absSize} {baseSymbol}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-secondary">
-                <span>Estimated PnL</span>
-                <span
-                  className={`font-mono font-medium ${pnlVal > 0 ? 'text-success' : pnlVal < 0 ? 'text-danger' : 'text-primary'}`}
-                >
-                  {pnlVal > 0 ? '+' : ''}
-                  {pnlVal.toFixed(2)} USDT
-                </span>
-              </div>
+
+              <p className="text-[11px] text-secondary leading-relaxed px-0.5">
+                Your position will be closed immediately at best available market price.
+              </p>
             </div>
           }
           onConfirm={handleConfirmClose}
@@ -331,53 +399,50 @@ const PositionRow = memo(
           isOpen={reverseModalOpen}
           title="Reverse Position"
           message={
-            <div className="flex flex-col gap-3 p-3 bg-secondary rounded-lg border border-color text-xs mt-2">
-              <div className="flex justify-between items-center text-secondary">
-                <span>Symbol</span>
-                <span className="text-primary font-bold">{position.symbol.replace('-', '')}</span>
-              </div>
-              <div className="flex justify-between items-center text-secondary">
-                <span>Size</span>
-                <span className="text-primary font-medium">
-                  {absSize} {baseSymbol}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-secondary">
-                <span>Direction Change</span>
-                <div className="flex items-center gap-1.5 font-medium">
-                  <span className={isLong ? 'text-success' : 'text-danger'}>
-                    {isLong ? 'LONG' : 'SHORT'}
-                  </span>
-                  <span className="text-muted">➔</span>
-                  <span className={!isLong ? 'text-success' : 'text-danger'}>
-                    {!isLong ? 'LONG' : 'SHORT'}
+            <div className="space-y-3 pt-0.5">
+              <div className="bg-tertiary rounded-xl p-3 border border-color space-y-2 text-[11px]">
+                <div className="flex justify-between text-secondary">
+                  <span>Symbol</span>
+                  <span className="text-primary font-mono font-semibold">
+                    {position.symbol.replace('-', '')}
                   </span>
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mt-1 pt-2 border-t border-color text-center">
-                <div className="p-2 bg-tertiary rounded flex flex-col items-center">
-                  <span className="text-muted text-[10px]">1. Close Current</span>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${isLong ? 'text-danger bg-danger/10' : 'text-success bg-success/10'}`}
-                  >
-                    {isLong ? 'SELL' : 'BUY'} {absSize}
-                  </span>
-                  <span className="text-secondary text-[11px] mt-1.5 font-medium">
-                    Market Price
+                <div className="flex justify-between text-secondary">
+                  <span>Position Size</span>
+                  <span className="text-primary font-mono font-medium">
+                    {absSize} {baseSymbol}
                   </span>
                 </div>
-                <div className="p-2 bg-tertiary rounded flex flex-col items-center">
-                  <span className="text-muted text-[10px]">2. Open Opposite</span>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${!isLong ? 'text-success bg-success/10' : 'text-danger bg-danger/10'}`}
-                  >
-                    {!isLong ? 'LONG' : 'SHORT'} {leverage}x
-                  </span>
-                  <span className="text-secondary text-[11px] mt-1.5 font-medium">
-                    Market Price
-                  </span>
+                <div className="flex justify-between text-secondary">
+                  <span>Reversal Direction</span>
+                  <div className="flex items-center gap-1.5 font-mono">
+                    <span
+                      className={
+                        isLong ? 'text-success font-semibold' : 'text-danger font-semibold'
+                      }
+                    >
+                      {isLong ? 'LONG' : 'SHORT'}
+                    </span>
+                    <span className="text-muted">➔</span>
+                    <span
+                      className={
+                        !isLong ? 'text-success font-semibold' : 'text-danger font-semibold'
+                      }
+                    >
+                      {!isLong ? 'LONG' : 'SHORT'} {leverage}x
+                    </span>
+                  </div>
+                </div>
+                <div className="flex justify-between text-secondary border-t border-color pt-2">
+                  <span>Execution Type</span>
+                  <span className="text-primary font-medium">Market Order (Immediate)</span>
                 </div>
               </div>
+
+              <p className="text-[11px] text-secondary leading-relaxed px-0.5">
+                Your active {isLong ? 'LONG' : 'SHORT'} will be closed and an opposite position of{' '}
+                {absSize} {baseSymbol} ({leverage}x) will be opened immediately at market price.
+              </p>
             </div>
           }
           onConfirm={handleConfirmReverse}
@@ -393,6 +458,12 @@ const PositionRow = memo(
           isOpen={tpSlModalOpen}
           onClose={() => setTpSlModalOpen(false)}
           position={position}
+          currentTpPrice={effectiveTp}
+          currentSlPrice={effectiveSl}
+          onSuccess={(tp, sl) => {
+            if (tp) setOptimisticTp(tp);
+            if (sl) setOptimisticSl(sl);
+          }}
         />
       </tr>
     );
@@ -491,35 +562,45 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
         </tbody>
       </table>
 
-      {/* Close All Confirmation Modal */}
       <ConfirmationModal
         isOpen={closeAllModalOpen}
         title="Close All Positions"
         message={
-          <div className="flex flex-col gap-2 p-3 bg-secondary rounded-lg border border-color text-xs mt-2">
-            <p className="text-primary font-medium">
-              Are you sure you want to market close all{' '}
-              <strong className="text-warning">{positionList.length}</strong> open positions?
-            </p>
-            <div className="text-muted text-[11px] space-y-1 mt-1 max-h-40 overflow-y-auto">
-              {positionList.map(p => (
-                <div
-                  key={p.symbol}
-                  className="flex justify-between items-center py-0.5 border-b border-color/40 last:border-0"
-                >
-                  <span className="font-semibold text-secondary">{p.symbol.replace('-', '')}</span>
-                  <span
-                    className={
-                      parseFloat(p.size) > 0
-                        ? 'text-success font-medium'
-                        : 'text-danger font-medium'
-                    }
-                  >
-                    {parseFloat(p.size) > 0 ? 'LONG' : 'SHORT'} {Math.abs(parseFloat(p.size))}
-                  </span>
-                </div>
-              ))}
+          <div className="space-y-3 pt-0.5">
+            <div className="bg-tertiary rounded-xl p-3 border border-color space-y-2 text-[11px]">
+              <div className="flex justify-between text-secondary">
+                <span>Positions to Close</span>
+                <span className="text-primary font-mono font-semibold">
+                  {positionList.length} Open
+                </span>
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1.5 pt-2 border-t border-color">
+                {positionList.map(p => {
+                  const sizeNum = parseFloat(p.size);
+                  const isL = sizeNum > 0;
+                  return (
+                    <div key={p.symbol} className="flex justify-between items-center text-[11px]">
+                      <span className="text-primary font-mono">{p.symbol.replace('-', '')}</span>
+                      <div className="flex items-center gap-1.5 font-mono">
+                        <span
+                          className={
+                            isL ? 'text-success font-semibold' : 'text-danger font-semibold'
+                          }
+                        >
+                          {isL ? 'LONG' : 'SHORT'}
+                        </span>
+                        <span className="text-secondary">{Math.abs(sizeNum)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+
+            <p className="text-[11px] text-secondary leading-relaxed px-0.5">
+              All {positionList.length} positions will be closed immediately at current best
+              available market prices.
+            </p>
           </div>
         }
         onConfirm={handleConfirmCloseAll}

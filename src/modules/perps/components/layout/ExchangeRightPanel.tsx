@@ -153,14 +153,19 @@ export const ExchangeOrderFormPanel: React.FC = () => {
       let res: any = null;
 
       if (payload.type === 'SCALED') {
-        const pLower = parseFloat(payload.scaledPriceLower || '0');
-        const pUpper = parseFloat(payload.scaledPriceUpper || '0');
+        const rawLower = parseFloat(payload.scaledPriceLower || '0');
+        const rawUpper = parseFloat(payload.scaledPriceUpper || '0');
         const n = parseInt(payload.scaledOrderCount || '5', 10);
         const dist = payload.scaledDistribution || 'FLAT';
         const tSize = parseFloat(finalSize || '0');
 
         if (n < 2 || n > 20) throw new Error('Order count must be between 2 and 20');
-        if (pLower <= 0 || pUpper <= 0 || pLower >= pUpper) throw new Error('Invalid price range');
+        if (rawLower <= 0 || rawUpper <= 0)
+          throw new Error('Please enter valid Lower and Upper prices');
+
+        const pLower = Math.min(rawLower, rawUpper);
+        const pUpper = Math.max(rawLower, rawUpper);
+        if (pLower === pUpper) throw new Error('Lower and Upper prices cannot be identical');
 
         const priceStep = (pUpper - pLower) / (n - 1);
         const sumWeights = (n * (n + 1)) / 2;
@@ -184,7 +189,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
               quantity: fSize,
               price: fPrice,
               timeInForce: 'GTC',
-              reduceOnly: payload.isReduceOnly,
+              reduceOnly: false,
             });
           }
         }
@@ -233,7 +238,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
           type: payload.type,
           price: !isMarket && !isTrailingStop ? formattedPrice || '0' : '0',
           size: formattedQty || payload.size,
-          reduceOnly: payload.isReduceOnly,
+          reduceOnly: isPostOnly ? false : payload.isReduceOnly,
           timeInForce: !isMarket && !isTrailingStop ? (isPostOnly ? 'GTX' : tif) : undefined,
           stopPrice: !isMarket && !isTrailingStop ? formattedStopPrice : undefined,
           callbackRate: isTrailingStop ? payload.callbackRate || '1.0' : undefined,

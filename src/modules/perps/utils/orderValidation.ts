@@ -6,7 +6,14 @@ import type { OrderSide, OrderType } from '../core/stores/orderEntryStore';
 export interface ValidationResult {
   isValid: boolean;
   error?: string;
-  errorField?: 'price' | 'size' | 'stopPrice' | 'callbackRate';
+  errorField?:
+    | 'price'
+    | 'size'
+    | 'stopPrice'
+    | 'callbackRate'
+    | 'scaledPriceLower'
+    | 'scaledPriceUpper'
+    | 'scaledOrderCount';
 }
 
 function isMultipleOf(val: number | string, step: number | string): boolean {
@@ -29,7 +36,10 @@ export function validateOrder(
   sizeAsset: 'base' | 'quote',
   stopPriceStr?: string,
   callbackRateStr?: string,
-  maxPossibleSize?: number
+  maxPossibleSize?: number,
+  scaledPriceLower?: string,
+  scaledPriceUpper?: string,
+  scaledOrderCount?: string
 ): ValidationResult {
   if (!market) {
     return { isValid: false };
@@ -126,6 +136,41 @@ export function validateOrder(
         isValid: false,
         error: 'Callback rate must be between 0.1% and 5%',
         errorField: 'callbackRate',
+      };
+    }
+  }
+
+  if (orderType === 'SCALED') {
+    if (!scaledPriceLower || scaledPriceLower.trim() === '') {
+      return { isValid: false, errorField: 'scaledPriceLower' };
+    }
+    const bnLower = new BigNumber(scaledPriceLower);
+    if (bnLower.isNaN() || bnLower.lte(0)) {
+      return { isValid: false, error: 'Enter a valid lower price', errorField: 'scaledPriceLower' };
+    }
+
+    if (!scaledPriceUpper || scaledPriceUpper.trim() === '') {
+      return { isValid: false, errorField: 'scaledPriceUpper' };
+    }
+    const bnUpper = new BigNumber(scaledPriceUpper);
+    if (bnUpper.isNaN() || bnUpper.lte(0)) {
+      return { isValid: false, error: 'Enter a valid upper price', errorField: 'scaledPriceUpper' };
+    }
+
+    if (bnLower.gte(bnUpper)) {
+      return {
+        isValid: false,
+        error: 'Upper Price must be higher than Lower Price',
+        errorField: 'scaledPriceUpper',
+      };
+    }
+
+    const count = parseInt(scaledOrderCount || '0', 10);
+    if (isNaN(count) || count < 2 || count > 20) {
+      return {
+        isValid: false,
+        error: 'Order count must be between 2 and 20',
+        errorField: 'scaledOrderCount',
       };
     }
   }

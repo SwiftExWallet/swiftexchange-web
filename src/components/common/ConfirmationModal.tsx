@@ -1,3 +1,4 @@
+import { X } from 'lucide-react';
 import React, { useEffect } from 'react';
 
 export interface ConfirmationModalProps {
@@ -49,30 +50,39 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in p-4"
       onClick={isLoading ? undefined : onCancel}
     >
       <div
-        className="w-full max-w-sm sm:max-w-md bg-secondary rounded-xl shadow-lg border border-color animate-slide-up overflow-hidden"
+        className="w-full max-w-sm sm:max-w-[420px] bg-secondary rounded-2xl shadow-2xl border border-color animate-scale-in overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? 'modal-title' : undefined}
         onClick={handleModalClick}
       >
-        <div className="p-6 space-y-3">
-          {title && (
-            <h3 id="modal-title" className="text-xl font-semibold text-primary">
+        {title && (
+          <div className="flex items-center justify-between px-5 py-4 border-b border-color bg-secondary">
+            <h3 id="modal-title" className="text-primary text-[15px] font-semibold tracking-tight">
               {title}
             </h3>
-          )}
-          <div className="text-secondary text-sm md:text-base leading-relaxed">{message}</div>
-        </div>
+            <button
+              onClick={onCancel}
+              disabled={isLoading}
+              aria-label="Close"
+              className="text-secondary hover:text-primary transition-colors p-1.5 rounded-lg hover:bg-tertiary cursor-pointer disabled:opacity-40"
+            >
+              <X size={18} strokeWidth={2} />
+            </button>
+          </div>
+        )}
 
-        <div className="px-6 py-4 bg-tertiary border-t border-color flex justify-end gap-3 rounded-b-xl">
+        <div className="p-5 text-secondary text-sm leading-relaxed">{message}</div>
+
+        <div className="px-5 py-3.5 bg-tertiary/20 border-t border-color flex items-center justify-end gap-2.5">
           <button
             onClick={onCancel}
             disabled={isLoading}
-            className="btn btn-ghost disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="h-10 px-4 text-xs font-semibold text-secondary hover:text-primary bg-tertiary hover:bg-hover border border-color rounded-xl transition-all disabled:opacity-40 cursor-pointer"
             type="button"
           >
             {cancelText}
@@ -80,30 +90,17 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           <button
             onClick={onConfirm}
             disabled={isLoading}
-            className={`btn btn-${confirmButtonType} flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed min-w-[120px] cursor-pointer`}
+            className={`h-10 px-5 text-xs font-semibold rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer ${
+              confirmButtonType === 'danger'
+                ? 'bg-danger text-white hover:bg-danger/90 shadow-danger/20'
+                : confirmButtonType === 'success'
+                  ? 'bg-success text-white hover:bg-success/90 shadow-success/20'
+                  : 'bg-brand text-white hover:bg-brand-hover shadow-brand/20'
+            }`}
             type="button"
           >
             {isLoading && (
-              <svg
-                className="animate-spin -ml-0.5 mr-1 h-3.5 w-3.5 text-current shrink-0"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
+              <span className="inline-block animate-spin h-3.5 w-3.5 border-2 border-white/20 border-t-white rounded-full mr-0.5" />
             )}
             <span>
               {isLoading

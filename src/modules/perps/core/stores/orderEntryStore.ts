@@ -103,8 +103,12 @@ interface OrderEntryStoreState {
   setAttachedSlPrice: (price: string) => void;
   setAttachedSlTrigger: (trigger: WorkingType) => void;
 
-  activeInput: 'price' | 'stopPrice' | 'activationPrice' | null;
-  setActiveInput: (input: 'price' | 'stopPrice' | 'activationPrice' | null) => void;
+  activeInput:
+    'price' | 'stopPrice' | 'activationPrice' | 'scaledPriceLower' | 'scaledPriceUpper' | null;
+  setActiveInput: (
+    input:
+      'price' | 'stopPrice' | 'activationPrice' | 'scaledPriceLower' | 'scaledPriceUpper' | null
+  ) => void;
   applyOrderbookPrice: (price: string) => void;
 
   reset: () => void;
@@ -261,6 +265,18 @@ export const useOrderEntryStore = create<OrderEntryStoreState>()(
           }
           if (state.activeInput === 'price') {
             return { price };
+          }
+          if (state.activeInput === 'scaledPriceLower') {
+            return { scaledPriceLower: price };
+          }
+          if (state.activeInput === 'scaledPriceUpper') {
+            return { scaledPriceUpper: price };
+          }
+          if (state.orderType === 'SCALED') {
+            if (!state.scaledPriceLower || state.scaledPriceLower === '0') {
+              return { scaledPriceLower: price };
+            }
+            return { scaledPriceUpper: price };
           }
           // 3. If STOP (Stop Limit) or TAKE_PROFIT (Take Profit Limit):
           if (state.orderType === 'STOP' || state.orderType === 'TAKE_PROFIT') {
