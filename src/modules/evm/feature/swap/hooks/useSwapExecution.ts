@@ -780,7 +780,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
           });
           openModal({
             status: 'success',
-            type: 'Swap',
+            type: 'Trustline',
             hash: trustlineResult.transactionHash,
             isStellar: true,
           });

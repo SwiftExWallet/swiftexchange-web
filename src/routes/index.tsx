@@ -29,7 +29,6 @@ const StellarPortfolioUI = lazy(
 const Dashboard = lazy(() => import('@/pages/dashboard'));
 const Profile = lazy(() => import('@/pages/profile'));
 const StatusPage = lazy(() => import('@/pages/status/StatusPage'));
-const RecoveryPage = lazy(() => import('@/modules/recovery/RecoveryPage'));
 
 const router = createBrowserRouter([
   {
@@ -140,14 +139,6 @@ const router = createBrowserRouter([
         element: (
           <Layout>
             <Profile />
-          </Layout>
-        ),
-      },
-      {
-        path: ROUTES.RECOVERY,
-        element: (
-          <Layout>
-            <RecoveryPage />
           </Layout>
         ),
       },

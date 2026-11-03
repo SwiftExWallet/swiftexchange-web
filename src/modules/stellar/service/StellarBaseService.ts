@@ -418,15 +418,36 @@ export class StellarBaseService {
   protected ensureTrustline(
     txBuilder: StellarSDK.TransactionBuilder,
     sourceAccount: StellarSDK.Horizon.AccountResponse,
-    asset: StellarSDK.Asset
+    asset: StellarSDK.Asset | any
   ) {
-    if (asset.isNative()) return;
+    if (!asset) return;
+    const isNative =
+      asset instanceof StellarSDK.Asset
+        ? asset.isNative()
+        : (asset as any) === 'native' ||
+          (asset as any) === 'XLM' ||
+          (asset as any)?.code === 'XLM' ||
+          Boolean((asset as any)?.isNative);
+    if (isNative) return;
+
+    const assetCode =
+      asset instanceof StellarSDK.Asset
+        ? asset.getCode()
+        : (asset as any)?.code || (asset as any)?.symbol || '';
+    const assetIssuer =
+      asset instanceof StellarSDK.Asset
+        ? asset.getIssuer()
+        : (asset as any)?.issuer ||
+          (typeof (asset as any)?.asset?.getIssuer === 'function'
+            ? (asset as any).asset.getIssuer()
+            : undefined) ||
+          (asset as any)?.address;
 
     const hasTrustline = sourceAccount.balances.some(
       (b: any) =>
         (b.asset_type === 'credit_alphanum4' || b.asset_type === 'credit_alphanum12') &&
-        b.asset_code === asset.getCode() &&
-        b.asset_issuer === asset.getIssuer()
+        b.asset_code?.toUpperCase() === assetCode.toUpperCase() &&
+        (!assetIssuer || b.asset_issuer === assetIssuer)
     );
 
     if (!hasTrustline) {
@@ -443,13 +464,16 @@ export class StellarBaseService {
 
       if (totalXlm.isLessThan(requiredReserve)) {
         throw new Error(
-          `Insufficient XLM balance to establish trustline for ${asset.getCode()}. You need at least ${requiredReserve.toFixed(2)} XLM to cover Stellar minimum reserves (current balance: ${totalXlm.toFixed(2)} XLM).`
+          `Insufficient XLM balance to establish trustline for ${assetCode}. You need at least ${requiredReserve.toFixed(2)} XLM to cover Stellar minimum reserves (current balance: ${totalXlm.toFixed(2)} XLM).`
         );
       }
 
+      const trustAsset =
+        asset instanceof StellarSDK.Asset ? asset : new StellarSDK.Asset(assetCode, assetIssuer);
+
       txBuilder.addOperation(
         StellarSDK.Operation.changeTrust({
-          asset: asset,
+          asset: trustAsset,
         })
       );
     }

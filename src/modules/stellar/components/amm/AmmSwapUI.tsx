@@ -534,7 +534,7 @@ const AmmSwapUI = () => {
           UI_STRINGS.ENTER_AMOUNT
         ) : isInsufficientBalance ? (
           `INSUFFICIENT ${fromToken?.code || ''} BALANCE`
-        ) : !toToken?.hasTrustline ? (
+        ) : !toToken?.asset?.isNative() && toToken?.code !== 'XLM' && !toToken?.hasTrustline ? (
           `Add Trustline & Swap`
         ) : (
           UI_STRINGS.SWAP_BUTTON
