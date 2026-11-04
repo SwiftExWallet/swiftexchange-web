@@ -19,7 +19,6 @@
 
 - [Overview](#-overview)
   - [Two Ecosystems, One Interface: EVM & Stellar Unified](#-two-ecosystems-one-interface-evm--stellar-unified)
-  - [Zero-Knowledge Social Recovery (Stellar Soroban)](#-zero-knowledge-social-recovery-stellar-soroban)
 - [Mobile Applications](#-mobile-applications)
 - [Screenshots](#-screenshots)
 - [Supported Networks & Ecosystems](#-supported-networks--ecosystems)
@@ -63,7 +62,6 @@ flowchart TD
         direction TB
         UI1["Multi-Chain Portfolio View"]
         UI2["Aster Perps Trading (Beta · In Development)"]
-        UI3["SpareKey ZK Account Recovery Guardian"]
     end
 
     subgraph Ecosystems["⛓️ Direct Blockchain Interactions"]
@@ -73,7 +71,7 @@ flowchart TD
         end
         subgraph Stellar["Stellar Network & Soroban"]
             S1["Sub-Second Settlement (<5s) & Micro-Fees"]
-            S2["Soroban Smart Contracts & ZK-Email Recovery"]
+            S2["Soroban Smart Contracts & Native Tokens"]
         end
     end
 
@@ -85,22 +83,8 @@ flowchart TD
 ```
 
 - **EVM Capability:** Connect any EVM wallet (via WalletConnect v2, MetaMask, etc.) to trade institutional perpetual futures on Aster DEX _(Beta — Under Active Development)_ with zero repetitive popups, execute spot swaps, and manage balances across 7+ major EVM chains.
-- **Stellar & Soroban Capability:** Connect your Stellar account to access ultra-fast settlement (<$0.0001 fees), native SDEX order book liquidity, and native **Soroban Smart Contracts** for Zero-Knowledge account recovery.
+- **Stellar & Soroban Capability:** Connect your Stellar account to access ultra-fast settlement (<$0.0001 fees), native SDEX order book liquidity, and native **Soroban Smart Contracts**.
 - **Unified Multi-Wallet Experience:** Instead of juggling separate wallet extensions or opening different websites for EVM and Stellar, Swiftex lets you use both networks side-by-side in one place while you always retain 100% self-custody of your private keys.
-
----
-
-### 🛡️ Zero-Knowledge Social Recovery (Stellar Soroban)
-
-To solve the ultimate barrier in crypto self-custody—losing seed phrases or private keys—Swiftex introduces **SpareKey**, a decentralized zero-knowledge recovery guardian built natively on **Stellar Soroban**:
-
-- **Self-Custodial & Private:** Users register an emergency recovery email without exposing their cleartext address to the public blockchain; only a cryptographic Poseidon zero-knowledge hash is recorded on-chain.
-- **DKIM Email Proof Trigger:** In an emergency, simply sending an email from your registered inbox generates a verifiable ZK proof on-chain to trigger an autonomous fund sweep into a new destination wallet.
-- **Safety Timelock:** Enforces an on-chain timelock window to protect assets against unauthorized sweeps.
-
-> 📖 **Read Full Recovery Documentation:** [RECOVERY_README.md](./RECOVERY_README.md)  
-> 🌐 **Live Testnet Demo:** [https://testnet.swiftexchange.io/recovery](https://testnet.swiftexchange.io/recovery)  
-> 📚 **Technical Guides:** [Architecture & State Machine](./docs/recovery/ARCHITECTURE.md) • [Live Demo & Verification Guide](./docs/recovery/DEMO_GUIDE.md) • [Installation Guide](./docs/recovery/INSTALLATION.md)
 
 ---
 

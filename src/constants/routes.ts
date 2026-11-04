@@ -13,7 +13,6 @@ export const ROUTES = {
   PORTFOLIO: '/stellar/portfolio',
   SETTINGS: '/settings',
   STATUS: '/status',
-  RECOVERY: '/recovery',
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;
