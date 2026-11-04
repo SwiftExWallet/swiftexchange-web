@@ -89,9 +89,18 @@ const StellarPnlChart: React.FC<StellarPnlChartProps> = ({
     }
 
     if (chartPoints.length === 0) {
-      setHasData(false);
-      return;
+      const today = new Date();
+      const past = new Date(today);
+      past.setDate(today.getDate() - 7);
+      const pastStr = past.toISOString().split('T')[0];
+      const todayStr = today.toISOString().split('T')[0];
+      chartPoints = [
+        { time: pastStr as Time, value: 0 },
+        { time: todayStr as Time, value: 0 },
+      ];
+      setMetricValue(0);
     }
+
     setHasData(true);
 
     if (chartContainerRef.current) {
@@ -213,12 +222,14 @@ const StellarPnlChart: React.FC<StellarPnlChartProps> = ({
               className={`text-xl font-black ${
                 activeMetric === 'holdings'
                   ? 'text-[var(--color-text-primary)]'
-                  : metricValue >= 0
+                  : metricValue > 0
                     ? 'text-emerald-500'
-                    : 'text-rose-500'
+                    : metricValue < 0
+                      ? 'text-rose-500'
+                      : 'text-[var(--color-text-primary)]'
               }`}
             >
-              {activeMetric !== 'holdings' && metricValue >= 0 ? '+' : ''}
+              {activeMetric !== 'holdings' && metricValue > 0 ? '+' : ''}
               {metricValue.toLocaleString('en-US', {
                 style: 'currency',
                 currency: 'USD',
@@ -229,28 +240,7 @@ const StellarPnlChart: React.FC<StellarPnlChartProps> = ({
         )}
       </div>
 
-      {!hasData ? (
-        <div className="flex-1 flex flex-col items-center justify-center min-h-[250px] opacity-50">
-          <svg
-            className="w-12 h-12 text-[var(--color-text-secondary)] mb-3"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-            />
-          </svg>
-          <span className="text-sm font-bold text-[var(--color-text-secondary)]">
-            No historical data to chart
-          </span>
-        </div>
-      ) : (
-        <div ref={chartContainerRef} className="w-full relative" />
-      )}
+      <div ref={chartContainerRef} className="w-full relative" />
     </div>
   );
 };

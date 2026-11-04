@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { sendCustomNotification } from '../../../../service/notificationService';
+import { StellarBaseService } from '../../service/StellarBaseService';
 import { StellarSequenceTracker } from '../StellarSequenceTracker';
 import { signAndSubmitTransaction } from '../transactionService';
 
@@ -371,6 +372,38 @@ describe('transactionService', () => {
       expect(result.success).toBe(false);
       expect(rollbackSpy).toHaveBeenCalledWith(testAddress, '99');
       expect(resetSpy).toHaveBeenCalledWith(testAddress);
+    });
+
+    it('properly propagates tx_bad_seq from Horizon submission failure and resets tracker and cache', async () => {
+      const resetSpy = vi.spyOn(StellarSequenceTracker, 'reset');
+      const rollbackSpy = vi.spyOn(StellarSequenceTracker, 'rollbackSequence');
+      const invalidateCacheSpy = vi.spyOn(StellarBaseService, 'invalidateAccountCache');
+
+      const mockProvider = {
+        signTransaction: vi.fn().mockResolvedValue('SIGNED_XDR'),
+      };
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({
+          extras: {
+            result_codes: {
+              transaction: 'tx_bad_seq',
+            },
+          },
+        }),
+      });
+
+      const result = await signAndSubmitTransaction({
+        ...defaultParams,
+        provider: mockProvider,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('tx_bad_seq');
+      expect(rollbackSpy).toHaveBeenCalledWith(testAddress, '99');
+      expect(resetSpy).toHaveBeenCalledWith(testAddress);
+      expect(invalidateCacheSpy).toHaveBeenCalledWith(testAddress);
     });
 
     it('fails gracefully when no provider is given', async () => {

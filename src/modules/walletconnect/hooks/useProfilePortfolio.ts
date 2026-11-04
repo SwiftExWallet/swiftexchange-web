@@ -29,16 +29,10 @@ export function useProfilePortfolio() {
   );
   const grandTotal = useMemo(() => evmTotal + stellarTotal, [evmTotal, stellarTotal]);
 
-  // Determine active cards based on connected wallets
-  const activeTabs = useMemo(() => {
-    const tabs: PortfolioTab[] = [];
-    if (isAnyWalletConnected) {
-      tabs.push('total');
-      tabs.push('evm');
-      tabs.push('stellar');
-    }
-    return tabs;
-  }, [isAnyWalletConnected]);
+  // Determine active cards - always provide Total, EVM, and Stellar for consistent dashboard structure
+  const activeTabs = useMemo<PortfolioTab[]>(() => {
+    return ['total', 'evm', 'stellar'];
+  }, []);
 
   // State for active card selection - defaults to 'total'
   const [activeTab, setActiveTab] = useState<PortfolioTab>('total');

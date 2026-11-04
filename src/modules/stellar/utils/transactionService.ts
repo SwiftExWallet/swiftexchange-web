@@ -35,14 +35,6 @@ export async function submitToHorizon(signedXdr: string, horizonUrl: string): Pr
   if (!res.ok) {
     const extras = json?.extras?.result_codes;
     if (extras) {
-      if (extras.transaction === 'tx_bad_seq') {
-        try {
-          const tx = new StellarSDK.Transaction(signedXdr, '');
-          return tx.hash().toString('hex');
-        } catch {
-          void 0;
-        }
-      }
       const detail = extras.operations ? ` — ${extras.operations.join(', ')}` : '';
       throw new Error(`Stellar submission failed: ${extras.transaction}${detail}`);
     }
@@ -593,6 +585,7 @@ export const signAndSubmitTransaction = async (
         errStr.includes('bad sequence')
       ) {
         StellarSequenceTracker.reset(sourceAddress);
+        StellarBaseService.invalidateAccountCache(sourceAddress);
       }
     }
 

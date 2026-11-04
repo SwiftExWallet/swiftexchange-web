@@ -278,12 +278,7 @@ const Profile: React.FC = () => {
     let isMounted = true;
     setStellarDetailedData(null);
 
-    if (
-      isSwiftExUser &&
-      connectWithSwiftEx &&
-      connectedWallets.stellar?.address &&
-      (activeTab === 'stellar' || activeTab === 'total')
-    ) {
+    if (connectedWallets.stellar?.address && (activeTab === 'stellar' || activeTab === 'total')) {
       const { fromStr, toStr } = getStellarDateRange();
 
       setLoadingStellarPnl(true);
@@ -316,7 +311,6 @@ const Profile: React.FC = () => {
     stellarTimeframe,
     activeTab,
     getStellarDateRange,
-    isSwiftExUser,
   ]);
 
   const handleCopy = (text: string, key: string) => {
@@ -469,7 +463,7 @@ const Profile: React.FC = () => {
         setExportError(err?.message || 'Failed to export report');
       }
     },
-    [exportType, isSwiftExUser, connectedWallets.stellar?.address, stellarCostBasis]
+    [isSwiftExUser, connectedWallets.stellar?.address, stellarCostBasis]
   );
 
   const handleSyncBalances = async () => {
@@ -666,142 +660,130 @@ const Profile: React.FC = () => {
           )}
         </div>
 
-        {!isAnyWalletConnected ? (
-          <div className="bg-(--color-bg-secondary) border border-(--color-border) border-dashed rounded-2xl p-12 text-center space-y-4 shadow-sm">
-            <div className="w-16 h-16 mx-auto rounded-full bg-(--color-bg-tertiary) flex items-center justify-center text-(--color-text-secondary)">
-              <Wallet size={32} />
-            </div>
-            <div className="space-y-1">
-              <h4 className="font-bold text-lg">No wallets connected</h4>
-              <p className="text-sm text-(--color-text-secondary) max-w-sm mx-auto">
-                Connect your EVM or Stellar wallet to start syncing your balances and performance.
-              </p>
+        {!isAnyWalletConnected && (
+          <div className="bg-(--color-bg-secondary) border border-brand-primary/20 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm bg-gradient-to-r from-brand-primary/5 via-transparent to-purple-500/5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-brand-primary/10 border border-brand-primary/20 flex items-center justify-center text-brand-primary shrink-0">
+                <Wallet size={18} />
+              </div>
+              <div>
+                <h4 className="font-bold text-xs text-(--color-text-primary)">
+                  Connect your wallet
+                </h4>
+                <p className="text-[11px] text-(--color-text-secondary)">
+                  Connect your EVM or Stellar wallet to synchronize your live balances, trading
+                  history, and performance.
+                </p>
+              </div>
             </div>
             <button
               onClick={openModal}
-              className="btn btn-primary px-6 py-2.5 rounded-xl font-bold text-sm inline-flex items-center gap-2"
+              className="btn btn-primary px-4 py-1.5 rounded-xl font-bold text-xs inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
             >
-              <Wallet size={16} />
+              <Wallet size={14} />
               Connect Wallet
             </button>
           </div>
-        ) : (
-          <>
-            {/* Distribution bar */}
-            {grandTotal > 0 && (
-              <div className="bg-(--color-bg-secondary) border border-(--color-border) rounded-2xl p-3 shadow-md space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="font-bold text-(--color-text-secondary) uppercase tracking-wider text-[10px]">
-                    Portfolio Distribution
-                  </span>
-                  <div className="flex flex-wrap items-center gap-3 text-[10.5px] font-semibold text-(--color-text-secondary)">
-                    {evmTotal > 0 && (
-                      <span className="flex items-center gap-1.5 bg-blue-500/5 px-2 py-0.5 rounded border border-blue-500/10">
-                        <span className="w-2 h-2 rounded-full bg-blue-500" />
-                        EVM: {((evmTotal / grandTotal) * 100).toFixed(0)}%
-                      </span>
-                    )}
-                    {stellarTotal > 0 && (
-                      <span className="flex items-center gap-1.5 bg-purple-500/5 px-2 py-0.5 rounded border border-purple-500/10">
-                        <span className="w-2 h-2 rounded-full bg-purple-500" />
-                        Stellar: {((stellarTotal / grandTotal) * 100).toFixed(0)}%
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="w-full h-1.5 rounded-full bg-(--color-bg-tertiary) flex overflow-hidden">
-                  {evmTotal > 0 && (
-                    <div
-                      style={{ width: `${(evmTotal / grandTotal) * 100}%` }}
-                      className="h-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
-                    />
-                  )}
-                  {stellarTotal > 0 && (
-                    <div
-                      style={{ width: `${(stellarTotal / grandTotal) * 100}%` }}
-                      className="h-full bg-gradient-to-r from-purple-600 to-purple-400 transition-all duration-500"
-                    />
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Portfolio Cards */}
-            <PortfolioCardsGrid
-              activeTabs={activeTabs}
-              activeTab={activeTab}
-              setActiveTab={setActiveTab}
-              grandTotal={grandTotal}
-              evmTotal={evmTotal}
-              stellarTotal={stellarTotal}
-
-              connectedWallets={connectedWallets}
-              copiedStates={copiedStates}
-              handleCopy={handleCopy}
-              cardPnL={cardPnL}
-              openModal={openModal}
-            />
-
-            {/* ========== PERFORMANCE SECTIONS (Stellar) ========== */}
-            {(activeTab === 'stellar' ||
-              (activeTab === 'total' &&
-                connectWithSwiftEx &&
-                connectedWallets.stellar?.address)) && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
-                {(activeTab === 'stellar' ||
-                  (activeTab === 'total' &&
-                    connectWithSwiftEx &&
-                    connectedWallets.stellar?.address)) && (
-                  <StellarPerformanceCard
-                    stellarTotal={stellarTotal}
-                    stellarPnlData={stellarPnlData}
-                    loadingStellarPnl={loadingStellarPnl}
-                    stellarPnlError={stellarPnlError}
-                    stellarTimeframe={stellarTimeframe}
-                    setStellarTimeframe={setStellarTimeframe}
-                    stellarSubTab={stellarSubTab}
-                    setStellarSubTab={setStellarSubTab}
-                    fromDate={fromDate}
-                    toDate={toDate}
-                    setFromDate={setFromDate}
-                    setToDate={setToDate}
-                    clearRange={clearRange}
-                    isDateRangeActive={isDateRangeActive}
-                    minFromDate={minFromDate}
-                    maxFromDate={maxFromDate}
-                    minToDate={minToDate}
-                    maxToDate={maxToDate}
-                    isSwiftExUser={isSwiftExUser}
-                    connectedWallets={connectedWallets}
-                    openModal={openModal}
-                    handleOpenCostBasis={handleOpenCostBasis}
-                    loadingCostBasisDetails={loadingCostBasisDetails}
-                    totalOpeningCostBasis={totalOpeningCostBasis}
-                    adjustedStellarPnl={adjustedStellarPnl}
-                    onExportReport={() => {
-                      setExportType('stellar');
-                      setExportStep(0);
-                      setExportError(null);
-                      setIsExportModalOpen(true);
-                    }}
-                  />
-                )}
-              </div>
-            )}
-
-            {/* ========== ASSET TABLE ========== */}
-            <AssetsTableSection
-              loading={loading}
-              isRefreshing={isRefreshing}
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              availableChains={availableChains}
-              selectedChainFilter={selectedChainFilter}
-              setSelectedChainFilter={setSelectedChainFilter}
-              filteredAssets={filteredAssets}
-            />
-          </>
         )}
+
+        {/* Distribution bar */}
+        <div className="bg-(--color-bg-secondary) border border-(--color-border) rounded-2xl p-3 shadow-md space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-bold text-(--color-text-secondary) uppercase tracking-wider text-[10px]">
+              Portfolio Distribution
+            </span>
+            <div className="flex flex-wrap items-center gap-3 text-[10.5px] font-semibold text-(--color-text-secondary)">
+              <span className="flex items-center gap-1.5 bg-blue-500/5 px-2 py-0.5 rounded border border-blue-500/10">
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                EVM: {grandTotal > 0 ? ((evmTotal / grandTotal) * 100).toFixed(0) : '0'}%
+              </span>
+              <span className="flex items-center gap-1.5 bg-purple-500/5 px-2 py-0.5 rounded border border-purple-500/10">
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                Stellar: {grandTotal > 0 ? ((stellarTotal / grandTotal) * 100).toFixed(0) : '0'}%
+              </span>
+            </div>
+          </div>
+          <div className="w-full h-1.5 rounded-full bg-(--color-bg-tertiary) flex overflow-hidden">
+            {evmTotal > 0 && grandTotal > 0 && (
+              <div
+                style={{ width: `${(evmTotal / grandTotal) * 100}%` }}
+                className="h-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
+              />
+            )}
+            {stellarTotal > 0 && grandTotal > 0 && (
+              <div
+                style={{ width: `${(stellarTotal / grandTotal) * 100}%` }}
+                className="h-full bg-gradient-to-r from-purple-600 to-purple-400 transition-all duration-500"
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Portfolio Cards */}
+        <PortfolioCardsGrid
+          activeTabs={activeTabs}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          grandTotal={grandTotal}
+          evmTotal={evmTotal}
+          stellarTotal={stellarTotal}
+          connectedWallets={connectedWallets}
+          copiedStates={copiedStates}
+          handleCopy={handleCopy}
+          cardPnL={cardPnL}
+          openModal={openModal}
+        />
+
+        {/* ========== PERFORMANCE SECTIONS (Stellar) ========== */}
+        {(activeTab === 'stellar' || activeTab === 'total') && (
+          <div className="pt-2">
+            <StellarPerformanceCard
+              stellarTotal={stellarTotal}
+              stellarPnlData={stellarPnlData}
+              loadingStellarPnl={loadingStellarPnl}
+              stellarPnlError={stellarPnlError}
+              stellarTimeframe={stellarTimeframe}
+              setStellarTimeframe={setStellarTimeframe}
+              stellarSubTab={stellarSubTab}
+              setStellarSubTab={setStellarSubTab}
+              fromDate={fromDate}
+              toDate={toDate}
+              setFromDate={setFromDate}
+              setToDate={setToDate}
+              clearRange={clearRange}
+              isDateRangeActive={isDateRangeActive}
+              minFromDate={minFromDate}
+              maxFromDate={maxFromDate}
+              minToDate={minToDate}
+              maxToDate={maxToDate}
+              isSwiftExUser={isSwiftExUser}
+              connectedWallets={connectedWallets}
+              openModal={openModal}
+              handleOpenCostBasis={handleOpenCostBasis}
+              loadingCostBasisDetails={loadingCostBasisDetails}
+              totalOpeningCostBasis={totalOpeningCostBasis}
+              adjustedStellarPnl={adjustedStellarPnl}
+              onExportReport={() => {
+                setExportType('stellar');
+                setExportStep(0);
+                setExportError(null);
+                setIsExportModalOpen(true);
+              }}
+            />
+          </div>
+        )}
+
+        {/* ========== ASSET TABLE ========== */}
+        <AssetsTableSection
+          loading={loading}
+          isRefreshing={isRefreshing}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          availableChains={availableChains}
+          selectedChainFilter={selectedChainFilter}
+          setSelectedChainFilter={setSelectedChainFilter}
+          filteredAssets={filteredAssets}
+        />
       </div>
 
       {/* ========== STELLAR COST BASIS MODAL ========== */}
