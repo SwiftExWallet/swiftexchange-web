@@ -65,6 +65,26 @@ describe('useEvmToStellarCctp', () => {
     expect(chains.some(c => c.id === 'avalanche')).toBe(true);
   });
 
+  describe('generateCctpIdempotencyKey', () => {
+    it('generates a valid UUID v4 format', () => {
+      const key = cctpService.generateCctpIdempotencyKey();
+      expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    });
+
+    it('uses crypto.getRandomValues fallback when crypto.randomUUID is undefined', () => {
+      const originalRandomUUID = crypto.randomUUID;
+      try {
+        (crypto as any).randomUUID = undefined;
+        const key = cctpService.generateCctpIdempotencyKey();
+        expect(key).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        );
+      } finally {
+        (crypto as any).randomUUID = originalRandomUUID;
+      }
+    });
+  });
+
   it('fetches a quote correctly with fast=true by default for EVM chains and direction=EVM_TO_STELLAR', async () => {
     const mockQuote: cctpService.CctpBridgeQuote = {
       amount: '2',

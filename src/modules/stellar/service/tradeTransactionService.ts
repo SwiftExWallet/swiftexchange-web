@@ -37,12 +37,11 @@ export class TradeTransactionService {
     if (cached && now - cached.timestamp < TradeTransactionService.SERVER_CACHE_TTL) {
       this.server = cached.server;
     } else {
-      const serverOptions: any = {};
-      if (config.horizonUrl.startsWith('http://')) {
-        serverOptions.allowHttp = true;
+      if (config.horizonUrl.startsWith('http://') && !import.meta.env.VITEST) {
+        throw new Error(`Insecure Horizon URL rejected: ${config.horizonUrl}. HTTPS is required.`);
       }
 
-      this.server = new StellarSDK.Horizon.Server(config.horizonUrl, serverOptions);
+      this.server = new StellarSDK.Horizon.Server(config.horizonUrl);
       TradeTransactionService.serverCache.set(cacheKey, { server: this.server, timestamp: now });
     }
 

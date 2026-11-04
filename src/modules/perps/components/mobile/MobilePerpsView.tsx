@@ -16,8 +16,7 @@ export const MobilePerpsView: React.FC<MobilePerpsViewProps> = ({ sidebar }) => 
   const asterAgent = useAsterAgent();
   const hyperliquidAgent = useHyperliquidAgent();
 
-  // Sync real live balances, positions, and orders on mobile
-  useAsterDataSync(asterAgent.asterSigner, asterAgent.userAddr);
+  useAsterDataSync(asterAgent.isReady ? asterAgent.asterSigner : null, asterAgent.userAddr);
   useHyperliquidDataStream(hyperliquidAgent.userAddr);
 
   const [currentScreen, setCurrentScreen] = useState<'chart' | 'trade'>('chart');

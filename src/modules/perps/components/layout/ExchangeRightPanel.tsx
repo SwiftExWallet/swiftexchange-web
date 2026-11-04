@@ -73,7 +73,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
   const { userAddr } = activeAgent;
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
 
-  useAsterDataSync(asterAgent.asterSigner, asterAgent.userAddr);
+  useAsterDataSync(asterAgent.isReady ? asterAgent.asterSigner : null, asterAgent.userAddr);
   useHyperliquidDataStream(hyperliquidAgent.userAddr);
 
   const { executeOrder } = useUnifiedExecution();
@@ -572,7 +572,6 @@ export const ExchangeAccountPanel: React.FC = () => {
         </div>
       </div>
 
-      {/* Asset Mode status button - Aster DEX only (Hyperliquid is USDC-only collateral) */}
       {isAster && (
         <button
           type="button"
@@ -588,6 +587,32 @@ export const ExchangeAccountPanel: React.FC = () => {
             Switch Mode
           </span>
         </button>
+      )}
+
+      {isAster && isAgentReady && (
+        <div className="w-full py-1.5 px-3 text-[11px] flex items-center justify-between text-secondary bg-tertiary/70 rounded-md mt-1 border border-color">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span className="text-primary font-medium text-[10px]">Session Active</span>
+            <span className="text-[10px] text-muted font-mono">
+              ({asterAgent.timeRemaining || '30d'})
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={asterAgent.isRevoking}
+            onClick={async () => {
+              try {
+                await asterAgent.revokeSession();
+              } catch (e) {
+                console.error('Revocation failed:', e);
+              }
+            }}
+            className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {asterAgent.isRevoking ? 'Revoking...' : 'Revoke'}
+          </button>
+        </div>
       )}
 
       <AssetModeModal isOpen={activeModal === 'assetMode'} onClose={() => setActiveModal(null)} />

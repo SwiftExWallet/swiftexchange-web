@@ -1,6 +1,7 @@
-import { Check, ChevronDown, Copy, Plus, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, KeyRound, Loader2, Plus, ShieldOff, X } from 'lucide-react';
 import React, { useRef, useState } from 'react';
 
+import { useAsterAgent } from '../../perps/adapters/aster/hooks/useAsterAgent';
 import { EVM_WALLETS, STELLAR_WALLETS, WalletType } from '../constants/Wallet';
 import { useWalletConnect } from '../hooks/useWalletConnect';
 
@@ -19,9 +20,11 @@ function getWalletIcon(walletId: string, type: string, peerIcon?: string): strin
 
 export const ConnectWalletButton: React.FC = () => {
   const { connectedWallets, openModal, disconnect, disconnectAll } = useWalletConnect();
+  const asterAgent = useAsterAgent();
   const [showDropdown, setShowDropdown] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [disconnectHint, setDisconnectHint] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -253,6 +256,94 @@ export const ConnectWalletButton: React.FC = () => {
                 );
               })}
             </div>
+
+            {validConnectedWallets.some(([type]) => type === 'evm') && (
+              <div
+                style={{
+                  background: 'color-mix(in srgb, var(--color-bg-tertiary) 90%, #3b82f6 10%)',
+                  borderTop: '1px solid var(--color-border)',
+                }}
+                className="px-5 py-3 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-3.5 h-3.5 text-blue-400" />
+                    <span
+                      style={{ color: 'var(--color-text-primary)' }}
+                      className="text-xs font-semibold"
+                    >
+                      1-Click Trading Session
+                    </span>
+                  </div>
+                  {asterAgent.isReady ? (
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      Active (30d)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">
+                      Inactive
+                    </span>
+                  )}
+                </div>
+
+                {asterAgent.isReady ? (
+                  <div className="flex items-center justify-between pt-0.5">
+                    <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                      {asterAgent.timeRemaining ? (
+                        <span>Expires in {asterAgent.timeRemaining}</span>
+                      ) : (
+                        <span>30-day validity</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={asterAgent.isRevoking}
+                      onClick={async () => {
+                        setRevokeError(null);
+                        try {
+                          await asterAgent.revokeSession();
+                        } catch (err: any) {
+                          setRevokeError(err?.message || 'Failed to revoke session on Aster');
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {asterAgent.isRevoking ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>Revoking...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldOff className="w-3 h-3" />
+                          <span>Revoke Session</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                    Orders will require wallet confirmation.
+                  </div>
+                )}
+
+                {revokeError && (
+                  <div className="text-[10px] text-rose-400 flex items-center justify-between gap-1 pt-1">
+                    <span className="truncate">{revokeError}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        asterAgent.emergencyPurgeSession();
+                        setRevokeError(null);
+                      }}
+                      className="underline flex-shrink-0 cursor-pointer hover:text-rose-300"
+                    >
+                      Purge Local
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {disconnectHint && (
               <div

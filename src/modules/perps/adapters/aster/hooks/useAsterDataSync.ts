@@ -21,26 +21,39 @@ import {
   getMultiAssetsMargin,
   getPositionRisk,
 } from '../api/account';
+import { isAsterDepositRequiredError, isAsterNoAgentError } from '../api/errors';
 import { getOpenOrders } from '../api/orders';
 import { useUserDataStream } from './useUserDataStream';
 
 export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
   useAccountStore.getState().setIsLoading(true);
   try {
+    let accountInfo: any;
+    try {
+      accountInfo = await getAccountInfo(signer, userAddr);
+    } catch (err: any) {
+      if (isAsterDepositRequiredError(err) || isAsterNoAgentError(err)) {
+        useAccountStore.getState().setBalances([]);
+        usePositionStore.getState().setPositions([]);
+        useOrderStore.getState().setOrders([]);
+        return {
+          mappedPositions: [],
+          mappedBalances: [],
+          mappedOrders: [],
+          requiresDeposit: true,
+        };
+      }
+      throw err;
+    }
+
     const hasBrackets = Object.keys(useLeverageStore.getState().bracketsBySymbol).length > 0;
-    const [
-      accountInfo,
-      positionRisk,
-      openOrdersResponse,
-      _leverageBracketResponse,
-      multiAssetResponse,
-    ] = await Promise.all([
-      getAccountInfo(signer, userAddr),
-      getPositionRisk(signer, userAddr),
-      getOpenOrders(signer, userAddr),
-      hasBrackets ? Promise.resolve([]) : getLeverageBracket(signer, userAddr),
-      getMultiAssetsMargin(signer, userAddr),
-    ]);
+    const [positionRisk, openOrdersResponse, _leverageBracketResponse, multiAssetResponse] =
+      await Promise.all([
+        getPositionRisk(signer, userAddr),
+        getOpenOrders(signer, userAddr),
+        hasBrackets ? Promise.resolve([]) : getLeverageBracket(signer, userAddr),
+        getMultiAssetsMargin(signer, userAddr),
+      ]);
 
     const tickerCtxs = useTickerStore.getState().assetCtxByMarket;
     const mappedBalances = (accountInfo.assets || []).map((a: any) => {
@@ -190,7 +203,18 @@ export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
     useOrderStore.getState().setOrders(mappedOrders);
 
     return { mappedPositions, mappedBalances, mappedOrders };
-  } catch (err) {
+  } catch (err: any) {
+    if (isAsterDepositRequiredError(err) || isAsterNoAgentError(err)) {
+      useAccountStore.getState().setBalances([]);
+      usePositionStore.getState().setPositions([]);
+      useOrderStore.getState().setOrders([]);
+      return {
+        mappedPositions: [],
+        mappedBalances: [],
+        mappedOrders: [],
+        requiresDeposit: true,
+      };
+    }
     console.error('[aster] Failed to fetch REST snapshot:', err);
     throw err;
   } finally {
@@ -201,6 +225,7 @@ export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
 export function useAsterDataSync(signer: Signer | null, userAddr: string | null) {
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const [isRestSynced, setIsRestSynced] = useState(false);
+  const hasPendingTransactions = useDepositTrackerStore(s => s.hasActiveTransactions());
   const { connected } = useUserDataStream(signer, userAddr);
 
   useEffect(() => {
@@ -218,28 +243,49 @@ export function useAsterDataSync(signer: Signer | null, userAddr: string | null)
     }
 
     if (!signer) {
+      setIsRestSynced(false);
+      useAccountStore.getState().setIsLoading(false);
       return;
     }
 
     let isMounted = true;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let isDepositRequired = false;
 
     if (useDepositTrackerStore.getState().hasActiveTransactions()) {
       startDepositPolling(signer, userAddr);
     }
 
-    fetchAsterSnapshot(signer, userAddr)
-      .then(() => {
+    const runSync = async () => {
+      if (!isMounted || !signer || !userAddr || isDepositRequired) return;
+      try {
+        const result = await fetchAsterSnapshot(signer, userAddr);
+        if (result?.requiresDeposit) {
+          isDepositRequired = true;
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+          return;
+        }
         if (isMounted) setIsRestSynced(true);
-      })
-      .catch(() => {});
+      } catch (err: any) {
+        if (isAsterDepositRequiredError(err) || isAsterNoAgentError(err)) {
+          isDepositRequired = true;
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+        }
+      }
+    };
+
+    runSync();
 
     // Adaptive REST polling fallback when WebSocket is disconnected (PROD-02)
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
-    if (!connected) {
-      pollInterval = setInterval(() => {
-        if (!isMounted || !signer || !userAddr) return;
-        fetchAsterSnapshot(signer, userAddr).catch(() => {});
-      }, 8000);
+    // Only poll if not connected AND account has deposited
+    if (!connected && !isDepositRequired) {
+      pollInterval = setInterval(runSync, 8000);
     }
 
     return () => {
@@ -249,7 +295,7 @@ export function useAsterDataSync(signer: Signer | null, userAddr: string | null)
         pollInterval = null;
       }
     };
-  }, [signer, userAddr, currentExchange, connected]);
+  }, [signer, userAddr, currentExchange, connected, hasPendingTransactions]);
 
   return { isRestSynced, connected };
 }

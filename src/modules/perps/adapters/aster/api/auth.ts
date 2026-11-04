@@ -120,6 +120,13 @@ export async function getSyncedServerTime(baseUrl?: string): Promise<number> {
   return pendingTimeSyncPromise;
 }
 
+const ALLOWED_ASTER_HOSTNAMES = new Set([
+  'fapi.asterdex.com',
+  'fapi.asterdex-testnet.com',
+  'sapi.asterdex.com',
+  'www.asterdex.com',
+]);
+
 export async function signedRequest(
   signer: Signer,
   userAddr: string,
@@ -132,15 +139,20 @@ export async function signedRequest(
   const defaultBaseUrl = getAsterRestUrl();
   let effectiveBaseUrl = defaultBaseUrl;
   if (baseUrl) {
-    const isAllowed =
-      baseUrl.startsWith('https://fapi.asterdex.com') ||
-      baseUrl.startsWith('https://fapi.asterdex-testnet.com') ||
-      baseUrl.startsWith('https://sapi.asterdex.com') ||
-      baseUrl.startsWith('https://www.asterdex.com');
-    if (!isAllowed) {
-      throw new Error(`Unauthorized base URL for signed request: ${baseUrl}`);
+    try {
+      const parsed = new URL(baseUrl);
+      if (parsed.protocol !== 'https:') {
+        throw new Error(`Insecure protocol: ${parsed.protocol}`);
+      }
+      if (!ALLOWED_ASTER_HOSTNAMES.has(parsed.hostname)) {
+        throw new Error(`Unauthorized base URL hostname: ${parsed.hostname}`);
+      }
+      effectiveBaseUrl = baseUrl;
+    } catch (err) {
+      throw new Error(
+        `Unauthorized base URL for signed request: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
-    effectiveBaseUrl = baseUrl;
   }
   const chainId = getAsterChainId();
   const signerAddr = await signer.getAddress();

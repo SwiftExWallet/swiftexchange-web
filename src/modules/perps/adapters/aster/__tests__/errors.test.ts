@@ -46,4 +46,22 @@ describe('Aster Error Handling & Classification (ERR-01, ERR-04)', () => {
     expect(err.retryAfterSec).toBe(30);
     expect(err.message).toContain('30s');
   });
+
+  it('correctly classifies -5050 deposit required as non-retryable and detects deposit requirement', () => {
+    const depositErr = parseAsterError({
+      code: -5050,
+      msg: 'This function can only be used after deposit',
+    });
+    expect(depositErr.code).toBe(-5050);
+    expect(depositErr.name).toBe('DEPOSIT_REQUIRED');
+    expect(depositErr.isRetryable).toBe(false);
+    expect(depositErr.userMessage).toContain('after deposit');
+  });
+
+  it('correctly classifies no agent error as non-retryable', () => {
+    const noAgentErr = parseAsterError({ code: -1000, msg: 'No agent found' });
+    expect(noAgentErr.code).toBe(-1000);
+    expect(noAgentErr.name).toBe('NO_AGENT_FOUND');
+    expect(noAgentErr.isRetryable).toBe(false);
+  });
 });

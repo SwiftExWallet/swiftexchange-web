@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildSortedQueryString,
   buildTypedData,
   generateMonotonicNonce,
   getAsterDomain,
+  signedRequest,
 } from '../api/auth';
 
 describe('Aster Authentication & Signing (AUTH-01, AUTH-02, AUTH-04)', () => {
@@ -48,5 +49,61 @@ describe('Aster Authentication & Signing (AUTH-01, AUTH-02, AUTH-04)', () => {
     const typedData = buildTypedData('a=1&b=2', 1666);
     expect(typedData.primaryType).toBe('Message');
     expect(typedData.message.msg).toBe('a=1&b=2');
+  });
+
+  describe('SEC-01 Hostname Validation in signedRequest', () => {
+    it('rejects attacker-controlled subdomain bypass (https://fapi.asterdex.com.attacker.com)', async () => {
+      const mockSigner = {
+        getAddress: vi.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
+        signTypedData: vi.fn().mockResolvedValue('0xsignature'),
+      } as any;
+
+      await expect(
+        signedRequest(
+          mockSigner,
+          '0x1234567890123456789012345678901234567890',
+          'POST',
+          '/fapi/v1/order',
+          {},
+          'https://fapi.asterdex.com.attacker.com'
+        )
+      ).rejects.toThrow(/Unauthorized base URL/);
+    });
+
+    it('rejects userinfo bypass (https://fapi.asterdex.com@attacker.com)', async () => {
+      const mockSigner = {
+        getAddress: vi.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
+        signTypedData: vi.fn().mockResolvedValue('0xsignature'),
+      } as any;
+
+      await expect(
+        signedRequest(
+          mockSigner,
+          '0x1234567890123456789012345678901234567890',
+          'POST',
+          '/fapi/v1/order',
+          {},
+          'https://fapi.asterdex.com@attacker.com'
+        )
+      ).rejects.toThrow(/Unauthorized base URL/);
+    });
+
+    it('rejects insecure http protocol (http://fapi.asterdex.com)', async () => {
+      const mockSigner = {
+        getAddress: vi.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
+        signTypedData: vi.fn().mockResolvedValue('0xsignature'),
+      } as any;
+
+      await expect(
+        signedRequest(
+          mockSigner,
+          '0x1234567890123456789012345678901234567890',
+          'POST',
+          '/fapi/v1/order',
+          {},
+          'http://fapi.asterdex.com'
+        )
+      ).rejects.toThrow(/Unauthorized base URL/);
+    });
   });
 });

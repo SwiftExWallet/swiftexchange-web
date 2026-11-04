@@ -36,7 +36,11 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
   const { isReady: isAgentReady, deriveAgentKey, deriveState, error: deriveError } = activeAgent;
   const hasFunds = walletBalance > 0;
   const quoteAsset = currentExchange === 'hyperliquid' ? 'USDC' : 'USDT';
-  const isDepositError = deriveState === 'error' && deriveError?.message?.includes('Must deposit');
+  const isDepositError =
+    deriveState === 'error' &&
+    (deriveError?.message?.includes('Must deposit') ||
+      deriveError?.message?.includes('after deposit') ||
+      deriveError?.message?.includes('-5050'));
 
   if (!isEvmConnected) {
     return (

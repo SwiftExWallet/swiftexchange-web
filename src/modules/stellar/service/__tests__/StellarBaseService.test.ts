@@ -172,4 +172,13 @@ describe('StellarBaseService', () => {
       expect(usdcToken!.hasTrustline).toBe(false);
     });
   });
+
+  describe('getOrCreateServer', () => {
+    it('creates and pools server instance for https URL', () => {
+      const server = StellarBaseService.getOrCreateServer('https://horizon-test.stellar.org');
+      expect(server).toBeDefined();
+      const cached = StellarBaseService.getOrCreateServer('https://horizon-test.stellar.org');
+      expect(cached).toBe(server);
+    });
+  });
 });

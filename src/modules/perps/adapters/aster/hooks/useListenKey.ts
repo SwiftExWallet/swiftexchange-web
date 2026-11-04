@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Signer } from 'ethers';
 
+import { isAsterDepositRequiredError, isAsterNoAgentError } from '../api/errors';
 import {
   LISTEN_KEY_KEEPALIVE_MS,
   createListenKey,
@@ -38,8 +39,12 @@ export function useListenKey(
       try {
         await keepaliveListenKey(signer, userAddr);
       } catch (e) {
+        if (isAsterDepositRequiredError(e) || isAsterNoAgentError(e)) {
+          clearKeepalive();
+          setListenKey(null);
+          return;
+        }
         console.error('[useListenKey] Keepalive failed, auto-refreshing key:', e);
-        // Automatically renew listenKey on Aster error or keepalive failure (e.g. -1125: This listenKey does not exist)
         try {
           await refresh();
         } catch (refreshErr) {
@@ -63,7 +68,12 @@ export function useListenKey(
         setListenKey(key);
         setError(null);
         startKeepalive();
-      } catch (e) {
+      } catch (e: any) {
+        if (isAsterDepositRequiredError(e) || isAsterNoAgentError(e)) {
+          setListenKey(null);
+          clearKeepalive();
+          return;
+        }
         setError(e instanceof Error ? e : new Error(String(e)));
         throw e;
       } finally {

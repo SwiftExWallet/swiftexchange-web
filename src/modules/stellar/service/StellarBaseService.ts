@@ -29,11 +29,10 @@ export class StellarBaseService {
   static getOrCreateServer(horizonUrl: string): StellarSDK.Horizon.Server {
     let instance = serverPool.get(horizonUrl);
     if (!instance) {
-      const serverOptions: any = {};
-      if (horizonUrl.startsWith('http://')) {
-        serverOptions.allowHttp = true;
+      if (horizonUrl.startsWith('http://') && !import.meta.env.VITEST) {
+        throw new Error(`Insecure Horizon URL rejected: ${horizonUrl}. HTTPS is required.`);
       }
-      instance = new StellarSDK.Horizon.Server(horizonUrl, serverOptions);
+      instance = new StellarSDK.Horizon.Server(horizonUrl);
       serverPool.set(horizonUrl, instance);
     }
     return instance;

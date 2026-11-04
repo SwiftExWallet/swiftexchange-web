@@ -194,7 +194,24 @@ const ERROR_MAP: Record<number, { name: string; userMessage: string }> = {
     userMessage:
       'Order exceeds the account risk limit for this leverage tier. Please reduce size or leverage.',
   },
+  '-5050': {
+    name: 'DEPOSIT_REQUIRED',
+    userMessage: 'This function can only be used after deposit.',
+  },
 };
+
+export function isAsterDepositRequiredError(err: any): boolean {
+  if (!err) return false;
+  if (err?.code === -5050) return true;
+  const msg = err?.msg || err?.message || (typeof err === 'string' ? err : '');
+  return /after deposit|only be used after deposit/i.test(msg);
+}
+
+export function isAsterNoAgentError(err: any): boolean {
+  if (!err) return false;
+  const msg = err?.msg || err?.message || (typeof err === 'string' ? err : '');
+  return /no agent|agent not found|agent does not exist/i.test(msg);
+}
 
 export function parseAsterError(err: any): AsterErrorDetail {
   let explicitCode: number | undefined = typeof err?.code === 'number' ? err.code : undefined;
@@ -214,6 +231,26 @@ export function parseAsterError(err: any): AsterErrorDetail {
     } catch {
       /* ignore */
     }
+  }
+
+  if (isAsterDepositRequiredError({ code: explicitCode, msg: rawMsg })) {
+    return {
+      code: -5050,
+      name: 'DEPOSIT_REQUIRED',
+      message: rawMsg,
+      userMessage: 'This function can only be used after deposit.',
+      isRetryable: false,
+    };
+  }
+
+  if (isAsterNoAgentError({ code: explicitCode, msg: rawMsg })) {
+    return {
+      code: -1000,
+      name: 'NO_AGENT_FOUND',
+      message: rawMsg,
+      userMessage: 'No authorized trading agent found. Please enable 1-Click Trading.',
+      isRetryable: false,
+    };
   }
 
   // Wallet signature rejection

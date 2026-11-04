@@ -6,7 +6,10 @@ import { destroyAESKey, generateAndStoreAESKey, retrieveAESKey } from './keyVaul
 
 const BLOB_KEY_PREFIX = '_sx_aster_agentkey';
 const ADDR_KEY_PREFIX = '_sx_aster_agentaddr';
+const EXPIRY_KEY_PREFIX = '_sx_aster_agentexp';
 const AGENT_NAME = '@swiftex-desktop';
+
+export const AGENT_VALIDITY_MS = 30 * 24 * 60 * 60 * 1000;
 
 function getBlobKey(network: string = 'mainnet') {
   return `${BLOB_KEY_PREFIX}_${network}`;
@@ -14,6 +17,26 @@ function getBlobKey(network: string = 'mainnet') {
 
 function getAddrKey(network: string = 'mainnet') {
   return `${ADDR_KEY_PREFIX}_${network}`;
+}
+
+function getExpKey(network: string = 'mainnet') {
+  return `${EXPIRY_KEY_PREFIX}_${network}`;
+}
+
+export function getStoredAgentExpiry(network?: string): number | null {
+  const net = network || useWalletStore.getState().network || 'mainnet';
+  const val =
+    localStorage.getItem(getExpKey(net)) ||
+    (net === 'mainnet' ? localStorage.getItem(EXPIRY_KEY_PREFIX) : null);
+  if (!val) return null;
+  const num = parseInt(val, 10);
+  return isNaN(num) ? null : num;
+}
+
+export function isAgentKeyExpired(network?: string): boolean {
+  const exp = getStoredAgentExpiry(network);
+  if (!exp) return false;
+  return Date.now() >= exp;
 }
 
 function getAsterAgentDomain(chainId: number) {
@@ -45,7 +68,12 @@ function buildApproveAgentData(
   nonce: number,
   expired: number,
   chainId: number,
-  asterChain: string = 'Mainnet'
+  asterChain: string = 'Mainnet',
+  permissions?: {
+    canSpotTrade?: boolean;
+    canPerpTrade?: boolean;
+    canWithdraw?: boolean;
+  }
 ) {
   return {
     domain: getAsterAgentDomain(chainId),
@@ -63,9 +91,9 @@ function buildApproveAgentData(
       AgentName: AGENT_NAME,
       AgentAddress: agentAddress,
       Expired: expired,
-      CanSpotTrade: true,
-      CanPerpTrade: true,
-      CanWithdraw: false,
+      CanSpotTrade: permissions?.canSpotTrade ?? true,
+      CanPerpTrade: permissions?.canPerpTrade ?? true,
+      CanWithdraw: permissions?.canWithdraw ?? false,
       AsterChain: asterChain,
       User: getAddress(evmAddress),
       Nonce: nonce,
@@ -358,7 +386,7 @@ export async function deriveAsterAgentKey(
   const agentWallet = new Wallet(Wallet.createRandom().privateKey);
 
   const nonce = Date.now() * 1000;
-  const expired = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const expired = Date.now() + AGENT_VALIDITY_MS;
 
   const typedData = buildApproveAgentData(
     evmAddress,
@@ -430,7 +458,8 @@ const ASTER_AES_KEY_ID = '_k_aster';
 
 export async function encryptAndStoreAgentKey(
   privKeyHex: string,
-  network?: string
+  network?: string,
+  expiredAt?: number
 ): Promise<string> {
   const net = network || useWalletStore.getState().network || 'mainnet';
   let aesKey = await retrieveAESKey(ASTER_AES_KEY_ID);
@@ -445,12 +474,22 @@ export async function encryptAndStoreAgentKey(
 
   localStorage.setItem(getBlobKey(net), JSON.stringify(blob));
   localStorage.setItem(getAddrKey(net), agentWallet.address);
+  if (expiredAt) {
+    localStorage.setItem(getExpKey(net), expiredAt.toString());
+  }
 
   return agentWallet.address;
 }
 
 export async function restoreAgentWallet(network?: string): Promise<Wallet | null> {
   const net = network || useWalletStore.getState().network || 'mainnet';
+
+  if (isAgentKeyExpired(net)) {
+    console.warn(`[AsterAgentKeyManager] Agent key expired for network ${net}. Purging key.`);
+    purgeAgentKey(net);
+    return null;
+  }
+
   const raw =
     localStorage.getItem(getBlobKey(net)) ||
     (net === 'mainnet' ? localStorage.getItem(BLOB_KEY_PREFIX) : null);
@@ -492,6 +531,10 @@ export function getStoredAgentAddress(network?: string): string | null {
 
 export function hasStoredAgentKey(network?: string): boolean {
   const net = network || useWalletStore.getState().network || 'mainnet';
+  if (isAgentKeyExpired(net)) {
+    purgeAgentKey(net);
+    return false;
+  }
   return !!(
     localStorage.getItem(getBlobKey(net)) ||
     (net === 'mainnet' && localStorage.getItem(BLOB_KEY_PREFIX))
@@ -502,17 +545,93 @@ export function purgeAgentKey(network?: string): void {
   if (network) {
     localStorage.removeItem(getBlobKey(network));
     localStorage.removeItem(getAddrKey(network));
+    localStorage.removeItem(getExpKey(network));
   } else {
     localStorage.removeItem(getBlobKey('mainnet'));
     localStorage.removeItem(getAddrKey('mainnet'));
+    localStorage.removeItem(getExpKey('mainnet'));
     localStorage.removeItem(getBlobKey('testnet'));
     localStorage.removeItem(getAddrKey('testnet'));
+    localStorage.removeItem(getExpKey('testnet'));
     localStorage.removeItem(BLOB_KEY_PREFIX);
     localStorage.removeItem(ADDR_KEY_PREFIX);
+    localStorage.removeItem(EXPIRY_KEY_PREFIX);
   }
 }
 
 export async function purgeAgentKeyAndAes(network?: string): Promise<void> {
   purgeAgentKey(network);
   await destroyAESKey(ASTER_AES_KEY_ID);
+}
+
+export async function revokeAsterAgentKey(
+  evmAddress: string,
+  provider: any,
+  network?: 'mainnet' | 'testnet'
+): Promise<void> {
+  const currentNetwork = network || useWalletStore.getState().network || 'mainnet';
+  const isTestnet = currentNetwork === 'testnet';
+  const asterChain = isTestnet ? 'Testnet' : 'Mainnet';
+
+  let chainId = isTestnet ? 97 : 56;
+  if (provider?.request) {
+    try {
+      const rawChainId = await provider.request({ method: 'eth_chainId' });
+      if (typeof rawChainId === 'number') {
+        chainId = rawChainId;
+      } else if (typeof rawChainId === 'string') {
+        chainId = rawChainId.startsWith('0x') ? parseInt(rawChainId, 16) : parseInt(rawChainId, 10);
+      }
+    } catch (err) {
+      console.warn(`[aster] Failed to fetch active eth_chainId during revoke:`, err);
+    }
+  }
+
+  const agentAddress =
+    getStoredAgentAddress(currentNetwork) || '0x0000000000000000000000000000000000000000';
+  const nonce = Date.now() * 1000;
+  const expired = 0;
+
+  const typedData = buildApproveAgentData(
+    evmAddress,
+    agentAddress,
+    nonce,
+    expired,
+    chainId,
+    asterChain,
+    { canSpotTrade: false, canPerpTrade: false, canWithdraw: false }
+  );
+
+  let signatureFailed = false;
+  try {
+    const signature = await signTypedData(provider, evmAddress, typedData);
+    assertWellFormedSignature(signature);
+
+    await submitApproveAgent({
+      user: evmAddress,
+      nonce: nonce.toString(),
+      signature,
+      agentName: AGENT_NAME,
+      agentAddress,
+      expired: '0',
+      signatureChainId: chainId,
+      canSpotTrade: false,
+      canPerpTrade: false,
+      canWithdraw: false,
+      asterChain,
+      network: currentNetwork,
+    });
+  } catch (err) {
+    console.warn('[aster] On-chain/API agent revocation error:', err);
+    signatureFailed = true;
+    throw err;
+  } finally {
+    if (!signatureFailed) {
+      await purgeAgentKeyAndAes(currentNetwork);
+    }
+  }
+}
+
+export async function emergencyPurgeLocalAgent(network?: string): Promise<void> {
+  await purgeAgentKeyAndAes(network);
 }

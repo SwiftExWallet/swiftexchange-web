@@ -13,6 +13,7 @@ interface ImportMetaEnv {
   readonly VITE_WALLETCONNECT_RELAY_URL: string;
   readonly VITE_BASE_URL: string;
   readonly REACT_APP_COINMARKETCAP_API_KEY: string;
+  readonly VITEST?: boolean | string;
 }
 
 interface ImportMeta {
