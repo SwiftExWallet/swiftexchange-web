@@ -52,12 +52,21 @@ export const WalletListModal: React.FC = () => {
     if (discoveredExtensions) {
       for (const ext of discoveredExtensions) {
         if (ext.type === 'evm') {
-          const idx = list.findIndex(w => w.id === ext.id);
+          // Match by id, rdns, or injectedIds to prevent duplicates when
+          // EIP-6963 rdns (e.g. 'io.metamask') differs from static id ('metamask')
+          const extRdns = (ext as any).rdns as string | undefined;
+          const idx = list.findIndex(
+            w =>
+              w.id === ext.id ||
+              (extRdns && (w.rdns === extRdns || w.id === extRdns)) ||
+              w.injectedIds?.some(inj => ext.id.includes(inj))
+          );
           if (idx !== -1) {
             list[idx] = {
               ...list[idx],
               name: ext.name || list[idx].name,
               icon: ext.icon || list[idx].icon,
+              rdns: extRdns || list[idx].rdns,
             };
           } else {
             list.push({
@@ -65,6 +74,7 @@ export const WalletListModal: React.FC = () => {
               name: ext.name,
               icon: ext.icon || WALLETCONNECT_ICON,
               type: 'evm',
+              rdns: extRdns,
             });
           }
         }
@@ -78,12 +88,20 @@ export const WalletListModal: React.FC = () => {
     if (discoveredExtensions) {
       for (const ext of discoveredExtensions) {
         if (ext.type === 'stellar') {
-          const idx = list.findIndex(w => w.id === ext.id);
+          // Match by id, rdns, or injectedIds to prevent duplicates
+          const extRdns = (ext as any).rdns as string | undefined;
+          const idx = list.findIndex(
+            w =>
+              w.id === ext.id ||
+              (extRdns && (w.rdns === extRdns || w.id === extRdns)) ||
+              w.injectedIds?.some(inj => ext.id.includes(inj))
+          );
           if (idx !== -1) {
             list[idx] = {
               ...list[idx],
               name: ext.name || list[idx].name,
               icon: ext.icon || list[idx].icon,
+              rdns: extRdns || list[idx].rdns,
             };
           } else {
             list.push({
@@ -91,6 +109,7 @@ export const WalletListModal: React.FC = () => {
               name: ext.name,
               icon: ext.icon || WALLETCONNECT_ICON,
               type: 'stellar',
+              rdns: extRdns,
             });
           }
         }

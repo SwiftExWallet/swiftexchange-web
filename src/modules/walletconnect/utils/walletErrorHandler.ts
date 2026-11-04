@@ -19,8 +19,8 @@ export function extractErrorMessage(error: any): string {
           }
           return match[1];
         }
-      } catch (e) {
-        console.log(e);
+      } catch {
+        // Ignore JSON parse errors in string error payloads
       }
     }
     return error;
@@ -38,8 +38,8 @@ export function extractErrorMessage(error: any): string {
         }
         return match[1];
       }
-    } catch (e) {
-      console.log(e);
+    } catch {
+      // Ignore JSON parse errors in string error payloads
     }
   }
 

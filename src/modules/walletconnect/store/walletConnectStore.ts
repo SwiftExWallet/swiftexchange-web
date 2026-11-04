@@ -61,6 +61,7 @@ export interface WalletState {
   authenticatedChain: 'evm' | 'stellar' | null;
   linkedChains: ('evm' | 'stellar')[];
   tradingAuthEnabled: boolean;
+  authAbortController: AbortController | null;
 }
 
 interface WalletActions {
@@ -73,6 +74,13 @@ interface WalletActions {
   openModal: () => void;
   closeModal: () => void;
   cancelConnection: () => void;
+  cancelAuthentication: () => void;
+  handleAccountSwitched: (
+    type: WalletType,
+    newAddress: string,
+    prevAddress?: string
+  ) => Promise<void>;
+  handleNetworkSwitched: (type: WalletType, newNetwork: string) => void;
   setNetwork: (network: NetworkType) => Promise<void>;
   isConnected: (type: WalletType) => boolean;
   isConnecting: (type: WalletType) => boolean;
@@ -129,6 +137,50 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     authenticatedChain: null,
     linkedChains: [],
     tradingAuthEnabled: getInitialTradingAuth(),
+    authAbortController: null,
+
+    cancelAuthentication: () => {
+      const controller = get().authAbortController;
+      if (controller) {
+        try {
+          controller.abort();
+        } catch {
+          // ignore
+        }
+      }
+      set({ isAuthenticating: false, authAbortController: null, authError: null });
+    },
+
+    handleAccountSwitched: async (type, newAddress, prevAddress) => {
+      if (prevAddress) {
+        try {
+          await clearAccessToken(prevAddress);
+          if (type === 'evm') {
+            await logoutServer(prevAddress);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      const currentWallets = { ...get().connectedWallets };
+      if (currentWallets[type]) {
+        currentWallets[type] = {
+          ...currentWallets[type]!,
+          address: newAddress,
+        };
+      }
+      set({
+        connectedWallets: currentWallets,
+        isAuthenticated: false,
+        authenticatedChain: null,
+        linkedChains: [],
+        authError: `Account changed to ${newAddress.slice(0, 6)}...${newAddress.slice(-4)}. Please sign in again.`,
+      });
+    },
+
+    handleNetworkSwitched: (type, newNetwork) => {
+      console.info(`[WalletStore] Network switched for ${type}: ${newNetwork}`);
+    },
 
     setPairingUri: (uri: string | null) => set({ pairingUri: uri }),
     setConnectingWalletId: (walletId: string | null) => set({ connectingWalletId: walletId }),
@@ -137,6 +189,14 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       if (get().isConnecting(type)) return;
       const existing = get().connectedWallets[type];
       if (existing?.address) return;
+
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('swiftex_user_disconnected');
+        }
+      } catch {
+        // ignore
+      }
 
       set(state => ({
         pairingUri: null,
@@ -219,6 +279,13 @@ export const useWalletStore = create<WalletState & WalletActions>()(
 
     connectUnified: async walletId => {
       if (get().isConnecting('evm') || get().isConnecting('stellar')) return;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('swiftex_user_disconnected');
+        }
+      } catch {
+        // ignore
+      }
       set(state => ({
         pairingUri: null,
         connectingWalletId: walletId,
@@ -299,94 +366,36 @@ export const useWalletStore = create<WalletState & WalletActions>()(
 
     authenticateEvm: async () => {
       const evm = get().connectedWallets.evm;
-      const network = get().network;
+      if (!evm) return;
+      if (get().isAuthenticating) return;
 
-      if (!evm) {
-        console.warn('[Auth:EVM] authenticateEvm called but no EVM wallet connected');
-        return;
-      }
-      if (get().isAuthenticating) {
-        console.warn('[Auth:EVM] Already authenticating — skipping duplicate call');
-        return;
-      }
-
-      console.group(
-        `%c[Auth:EVM] Starting EVM authentication`,
-        'color: #6366f1; font-weight: bold;'
-      );
-      console.log('  Address  :', evm.address);
-      console.log('  Chain ID :', evm.chainId, `(network: ${network})`);
-      console.log('  Wallet   :', evm.walletId);
-      console.groupEnd();
-
-      set({ isAuthenticating: true, authError: null });
+      const controller = new AbortController();
+      set({ isAuthenticating: true, authError: null, authAbortController: controller });
 
       try {
-        const currentToken = getCurrentTokenInfo();
-        if (currentToken && currentToken.expiresAt > Date.now() + 60_000 && get().isAuthenticated) {
-          const hasStellar = Boolean(get().connectedWallets.stellar);
-          const linked: ('evm' | 'stellar')[] = hasStellar ? ['evm', 'stellar'] : ['evm'];
-          set({
-            isAuthenticated: true,
-            isAuthenticating: false,
-            authError: null,
-            linkedChains: linked,
-          });
-          return;
-        }
-
-        console.info('[Auth:EVM] Checking for existing auth session...');
-        const existingSession = await restoreAuthSession(evm.address);
-        if (existingSession) {
-          console.info('[Auth:EVM] ✓ Existing valid session found — skipping sign request');
-          const hasStellar = Boolean(get().connectedWallets.stellar);
-          const linked: ('evm' | 'stellar')[] = hasStellar ? ['evm', 'stellar'] : ['evm'];
-
-          set({
-            isAuthenticated: true,
-            isAuthenticating: false,
-            authError: null,
-            authenticatedChain: 'evm',
-            linkedChains: linked,
-          });
-          return;
-        }
-
-        console.info('[Auth:EVM] No existing session — requesting wallet signature...');
-
-        // 2. Otherwise request signature from wallet
         const provider = walletService.getProvider('evm');
         if (!provider) {
           throw new Error('EVM provider not found');
         }
 
-        // Always use chainId 1 (Ethereum mainnet) for SIWE signing.
-        // Testnet mode affects the Stellar chain only — EVM auth always
-        // goes through the mainnet signing flow regardless of network UI mode.
         const rawChainId =
           typeof evm.chainId === 'number' ? evm.chainId : parseInt(String(evm.chainId), 10);
         const signingChainId = rawChainId || 1;
 
-        console.info(
-          `[Auth:EVM] Building SIWE message for address=${evm.address} chainId=${signingChainId}`
-        );
         const message = await buildSiweMessage(evm.address, signingChainId);
 
-        console.info('[Auth:EVM] ➔ Sending personal_sign request to wallet...');
         const signature = await walletService.signSiweMessage(
           evm.address,
           provider,
           message,
-          signingChainId
+          signingChainId,
+          controller.signal
         );
-        console.info('[Auth:EVM] ✓ Signature received from wallet');
 
-        console.info('[Auth:EVM] Verifying signature on backend...');
         const { accessToken, expiresIn, refreshToken } = await verifySiwe(message, signature, {
           address: evm.address,
           chainId: signingChainId,
         });
-        console.info('[Auth:EVM] ✓ Backend verification successful');
 
         await setAccessToken(
           {
@@ -402,21 +411,33 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         const hasStellar = Boolean(get().connectedWallets.stellar);
         const linked: ('evm' | 'stellar')[] = hasStellar ? ['evm', 'stellar'] : ['evm'];
 
-        console.info('[Auth:EVM] ✓ Authentication complete');
         set({
           isAuthenticated: true,
           isAuthenticating: false,
+          authAbortController: null,
           authError: null,
           authenticatedChain: 'evm',
           linkedChains: linked,
         });
         void usePortfolioStore.getState().fetchAssets(get().connectedWallets, get().network, true);
       } catch (error: any) {
-        const msg =
-          error?.message === 'USER_REJECTED' ? 'Signature rejected' : extractErrorMessage(error);
-        console.error('[Auth:EVM] ✕ Authentication failed:', error?.message ?? error);
+        if (controller.signal.aborted || error?.isCancelled || error?.code === 'USER_CANCELLED') {
+          set({ isAuthenticating: false, authAbortController: null });
+          return;
+        }
+
+        let msg = 'Authentication failed';
+        if (error?.message === 'USER_REJECTED' || error?.isUserRejected) {
+          msg = 'Signature rejected by user';
+        } else if (error?.isTimeout || error?.code === 'TIMEOUT') {
+          msg = 'Signing request timed out after 60s. Please check your wallet popup or retry.';
+        } else {
+          msg = extractErrorMessage(error);
+        }
+
         set(state => ({
           isAuthenticating: false,
+          authAbortController: null,
           isAuthenticated: state.isAuthenticated,
           authError: msg,
         }));
@@ -427,42 +448,40 @@ export const useWalletStore = create<WalletState & WalletActions>()(
       const state = get();
       if (state.isAuthenticating) return;
 
-      set({ isAuthenticating: true, authError: null });
+      const stellar = state.connectedWallets.stellar;
+      if (!stellar) return;
+
+      const currentToken = getCurrentTokenInfo();
+      if (currentToken && currentToken.expiresAt > Date.now() + 60_000 && state.isAuthenticated) {
+        const hasEvm = Boolean(state.connectedWallets.evm);
+        const linked: ('evm' | 'stellar')[] = hasEvm ? ['evm', 'stellar'] : ['stellar'];
+        set({
+          isAuthenticated: true,
+          isAuthenticating: false,
+          authError: null,
+          linkedChains: linked,
+        });
+        return;
+      }
+
+      const existingSession = await restoreAuthSession(stellar.address);
+      if (existingSession) {
+        const hasEvm = Boolean(get().connectedWallets.evm);
+        const linked: ('evm' | 'stellar')[] = hasEvm ? ['evm', 'stellar'] : ['stellar'];
+        set({
+          isAuthenticated: true,
+          isAuthenticating: false,
+          authError: null,
+          authenticatedChain: 'stellar',
+          linkedChains: linked,
+        });
+        return;
+      }
+
+      const controller = new AbortController();
+      set({ isAuthenticating: true, authError: null, authAbortController: controller });
 
       try {
-        const stellar = state.connectedWallets.stellar;
-
-        const currentToken = getCurrentTokenInfo();
-        if (currentToken && currentToken.expiresAt > Date.now() + 60_000 && state.isAuthenticated) {
-          const hasEvm = Boolean(state.connectedWallets.evm);
-          const linked: ('evm' | 'stellar')[] = hasEvm ? ['evm', 'stellar'] : ['stellar'];
-          set({
-            isAuthenticated: true,
-            isAuthenticating: false,
-            authError: null,
-            linkedChains: linked,
-          });
-          return;
-        }
-
-        const existingSession = stellar ? await restoreAuthSession(stellar.address) : null;
-        if (existingSession) {
-          const hasEvm = Boolean(get().connectedWallets.evm);
-          const linked: ('evm' | 'stellar')[] = hasEvm ? ['evm', 'stellar'] : ['stellar'];
-          set({
-            isAuthenticated: true,
-            isAuthenticating: false,
-            authError: null,
-            authenticatedChain: 'stellar',
-            linkedChains: linked,
-          });
-          return;
-        }
-
-        if (!stellar) {
-          throw new Error('Stellar wallet not connected');
-        }
-
         const provider = walletService.getProvider('stellar');
         if (!provider) {
           throw new Error('Stellar provider not found');
@@ -473,7 +492,8 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           payload,
           provider,
           stellar.address,
-          get().network
+          get().network,
+          controller.signal
         );
 
         let verifyRes;
@@ -484,16 +504,18 @@ export const useWalletStore = create<WalletState & WalletActions>()(
           });
         } catch (verifyErr: any) {
           if (
-            verifyErr?.status === 401 ||
-            verifyErr?.message?.toLowerCase?.()?.includes('expired') ||
-            verifyErr?.message?.toLowerCase?.()?.includes('nonce')
+            !controller.signal.aborted &&
+            (verifyErr?.status === 401 ||
+              verifyErr?.message?.toLowerCase?.()?.includes('expired') ||
+              verifyErr?.message?.toLowerCase?.()?.includes('nonce'))
           ) {
             payload = await buildStellarPayload();
             authResult = await walletService.signStellarPayload(
               payload,
               provider,
               stellar.address,
-              get().network
+              get().network,
+              controller.signal
             );
             verifyRes = await verifyStellarPayload(payload, authResult, {
               address: stellar.address,
@@ -522,16 +544,33 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         set({
           isAuthenticated: true,
           isAuthenticating: false,
+          authAbortController: null,
           authError: null,
           authenticatedChain: 'stellar',
           linkedChains: linked,
         });
       } catch (error: any) {
+        if (controller.signal.aborted || error?.isCancelled || error?.code === 'USER_CANCELLED') {
+          set({ isAuthenticating: false, authAbortController: null });
+          return;
+        }
+
+        let msg = 'Authentication failed';
+        if (error?.message === 'USER_REJECTED' || error?.isUserRejected) {
+          msg = 'Signature rejected by user';
+        } else if (error?.isTimeout || error?.code === 'TIMEOUT') {
+          msg = 'Signing request timed out after 60s. Please check your wallet popup or retry.';
+        } else if (error?.message?.includes('Network mismatch')) {
+          msg = error.message;
+        } else {
+          msg = extractErrorMessage(error);
+        }
+
         set(state => ({
           isAuthenticating: false,
+          authAbortController: null,
           isAuthenticated: state.isAuthenticated,
-          authError:
-            error?.message === 'USER_REJECTED' ? 'Signature rejected' : extractErrorMessage(error),
+          authError: msg,
         }));
       }
     },
@@ -539,9 +578,10 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     logoutAuth: async (address?: string) => {
       const targetAddr =
         address || get().connectedWallets.evm?.address || get().connectedWallets.stellar?.address;
-      await clearAccessToken(targetAddr);
       if (targetAddr) {
         await logoutServer(targetAddr);
+      } else {
+        clearAccessToken();
       }
       set({ isAuthenticated: false, authenticatedChain: null, linkedChains: [], authError: null });
     },
@@ -593,10 +633,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
 
       if (wasPrimaryAuth) {
         if (disconnectedAddress) {
-          await clearAccessToken(disconnectedAddress);
-          if (type === 'evm') {
-            await logoutServer(disconnectedAddress);
-          }
+          await logoutServer(disconnectedAddress);
         }
 
         if (remainingOtherWallet) {
@@ -785,10 +822,13 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     },
 
     cancelConnection: () => {
+      get().cancelAuthentication();
       walletService.cancelConnection();
       set(state => ({
         pairingUri: null,
         connectingWalletId: null,
+        isAuthenticating: false,
+        authError: null,
         connectionStatus: {
           ...state.connectionStatus,
           evm:
@@ -882,11 +922,15 @@ export const initWalletListener = async () => {
             }
           }
 
-          if (type === 'evm') {
+          if (disconnectedAddress) {
+            void clearAccessToken(disconnectedAddress);
+          }
+
+          if (useWalletStore.getState().authenticatedChain === type) {
             void useWalletStore.getState().logoutAuth(disconnectedAddress);
-          } else if (type === 'stellar') {
+          } else {
             useWalletStore.setState(prev => ({
-              linkedChains: prev.linkedChains.filter(c => c !== 'stellar'),
+              linkedChains: prev.linkedChains.filter(c => c !== type),
             }));
           }
           return;

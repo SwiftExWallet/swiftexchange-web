@@ -36,13 +36,15 @@ export async function connectStellar(
         try {
           return await connectFreighter(ctx);
         } catch (freighterErr: any) {
+          if (freighterErr?.message?.includes('unlock')) {
+            throw freighterErr;
+          }
           if (
-            freighterErr?.message?.includes('not active') ||
             freighterErr?.message?.includes('not installed') ||
             freighterErr?.message?.includes('not detected')
           ) {
             console.info(
-              `[WalletService] Freighter extension not active/installed — falling back to WalletConnect QR`
+              `[WalletService] Freighter extension not installed — falling back to WalletConnect QR`
             );
             return connectStellarWalletConnectSingle(ctx, walletId);
           }

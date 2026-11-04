@@ -104,6 +104,7 @@ describe('walletConnectStore', () => {
       'mock-payload',
       expect.anything(),
       'GCMOCKADDRESS',
+      expect.anything(),
       expect.anything()
     );
     expect(verifyStellarPayload).toHaveBeenCalledWith(

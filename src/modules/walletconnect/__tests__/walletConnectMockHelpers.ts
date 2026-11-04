@@ -218,6 +218,7 @@ export function createMockWalletServiceContext(network: 'mainnet' | 'testnet' = 
     providers: new Map<string, any>(),
     modals: new Map(),
     eip6963Providers: new Map(),
+    discoveredExtensions: new Map(),
     registeredProviders: new Set(),
     lastPingAt: new Map(),
     disconnecting: new Set(),

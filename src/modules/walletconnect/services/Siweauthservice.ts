@@ -80,7 +80,27 @@ function removeStoredSession(address?: string): void {
     if (targetAddr) {
       localStorage.removeItem(`${STORAGE_KEY_PREFIX}${targetAddr}`);
     }
-    localStorage.removeItem(ACTIVE_ADDRESS_KEY);
+
+    const currentActive = (localStorage.getItem(ACTIVE_ADDRESS_KEY) || '').toLowerCase();
+    if (currentActive === targetAddr || !targetAddr) {
+      // Look for another remaining session
+      let remainingAddr: string | null = null;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+          const addr = key.slice(STORAGE_KEY_PREFIX.length);
+          if (addr && addr !== targetAddr) {
+            remainingAddr = addr;
+            break;
+          }
+        }
+      }
+      if (remainingAddr) {
+        localStorage.setItem(ACTIVE_ADDRESS_KEY, remainingAddr);
+      } else {
+        localStorage.removeItem(ACTIVE_ADDRESS_KEY);
+      }
+    }
   } catch {
     // ignore
   }
@@ -178,18 +198,16 @@ export function clearAccessToken(address?: string): void {
   removeStoredSession(address);
 }
 
-export async function buildSiweMessage(_address: string, _chainId: number): Promise<string> {
+export async function buildSiweMessage(_address?: string, _chainId?: number): Promise<string> {
+  void _address;
+  void _chainId;
   const API_URL = getAuthApiBaseUrl();
-  console.log(_address, _chainId, API_URL, 'API_URL');
   try {
-    console.log('[auth] Requesting signing payload from:', `${API_URL}/signing/request`);
-
     const res = await fetch(`${API_URL}/signing/request`);
     if (!res.ok) {
       throw new Error(`Failed to fetch signing payload, status: ${res.status}`);
     }
     const data = await res.json();
-    console.log('[auth] Received signing payload:', data);
 
     if (data.payload) {
       return data.payload;
@@ -221,13 +239,11 @@ export async function verifySiwe(
 
   if (API_URL) {
     try {
-      console.log('[auth] Verifying signature on backend:', `${API_URL}/signing/verify`);
       // Backend only accepts { payload, signature } — extra fields cause 400
       const payloadBody = {
         payload: message,
         signature: signature,
       };
-      console.log('[auth] Verify request body:', payloadBody);
 
       const res = await fetch(`${API_URL}/signing/verify`, {
         method: 'POST',
@@ -481,13 +497,14 @@ export async function restoreAuthSession(address?: string): Promise<StoredAuthSe
 
 export async function logoutServer(address?: string): Promise<void> {
   const API_URL = getAuthApiBaseUrl();
-  if (API_URL && currentToken) {
+  const tokenToRevoke = currentToken?.accessToken || getStoredSession(address)?.accessToken;
+  if (API_URL && tokenToRevoke) {
     try {
       await fetch(`${API_URL}/auth/logout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${currentToken.accessToken}`,
+          Authorization: `Bearer ${tokenToRevoke}`,
         },
       });
     } catch {

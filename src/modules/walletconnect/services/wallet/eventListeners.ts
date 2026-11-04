@@ -158,6 +158,9 @@ export function handleAccountsChanged(
   const firstAccount = Array.isArray(accounts) ? accounts[0] : accounts;
   if (typeof firstAccount !== 'string') return;
 
+  const prevAddress = type === 'evm' ? session.evmAddress : session.stellarAddress;
+  let newAddress: string | undefined;
+
   if (type === 'evm') {
     if (firstAccount.includes(':')) {
       const parts = firstAccount.split(':');
@@ -166,10 +169,12 @@ export function handleAccountsChanged(
         if (address && address.startsWith('0x') && address.length >= 8) {
           session.evmAddress = address;
           session.evmChainId = parseInt(chainIdStr, 10);
+          newAddress = address;
         }
       }
     } else if (firstAccount.startsWith('0x') && firstAccount.length >= 8) {
       session.evmAddress = firstAccount;
+      newAddress = firstAccount;
     }
   } else if (type === 'stellar') {
     if (firstAccount.includes(':')) {
@@ -183,6 +188,7 @@ export function handleAccountsChanged(
         ) {
           session.stellarAddress = address;
           session.stellarChainId = chainId;
+          newAddress = address;
         }
       }
     } else if (
@@ -192,12 +198,23 @@ export function handleAccountsChanged(
       firstAccount.length >= 20
     ) {
       session.stellarAddress = firstAccount;
+      newAddress = firstAccount;
     }
   }
 
   ctx.sessions.set(type, session);
   ctx.saveSession();
   ctx.emitState(type, 'connected');
+
+  if (
+    newAddress &&
+    prevAddress &&
+    (type === 'evm'
+      ? newAddress.toLowerCase() !== prevAddress.toLowerCase()
+      : newAddress !== prevAddress)
+  ) {
+    ctx.onAccountChanged?.(type, newAddress, prevAddress);
+  }
 }
 
 export function handleChainChanged(

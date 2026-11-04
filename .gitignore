@@ -37,3 +37,7 @@ aster-finance-futures-api-v3.md
 .agent/
 .agent
 ASTER_AUDIT.md
+
+# Security documentation
+docs/security/
+

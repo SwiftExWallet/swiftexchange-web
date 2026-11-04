@@ -113,22 +113,44 @@ export async function clearAppData(): Promise<void> {
     localStorage.removeItem('wallet_sessions');
     localStorage.removeItem('_sx_active_auth_addr');
 
-    // Sweep all keys — remove anything matching known stale patterns
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      if (
-        key.startsWith('_sx_auth_') ||
-        key.startsWith('stellar_active_') || // old format stale sessions
-        key.startsWith('wc@2:') || // WalletConnect v2 pairing/session storage
-        key.startsWith('walletconnect') ||
-        key === 'wallet_sessions'
-      ) {
-        keysToRemove.push(key);
+    // Vendor prefixes that must be wiped on full disconnect
+    const PURGE_PREFIXES = [
+      '_sx_auth_',
+      'stellar_active_',
+      'wc@2:',
+      'walletconnect',
+      'WALLETCONNECT_',
+      'walletlink:',
+      '-walletlink',
+      '@appkit/',
+      'WCM_',
+      'W3M_',
+      '@StellarWalletsKit',
+      'freighter',
+      'swiftex_',
+    ];
+
+    const purgeStore = (store: Storage) => {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < store.length; i++) {
+        const key = store.key(i);
+        if (!key) continue;
+        if (
+          key === 'wallet_sessions' ||
+          PURGE_PREFIXES.some(
+            prefix => key.startsWith(prefix) || key.toLowerCase().startsWith(prefix.toLowerCase())
+          )
+        ) {
+          keysToRemove.push(key);
+        }
       }
+      keysToRemove.forEach(k => store.removeItem(k));
+    };
+
+    purgeStore(localStorage);
+    if (typeof sessionStorage !== 'undefined') {
+      purgeStore(sessionStorage);
     }
-    keysToRemove.forEach(key => localStorage.removeItem(key));
   } catch (error) {
     console.warn('[WalletService] Storage clear failed:', error);
   }

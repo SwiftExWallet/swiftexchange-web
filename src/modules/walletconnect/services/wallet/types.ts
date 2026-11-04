@@ -69,4 +69,6 @@ export interface WalletServiceContext {
   openMobileDeepLink: (walletId: string, uri: string) => void;
   handleDisconnect: (type: WalletType) => void;
   cancelActiveConnection?: (reason?: string) => void;
+  onAccountChanged?: (type: WalletType, newAddress: string, prevAddress?: string) => void;
+  onNetworkChanged?: (type: WalletType, newNetwork: string) => void;
 }

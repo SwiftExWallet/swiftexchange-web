@@ -48,6 +48,20 @@ class WalletService {
       saveSession: () => saveSession(this.ctx),
       openMobileDeepLink: (walletId, uri) => this.openMobileDeepLink(walletId, uri),
       handleDisconnect: type => void disconnect(this.ctx, type),
+      onAccountChanged: (type, newAddress, prevAddress) => {
+        try {
+          useWalletStore.getState().handleAccountSwitched?.(type, newAddress, prevAddress);
+        } catch {
+          // ignore
+        }
+      },
+      onNetworkChanged: (type, newNetwork) => {
+        try {
+          useWalletStore.getState().handleNetworkSwitched?.(type, newNetwork);
+        } catch {
+          // ignore
+        }
+      },
     };
 
     setupEIP6963Listener(this.ctx);
@@ -170,26 +184,29 @@ class WalletService {
     evmAddress: string,
     provider: unknown,
     message: string,
-    chainId?: number | string
+    chainId?: number | string,
+    signal?: AbortSignal
   ): Promise<string> {
-    return signSiweMessage(evmAddress, provider, message, chainId);
+    return signSiweMessage(evmAddress, provider, message, chainId, signal);
   }
 
   async signStellarPayload(
     payload: string,
     provider: unknown,
     stellarAddress?: string,
-    network?: string
+    network?: string,
+    signal?: AbortSignal
   ): Promise<string> {
-    return signStellarPayload(payload, provider, stellarAddress, network);
+    return signStellarPayload(payload, provider, stellarAddress, network, signal);
   }
 
   async signStellarChallenge(
     xdr: string,
     networkPassphrase: string,
-    provider: unknown
+    provider: unknown,
+    signal?: AbortSignal
   ): Promise<string> {
-    return signStellarChallenge(xdr, networkPassphrase, provider);
+    return signStellarChallenge(xdr, networkPassphrase, provider, signal);
   }
 
   // ---------------------------------------------------------------------------
