@@ -75,6 +75,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   const stellarAddress = stellarWallet?.address || '';
   const currentChainId = evmWallet?.chainId || null;
   const currentNetwork = useWalletStore((state: any) => state.network) as 'mainnet' | 'testnet';
+  const isTestnet = currentNetwork === 'testnet';
 
   const fromChainId = useSwapStore(s => s.fromChainId);
   const setFromChainId = useSwapStore(s => s.setFromChainId);
@@ -117,6 +118,12 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   const [crossChainWarning, setCrossChainWarning] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [swapTab, setSwapTab] = useState<'swap' | 'cctp'>('swap');
+
+  useEffect(() => {
+    if (!isTestnet && swapTab === 'cctp') {
+      setSwapTab('swap');
+    }
+  }, [isTestnet, swapTab]);
 
   const actionType = useMemo(
     () =>
@@ -1056,39 +1063,45 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
   return (
     <PageLayout
-      title={swapTab === 'cctp' ? 'Circle CCTP Bridge' : 'Token Swap'}
-      subtitle={swapTab === 'cctp' ? 'Native Cross-Chain USDC (EVM ↔ Stellar)' : 'Swap & Bridge'}
+      title={isTestnet && swapTab === 'cctp' ? 'Circle CCTP Bridge' : 'Token Swap'}
+      subtitle={
+        isTestnet && swapTab === 'cctp'
+          ? 'Native Cross-Chain USDC (EVM ↔ Stellar)'
+          : 'Swap & Bridge'
+      }
       onBack={onClose}
       showBackButton={!!onClose}
       maxWidth="lg"
       isBeta
       betaMessage="This feature is in Beta. Please double-check the network and address crypto transactions can't be reversed."
     >
-      <div className="flex items-center gap-1.5 p-1 bg-secondary/80 rounded-xl border border-divider/40 w-fit mb-4">
-        <button
-          type="button"
-          onClick={() => setSwapTab('swap')}
-          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-            swapTab === 'swap' ? 'bg-brand text-white shadow-sm' : 'text-muted hover:text-primary'
-          }`}
-        >
-          Swap & Bridge
-        </button>
-        <button
-          type="button"
-          onClick={() => setSwapTab('cctp')}
-          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-            swapTab === 'cctp' ? 'bg-brand text-white shadow-sm' : 'text-muted hover:text-primary'
-          }`}
-        >
-          <span>Circle CCTP</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/20 text-white font-extrabold uppercase">
-            USDC
-          </span>
-        </button>
-      </div>
+      {isTestnet && (
+        <div className="flex items-center gap-1.5 p-1 bg-secondary/80 rounded-xl border border-divider/40 w-fit mb-4">
+          <button
+            type="button"
+            onClick={() => setSwapTab('swap')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              swapTab === 'swap' ? 'bg-brand text-white shadow-sm' : 'text-muted hover:text-primary'
+            }`}
+          >
+            Swap & Bridge
+          </button>
+          <button
+            type="button"
+            onClick={() => setSwapTab('cctp')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              swapTab === 'cctp' ? 'bg-brand text-white shadow-sm' : 'text-muted hover:text-primary'
+            }`}
+          >
+            <span>Circle CCTP</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/20 text-white font-extrabold uppercase">
+              USDC
+            </span>
+          </button>
+        </div>
+      )}
 
-      {swapTab === 'cctp' ? (
+      {isTestnet && swapTab === 'cctp' ? (
         <CctpBridgeComponent
           currentNetwork={currentNetwork}
           onBackToSwap={() => setSwapTab('swap')}
