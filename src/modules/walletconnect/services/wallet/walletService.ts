@@ -1,18 +1,25 @@
 import { openMobileWallet } from '../../../../utils/walletConnectUtils';
-import { IS_TESTNET_ENABLED, type NetworkType } from '../../config/chains';
+import { IS_MAINNET_ENABLED, IS_TESTNET_ENABLED, type NetworkType } from '../../config/chains';
 import { useWalletStore } from '../../store/walletConnectStore';
 import { disconnect, disconnectAll } from './disconnect';
 import { connectChainWallet } from './evmConnect';
 import {
+  discoverStellarExtensions,
   getInstalledWallets,
   isExtensionInstalled,
   setupEIP6963Listener,
 } from './providerRegistry';
-import { clearSessionStorage, restoreSessions, saveSession } from './sessionPersistence';
-import { signSiweMessage, signStellarChallenge } from './signing';
+import {
+  clearSessionStorage,
+  restoreSessions,
+  saveSession,
+  setupCrossTabSync,
+} from './sessionPersistence';
+import { signSiweMessage, signStellarChallenge, signStellarPayload } from './signing';
 import { connectStellar } from './stellarConnect';
 import type {
   ConnectionState,
+  DiscoveredExtension,
   UnifiedConnectionResult,
   WalletServiceContext,
   WalletSession,
@@ -29,6 +36,7 @@ class WalletService {
       providers: new Map(),
       modals: new Map(),
       eip6963Providers: new Map(),
+      discoveredExtensions: new Map(),
       registeredProviders: new Set(),
       lastPingAt: new Map(),
       disconnecting: new Set(),
@@ -40,10 +48,25 @@ class WalletService {
       saveSession: () => saveSession(this.ctx),
       openMobileDeepLink: (walletId, uri) => this.openMobileDeepLink(walletId, uri),
       handleDisconnect: type => void disconnect(this.ctx, type),
+      onAccountChanged: (type, newAddress, prevAddress) => {
+        try {
+          useWalletStore.getState().handleAccountSwitched?.(type, newAddress, prevAddress);
+        } catch {
+          // ignore
+        }
+      },
+      onNetworkChanged: (type, newNetwork) => {
+        try {
+          useWalletStore.getState().handleNetworkSwitched?.(type, newNetwork);
+        } catch {
+          // ignore
+        }
+      },
     };
 
     setupEIP6963Listener(this.ctx);
     this.setupVisibilityHandler();
+    setupCrossTabSync(this.ctx);
   }
 
   // ---------------------------------------------------------------------------
@@ -52,11 +75,12 @@ class WalletService {
 
   private loadNetwork(): NetworkType {
     if (!IS_TESTNET_ENABLED) return 'mainnet';
+    if (!IS_MAINNET_ENABLED) return 'testnet';
     try {
       const stored = localStorage.getItem('network');
-      return stored === 'testnet' ? 'testnet' : 'mainnet';
+      return stored === 'mainnet' ? 'mainnet' : 'testnet';
     } catch {
-      return 'mainnet';
+      return 'testnet';
     }
   }
 
@@ -127,6 +151,8 @@ class WalletService {
   }
 
   async setNetwork(network: NetworkType): Promise<void> {
+    if (!IS_TESTNET_ENABLED && network === 'testnet') return;
+    if (!IS_MAINNET_ENABLED && network === 'mainnet') return;
     if (this.ctx.currentNetwork === network) return;
     this.ctx.currentNetwork = network;
     localStorage.setItem('network', network);
@@ -154,16 +180,33 @@ class WalletService {
   // Signing pass-throughs
   // ---------------------------------------------------------------------------
 
-  async signSiweMessage(evmAddress: string, provider: unknown, message: string): Promise<string> {
-    return signSiweMessage(evmAddress, provider, message);
+  async signSiweMessage(
+    evmAddress: string,
+    provider: unknown,
+    message: string,
+    chainId?: number | string,
+    signal?: AbortSignal
+  ): Promise<string> {
+    return signSiweMessage(evmAddress, provider, message, chainId, signal);
+  }
+
+  async signStellarPayload(
+    payload: string,
+    provider: unknown,
+    stellarAddress?: string,
+    network?: string,
+    signal?: AbortSignal
+  ): Promise<string> {
+    return signStellarPayload(payload, provider, stellarAddress, network, signal);
   }
 
   async signStellarChallenge(
     xdr: string,
     networkPassphrase: string,
-    provider: unknown
+    provider: unknown,
+    signal?: AbortSignal
   ): Promise<string> {
-    return signStellarChallenge(xdr, networkPassphrase, provider);
+    return signStellarChallenge(xdr, networkPassphrase, provider, signal);
   }
 
   // ---------------------------------------------------------------------------
@@ -192,13 +235,41 @@ class WalletService {
 
   async checkSessionHealth(): Promise<{ type: WalletType; valid: boolean }[]> {
     const results: { type: WalletType; valid: boolean }[] = [];
-    for (const [type] of this.ctx.sessions.entries()) {
+    for (const [type, session] of this.ctx.sessions.entries()) {
       const provider = this.ctx.providers.get(type);
-      const hasSession = !!provider?.session;
-      const notExpired = hasSession
-        ? !provider.session.expiry || Date.now() / 1000 < provider.session.expiry
-        : false;
-      const valid = hasSession && notExpired;
+      let valid = false;
+
+      const isWalletConnect =
+        session?.connectionMode === 'unified' || session?.connectionMode === 'separate';
+
+      if (isWalletConnect) {
+        const hasSession = !!provider?.session;
+        const notExpired = hasSession
+          ? !provider.session.expiry || Date.now() / 1000 < provider.session.expiry
+          : false;
+        valid = hasSession && notExpired;
+      } else if (provider) {
+        if (type === 'evm' && typeof provider.request === 'function') {
+          try {
+            const accounts = await provider.request({ method: 'eth_accounts' });
+            valid = Array.isArray(accounts) && accounts.length > 0;
+          } catch {
+            valid = false;
+          }
+        } else if (type === 'stellar') {
+          try {
+            if (typeof provider.isConnected === 'function') {
+              const res = await provider.isConnected();
+              valid = typeof res === 'boolean' ? res : !!(res as any)?.isConnected;
+            } else if (typeof provider.getPublicKey === 'function') {
+              valid = true;
+            }
+          } catch {
+            valid = false;
+          }
+        }
+      }
+
       results.push({ type, valid });
       if (!valid) void this.disconnect(type);
     }
@@ -207,6 +278,35 @@ class WalletService {
 
   clearSignRequests(): void {
     this.ctx.isSignRequestInFlight.clear();
+  }
+
+  cancelConnection(): void {
+    try {
+      if (this.ctx.cancelActiveConnection) {
+        try {
+          this.ctx.cancelActiveConnection('Connection cancelled by user');
+        } catch {
+          // ignore
+        }
+        this.ctx.cancelActiveConnection = undefined;
+      }
+      for (const modal of this.ctx.modals.values()) {
+        try {
+          modal?.closeModal?.();
+        } catch {
+          // ignore
+        }
+      }
+      for (const provider of this.ctx.providers.values()) {
+        try {
+          provider?.abortPairing?.();
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      console.warn('[WalletService] cancelConnection error:', err);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -235,6 +335,14 @@ class WalletService {
 
   getInstalledWallets(): string[] {
     return getInstalledWallets(this.ctx);
+  }
+
+  getDiscoveredExtensions(): DiscoveredExtension[] {
+    return Array.from(this.ctx.discoveredExtensions.values());
+  }
+
+  discoverStellarExtensions(): DiscoveredExtension[] {
+    return discoverStellarExtensions();
   }
 
   // ---------------------------------------------------------------------------

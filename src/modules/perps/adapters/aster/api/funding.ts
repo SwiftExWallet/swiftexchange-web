@@ -1,4 +1,4 @@
-import { ASTER_BAPI_URL, ASTER_ENDPOINTS, ASTER_REST_URL, BAPI_ENDPOINTS } from '../constants';
+import { ASTER_ENDPOINTS, BAPI_ENDPOINTS, getAsterBapiUrl, getAsterRestUrl } from '../constants';
 
 export interface FundingRateData {
   symbol: string;
@@ -19,7 +19,27 @@ export async function getFundingRates(
   symbol: string,
   limit: number = 336
 ): Promise<FundingRateData[]> {
-  const url = `${ASTER_BAPI_URL}${BAPI_ENDPOINTS.FUNDING_HISTORY}`;
+  const cleanSymbol = symbol.replace('-', '').replace('/', '');
+  try {
+    const restUrl = getAsterRestUrl();
+    const publicUrl = `${restUrl}${ASTER_ENDPOINTS.FUNDING_RATE}?symbol=${cleanSymbol}&limit=${Math.min(limit, 1000)}`;
+    const res = await fetch(publicUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map((item: any) => ({
+          symbol: item.symbol,
+          fundingRate: item.fundingRate,
+          fundingTime: item.fundingTime,
+        }));
+      }
+    }
+  } catch (e) {
+    console.warn('[Funding] Failed to fetch from /fapi/v3/fundingRate, falling back to BAPI:', e);
+  }
+
+  // Fallback to internal BAPI
+  const url = `${getAsterBapiUrl()}${BAPI_ENDPOINTS.FUNDING_HISTORY}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -47,7 +67,7 @@ export async function getFundingRates(
 }
 
 export async function getSymbolDetail(coin: string): Promise<any> {
-  const url = `${ASTER_BAPI_URL}${BAPI_ENDPOINTS.SYMBOL_DETAIL}?symbol=${coin}`;
+  const url = `${getAsterBapiUrl()}${BAPI_ENDPOINTS.SYMBOL_DETAIL}?symbol=${coin}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch symbol detail: ${response.statusText}`);
@@ -63,7 +83,7 @@ export async function getSymbolDetail(coin: string): Promise<any> {
 }
 
 export async function getSymbolAthl(coin: string): Promise<any> {
-  const url = `${ASTER_BAPI_URL}${BAPI_ENDPOINTS.SYMBOL_ATHL}?symbol=${coin}`;
+  const url = `${getAsterBapiUrl()}${BAPI_ENDPOINTS.SYMBOL_ATHL}?symbol=${coin}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch symbol ATH/ATL: ${response.statusText}`);
@@ -76,9 +96,10 @@ export async function getSymbolAthl(coin: string): Promise<any> {
 }
 
 export async function getFundingInfo(symbol?: string): Promise<FundingInfoData[]> {
+  const restUrl = getAsterRestUrl();
   const url = symbol
-    ? `${ASTER_REST_URL}${ASTER_ENDPOINTS.FUNDING_INFO}?symbol=${symbol}`
-    : `${ASTER_REST_URL}${ASTER_ENDPOINTS.FUNDING_INFO}`;
+    ? `${restUrl}${ASTER_ENDPOINTS.FUNDING_INFO}?symbol=${symbol}`
+    : `${restUrl}${ASTER_ENDPOINTS.FUNDING_INFO}`;
 
   const response = await fetch(url);
   if (!response.ok) {
@@ -88,7 +109,7 @@ export async function getFundingInfo(symbol?: string): Promise<FundingInfoData[]
 }
 
 export async function getBrackets(): Promise<any[]> {
-  const url = `${ASTER_BAPI_URL}${BAPI_ENDPOINTS.BRACKETS}`;
+  const url = `${getAsterBapiUrl()}${BAPI_ENDPOINTS.BRACKETS}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -107,7 +128,7 @@ export async function getBrackets(): Promise<any[]> {
 }
 
 export async function getRealTimeFundingRate(symbol: string): Promise<any> {
-  const url = `${ASTER_BAPI_URL}${BAPI_ENDPOINTS.REAL_TIME_FUNDING_RATE}?symbol=${symbol}`;
+  const url = `${getAsterBapiUrl()}${BAPI_ENDPOINTS.REAL_TIME_FUNDING_RATE}?symbol=${symbol}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch real-time funding rate: ${response.statusText}`);
@@ -117,4 +138,26 @@ export async function getRealTimeFundingRate(symbol: string): Promise<any> {
     return json.data[0];
   }
   return null;
+}
+
+export interface AsterOpenInterestResponse {
+  symbol: string;
+  openInterest: string;
+  time: number;
+}
+
+/**
+ * Official Aster Futures v3 Open Interest endpoint:
+ * GET /fapi/v3/openInterest?symbol=BTCUSDT
+ * Response: { symbol: "BTCUSDT", openInterest: "6403.294", time: 1793263722567 }
+ */
+export async function getAsterOpenInterest(symbol: string): Promise<string> {
+  const cleanSymbol = symbol.replace(/[-_/]/g, '').toUpperCase();
+  const restUrl = getAsterRestUrl();
+  const response = await fetch(`${restUrl}${ASTER_ENDPOINTS.OPEN_INTEREST}?symbol=${cleanSymbol}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch open interest: ${response.statusText}`);
+  }
+  const data: AsterOpenInterestResponse = await response.json();
+  return data.openInterest || '0';
 }

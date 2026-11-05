@@ -9,6 +9,7 @@ import {
   getStellarConfig,
 } from '../../config/chains';
 import { WALLET_METADATA_MAP } from '../../constants/Wallet';
+import { setupWalletConnectListeners } from './eventListeners';
 import { getOrCreateProvider } from './providerRegistry';
 import type { UnifiedConnectionResult, WalletServiceContext, WalletSession } from './types';
 
@@ -28,6 +29,7 @@ export async function connectUnified(
   walletId: string
 ): Promise<UnifiedConnectionResult> {
   ctx.emitState('evm', 'connecting');
+  ctx.emitState('stellar', 'connecting');
 
   let provider: any;
   let modal: WalletConnectModal | undefined;
@@ -49,33 +51,22 @@ export async function connectUnified(
         '4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0', // Trust Wallet
         'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96', // MetaMask
         'a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393', // Phantom
+        'aee5083aac025c4c3f1c9afc31ea89dbddca0b1c248195bef469fc4886ae3ab2', // HOT Wallet
       ],
     });
     ctx.modals.set('unified', modal);
 
-    console.log('[WC] CONNECT START', {
-      providerInstanceId: (provider as any).__debugProviderId,
-    });
+    const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+    console.info(
+      `[WalletConnect:${networkTag}] Initializing unified pairing for wallet: ${walletId}`
+    );
 
     const session = await new Promise<any>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        modal!.closeModal();
-        reject(new Error('Connection timeout'));
-      }, CONNECTION_TIMEOUT_MS);
-
+      let sessionResolved = false;
       let modalOpened = false;
-      const unsubscribe = modal!.subscribeModal(state => {
-        if (state.open) {
-          modalOpened = true;
-        } else if (modalOpened && !state.open) {
-          clearTimeout(timeout);
-          unsubscribe();
-          provider.abortPairing?.();
-          reject(new Error('User closed the modal'));
-        }
-      });
 
-      provider.on('display_uri', (uri: string) => {
+      const onDisplayUri = (uri: string) => {
+        console.info(`[WalletConnect:${networkTag}] WC URI generated — opening modal/deeplink`);
         ctx.openMobileDeepLink(walletId, uri);
         if (!isMobileDevice() || walletId === 'walletconnect') {
           modal!.openModal({ uri });
@@ -89,28 +80,82 @@ export async function connectUnified(
             console.error(err);
           });
         }
+      };
+
+      const cleanup = () => {
+        ctx.cancelActiveConnection = undefined;
+        clearTimeout(timeout);
+        unsubscribe();
+        try {
+          if (typeof provider.removeListener === 'function') {
+            provider.removeListener('display_uri', onDisplayUri);
+          } else if (typeof provider.off === 'function') {
+            provider.off('display_uri', onDisplayUri);
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      ctx.cancelActiveConnection = (reason = 'Connection cancelled by user') => {
+        cleanup();
+        modal!.closeModal();
+        reject(new Error(reason));
+      };
+
+      const timeout = setTimeout(() => {
+        console.warn(
+          `[WalletConnect:${networkTag}] Connection timed out after ${CONNECTION_TIMEOUT_MS / 1000}s`
+        );
+        cleanup();
+        modal!.closeModal();
+        reject(new Error('Connection timeout'));
+      }, CONNECTION_TIMEOUT_MS);
+
+      const unsubscribe = modal!.subscribeModal(state => {
+        if (state.open) {
+          modalOpened = true;
+          console.info(
+            `[WalletConnect:${networkTag}] QR modal opened — waiting for wallet approval...`
+          );
+        } else if (modalOpened && !state.open) {
+          if (!sessionResolved) {
+            console.info(
+              `[WalletConnect:${networkTag}] Modal closed before session resolved — treating as user cancel`
+            );
+            cleanup();
+            provider.abortPairing?.();
+            reject(new Error('User closed the modal'));
+          } else {
+            console.debug(
+              `[WalletConnect:${networkTag}] Modal closed after session resolved — ignoring`
+            );
+          }
+        }
       });
+
+      provider.on('display_uri', onDisplayUri);
 
       provider
         .connect({ ...namespaces })
         .then((s: any) => {
-          clearTimeout(timeout);
-          unsubscribe();
+          sessionResolved = true;
+          console.info(
+            `[WalletConnect:${networkTag}] ✓ provider.connect() resolved — session established`
+          );
+          cleanup();
           modal!.closeModal();
           resolve(s);
         })
         .catch((err: any) => {
-          clearTimeout(timeout);
-          unsubscribe();
+          console.error(
+            `[WalletConnect:${networkTag}] ✕ provider.connect() failed:`,
+            err?.message ?? err
+          );
+          cleanup();
           modal!.closeModal();
           reject(err);
         });
-    });
-
-    console.log('[WC] CONNECT SUCCESS', {
-      providerInstanceId: (provider as any).__debugProviderId,
-      topic: session?.topic,
-      namespaces: session?.namespaces,
     });
 
     const result: UnifiedConnectionResult = {};
@@ -118,41 +163,82 @@ export async function connectUnified(
     const meta = getSessionMetadata(walletId, peerMetadata);
 
     const evmAccounts: string[] = session.namespaces?.eip155?.accounts ?? [];
-    if (evmAccounts.length > 0) {
-      const [, chainIdStr, address] = evmAccounts[0].split(':');
-      const evmSession: WalletSession = {
-        type: 'evm',
-        walletId,
-        evmAddress: address,
-        evmChainId: parseInt(chainIdStr, 10),
-        connectionMode: 'unified',
-        peerName: meta.peerName,
-        peerIcon: meta.peerIcon,
-        peerRedirect: meta.peerRedirect,
-      };
-      ctx.sessions.set('evm', evmSession);
-      ctx.providers.set('evm', provider);
-      result.evm = evmSession;
-      ctx.emitState('evm', 'connected');
+    if (evmAccounts.length > 0 && typeof evmAccounts[0] === 'string') {
+      const parts = evmAccounts[0].split(':');
+      if (parts.length >= 3) {
+        const [, chainIdStr, address] = parts;
+        if (address && address.startsWith('0x') && address.length >= 8) {
+          const evmSession: WalletSession = {
+            type: 'evm',
+            walletId,
+            evmAddress: address,
+            evmChainId: parseInt(chainIdStr, 10),
+            connectionMode: 'unified',
+            peerName: meta.peerName,
+            peerIcon: meta.peerIcon,
+            peerRedirect: meta.peerRedirect,
+          };
+          ctx.sessions.set('evm', evmSession);
+          ctx.providers.set('evm', provider);
+          result.evm = evmSession;
+          ctx.emitState('evm', 'connected');
+        } else {
+          ctx.emitState('evm', 'idle');
+        }
+      } else {
+        ctx.emitState('evm', 'idle');
+      }
+    } else {
+      ctx.emitState('evm', 'idle');
     }
 
     const stellarAccounts: string[] = session.namespaces?.stellar?.accounts ?? [];
-    if (stellarAccounts.length > 0) {
-      const [, chainId, address] = stellarAccounts[0].split(':');
-      const stellarSession: WalletSession = {
-        type: 'stellar',
-        walletId,
-        stellarAddress: address,
-        stellarChainId: chainId,
-        connectionMode: 'unified',
-        peerName: meta.peerName,
-        peerIcon: meta.peerIcon,
-        peerRedirect: meta.peerRedirect,
-      };
-      ctx.sessions.set('stellar', stellarSession);
-      ctx.providers.set('stellar', provider);
-      result.stellar = stellarSession;
-      ctx.emitState('stellar', 'connected');
+    if (stellarAccounts.length > 0 && typeof stellarAccounts[0] === 'string') {
+      const parts = stellarAccounts[0].split(':');
+      if (parts.length >= 3) {
+        const [, chainId, address] = parts;
+        if (
+          address &&
+          (address.startsWith('G') || address.startsWith('C') || /^[A-Z0-9]+$/i.test(address)) &&
+          address.length >= 20
+        ) {
+          const stellarSession: WalletSession = {
+            type: 'stellar',
+            walletId,
+            stellarAddress: address,
+            stellarChainId: chainId,
+            connectionMode: 'unified',
+            peerName: meta.peerName,
+            peerIcon: meta.peerIcon,
+            peerRedirect: meta.peerRedirect,
+          };
+          ctx.sessions.set('stellar', stellarSession);
+          ctx.providers.set('stellar', provider);
+          result.stellar = stellarSession;
+          ctx.emitState('stellar', 'connected');
+        } else {
+          ctx.emitState('stellar', 'idle');
+        }
+      } else {
+        ctx.emitState('stellar', 'idle');
+      }
+    } else {
+      ctx.emitState('stellar', 'idle');
+    }
+
+    console.info(`[WalletConnect:${networkTag}] ✓ Unified session established:`, {
+      peer: meta.peerName,
+      evm: result.evm ? `${result.evm.evmAddress} (Chain ${result.evm.evmChainId})` : 'none',
+      stellar: result.stellar
+        ? `${result.stellar.stellarAddress} (${result.stellar.stellarChainId})`
+        : 'none',
+    });
+
+    if (result.evm) {
+      setupWalletConnectListeners(ctx, provider, 'evm');
+    }
+    if (result.stellar) {
+      setupWalletConnectListeners(ctx, provider, 'stellar');
     }
 
     ctx.saveSession();
@@ -163,6 +249,7 @@ export async function connectUnified(
       ctx.providers.delete('unified');
     }
     ctx.emitState('evm', 'failed');
+    ctx.emitState('stellar', 'failed');
     throw error;
   }
 }

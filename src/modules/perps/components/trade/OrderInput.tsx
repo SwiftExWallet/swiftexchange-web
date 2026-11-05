@@ -5,6 +5,7 @@ interface OrderInputProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onFocus?: () => void;
   currency?: string;
   currencyOptions?: string[];
   onCurrencyChange?: (currency: string) => void;
@@ -15,12 +16,14 @@ interface OrderInputProps {
   triggerOption?: string;
   onTriggerOptionChange?: (opt: string) => void;
   triggerOptions?: string[];
+  onTriggerFill?: () => void;
 }
 
 export const OrderInput: React.FC<OrderInputProps> = ({
   label,
   value,
   onChange,
+  onFocus,
   currency,
   currencyOptions,
   onCurrencyChange,
@@ -31,6 +34,7 @@ export const OrderInput: React.FC<OrderInputProps> = ({
   triggerOption,
   onTriggerOptionChange,
   triggerOptions,
+  onTriggerFill,
 }) => {
   const [isCurrencyOpen, setIsCurrencyOpen] = useState(false);
   const [isTriggerOpen, setIsTriggerOpen] = useState(false);
@@ -66,6 +70,7 @@ export const OrderInput: React.FC<OrderInputProps> = ({
         type="text"
         inputMode="decimal"
         value={value}
+        onFocus={onFocus}
         onChange={e => {
           const val = e.target.value;
           if (val === '' || /^\d*\.?\d*$/.test(val)) {
@@ -90,7 +95,17 @@ export const OrderInput: React.FC<OrderInputProps> = ({
         )}
 
         {triggerOptions && triggerOptions.length > 0 && (
-          <div className="relative" ref={triggerRef}>
+          <div className="relative flex items-center gap-1.5" ref={triggerRef}>
+            {onTriggerFill && (
+              <button
+                type="button"
+                onClick={onTriggerFill}
+                className="px-1.5 py-0.5 rounded bg-brand/10 border border-brand/30 text-[10px] font-semibold text-brand hover:bg-brand/20 transition-colors"
+                title={`Fill with current ${triggerOption || 'Last'} price`}
+              >
+                Fill
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setIsTriggerOpen(!isTriggerOpen)}

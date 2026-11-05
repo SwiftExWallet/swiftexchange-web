@@ -3,10 +3,10 @@ import {
   CandlestickChart,
   Check,
   ChevronDown,
-  Download,
   Maximize2,
   Minimize2,
   Search,
+  Settings,
   TrendingUp,
   X,
 } from 'lucide-react';
@@ -15,63 +15,143 @@ import { memo, useMemo, useState } from 'react';
 import { indicatorRegistry } from 'lightweight-charts-indicators';
 
 import { TIMEFRAMES } from '../constants/toolCategories';
-import type { ActiveIndicator, ChartType } from '../types';
-import { type CandleResolution } from '../types';
+import type { ActiveIndicator, CandleResolution, ChartType } from '../types';
 
 interface TimeframeSelectorProps {
   value: CandleResolution;
   onChange: (v: CandleResolution) => void;
 }
 
+const PRIMARY_DESKTOP: CandleResolution[] = ['5MINS', '15MINS', '1HOUR', '4HOURS', '1DAY', '1WEEK'];
+
+const TF_SHORT: Record<string, string> = {
+  '1MIN': '1m',
+  '5MINS': '5m',
+  '15MINS': '15m',
+  '30MINS': '30m',
+  '1HOUR': '1H',
+  '4HOURS': '4H',
+  '1DAY': '1D',
+  '1WEEK': '1W',
+};
+
 const TimeframeSelector = memo(function TimeframeSelector({
   value,
   onChange,
 }: TimeframeSelectorProps) {
   const [open, setOpen] = useState(false);
-  const selectedLabel = TIMEFRAMES.find(t => t.value === value)?.label || value;
+  const selectedLabel = TF_SHORT[value] || value;
+  const isSelectedInMore = !PRIMARY_DESKTOP.includes(value);
 
   return (
-    <div className="relative flex-1">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2 py-1 hover:bg-hover rounded-md transition-colors min-h-[40px] text-primary font-medium text-xs sm:text-[13px]"
-      >
-        {selectedLabel}
-        <ChevronDown
-          className={`w-3 h-3 transition-transform duration-200 ${open ? 'rotate-180' : 'text-gray-400'}`}
-        />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-1 bg-secondary rounded-lg shadow-xl border border-color py-1 min-w-[140px] z-50">
-            {TIMEFRAMES.map(tf => (
-              <button
-                key={tf.value}
-                onClick={() => {
-                  onChange(tf.value);
-                  setOpen(false);
-                }}
-                className={`w-full text-left px-3 py-2.5 text-xs hover:bg-hover transition-colors flex items-center justify-between ${
-                  value === tf.value ? 'bg-hover text-brand font-medium' : 'text-primary'
-                }`}
-              >
-                <span>{tf.label}</span>
-                {value === tf.value && <Check className="w-3.5 h-3.5 text-brand" />}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+    <div className="flex items-center shrink-0">
+      {/* Mobile: Single Compact Dropdown Button */}
+      <div className="relative flex sm:hidden">
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-primary bg-tertiary/40 rounded transition-colors cursor-pointer"
+        >
+          <span>{selectedLabel}</span>
+          <ChevronDown
+            className={`w-3 h-3 transition-transform duration-150 ${open ? 'rotate-180' : 'opacity-60'}`}
+          />
+        </button>
+
+        {open && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <div className="absolute top-full left-0 mt-1 bg-secondary rounded-md shadow-lg border border-color py-1 min-w-[110px] z-50">
+              {TIMEFRAMES.map(tf => (
+                <button
+                  key={tf.value}
+                  onClick={() => {
+                    onChange(tf.value);
+                    setOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-hover transition-colors flex items-center justify-between cursor-pointer ${
+                    value === tf.value ? 'text-brand font-semibold' : 'text-primary'
+                  }`}
+                >
+                  <span>{tf.label}</span>
+                  {value === tf.value && <Check className="w-3 h-3 text-brand" />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Desktop: Flat Quick-Switch Pills */}
+      <div className="hidden sm:flex items-center gap-0.5">
+        {PRIMARY_DESKTOP.map(tf => {
+          const isSelected = value === tf;
+          return (
+            <button
+              key={tf}
+              onClick={() => onChange(tf)}
+              className={`px-1.5 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                isSelected
+                  ? 'bg-brand/15 text-brand font-semibold'
+                  : 'text-secondary hover:text-primary hover:bg-hover/60'
+              }`}
+            >
+              {TF_SHORT[tf] || tf}
+            </button>
+          );
+        })}
+
+        {/* Desktop More dropdown */}
+        <div className="relative">
+          <button
+            onClick={() => setOpen(!open)}
+            className={`flex items-center gap-0.5 px-1 py-0.5 text-[11px] rounded transition-colors cursor-pointer ${
+              isSelectedInMore
+                ? 'bg-brand/15 text-brand font-semibold'
+                : 'text-secondary hover:text-primary hover:bg-hover/60'
+            }`}
+            title="More Timeframes"
+          >
+            <span>{isSelectedInMore ? TF_SHORT[value] || value : ''}</span>
+            <ChevronDown
+              className={`w-3 h-3 transition-transform duration-150 ${open ? 'rotate-180' : 'opacity-60'}`}
+            />
+          </button>
+
+          {open && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+              <div className="absolute top-full left-0 mt-1 bg-secondary rounded-md shadow-lg border border-color py-1 min-w-[110px] z-50">
+                {TIMEFRAMES.map(tf => (
+                  <button
+                    key={tf.value}
+                    onClick={() => {
+                      onChange(tf.value);
+                      setOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] hover:bg-hover transition-colors flex items-center justify-between cursor-pointer ${
+                      value === tf.value ? 'text-brand font-semibold' : 'text-primary'
+                    }`}
+                  >
+                    <span>{tf.label}</span>
+                    {value === tf.value && <Check className="w-3 h-3 text-brand" />}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 });
 
-// Chart type dropdown
+// ============================================================================
+// Clean Chart Type Dropdown
+// ============================================================================
 const CHART_TYPES: { value: ChartType; label: string; icon: React.ReactNode }[] = [
-  { value: 'candlestick', label: 'Candles', icon: <CandlestickChart className="w-4 h-4" /> },
-  { value: 'line', label: 'Line', icon: <TrendingUp className="w-4 h-4" /> },
-  { value: 'area', label: 'Area', icon: <BarChart3 className="w-4 h-4" /> },
+  { value: 'candlestick', label: 'Candles', icon: <CandlestickChart className="w-3.5 h-3.5" /> },
+  { value: 'line', label: 'Line', icon: <TrendingUp className="w-3.5 h-3.5" /> },
+  { value: 'area', label: 'Area', icon: <BarChart3 className="w-3.5 h-3.5" /> },
 ];
 
 interface ChartTypeDropdownProps {
@@ -87,32 +167,38 @@ const ChartTypeDropdown = memo(function ChartTypeDropdown({
   onToggle,
   onSelect,
 }: ChartTypeDropdownProps) {
+  const current = CHART_TYPES.find(c => c.value === value) || CHART_TYPES[0];
+
   return (
-    <div className="relative">
+    <div className="relative shrink-0">
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 px-1.5 py-1 hover:bg-hover rounded-md transition-colors min-w-[36px] min-h-[40px] justify-center text-gray-400 hover:text-primary"
-        title={`Chart Type: ${value}`}
+        className="flex items-center gap-0.5 px-1.5 py-1 text-[11px] text-secondary hover:text-primary hover:bg-hover/60 rounded transition-colors cursor-pointer"
+        title={`Chart Type: ${current.label}`}
       >
-        {CHART_TYPES.find(c => c.value === value)?.icon}
+        {current.icon}
         <ChevronDown
-          className={`w-3 h-3 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          className={`w-3 h-3 transition-transform duration-150 ${open ? 'rotate-180' : 'opacity-60'}`}
         />
       </button>
+
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={onToggle} />
-          <div className="absolute top-full left-0 mt-1 bg-secondary rounded-lg shadow-xl border border-color py-1 min-w-[140px] z-50">
+          <div className="absolute top-full left-0 mt-1 bg-secondary rounded-md shadow-lg border border-color py-1 min-w-[120px] z-50">
             {CHART_TYPES.map(ct => (
               <button
                 key={ct.value}
                 onClick={() => onSelect(ct.value)}
-                className={`w-full text-left px-3 py-2.5 text-xs hover:bg-hover transition-colors flex items-center gap-2 ${
-                  value === ct.value ? 'bg-hover text-brand font-medium' : 'text-primary'
+                className={`w-full text-left px-2.5 py-1.5 text-[11px] hover:bg-hover transition-colors flex items-center justify-between cursor-pointer ${
+                  value === ct.value ? 'text-brand font-semibold' : 'text-primary'
                 }`}
               >
-                {ct.icon}
-                <span>{ct.label}</span>
+                <div className="flex items-center gap-2">
+                  {ct.icon}
+                  <span>{ct.label}</span>
+                </div>
+                {value === ct.value && <Check className="w-3 h-3 text-brand" />}
               </button>
             ))}
           </div>
@@ -122,7 +208,9 @@ const ChartTypeDropdown = memo(function ChartTypeDropdown({
   );
 });
 
-// ---- Indicator picker ----
+// ============================================================================
+// Clean Indicator Picker
+// ============================================================================
 interface IndicatorPickerProps {
   open: boolean;
   onToggle: () => void;
@@ -130,6 +218,7 @@ interface IndicatorPickerProps {
   onSearchChange: (v: string) => void;
   activeIndicators: ActiveIndicator[];
   onToggleIndicator: (registryId: string, instanceId: string | null) => void;
+  isMobile: boolean;
 }
 
 const IndicatorPicker = memo(function IndicatorPicker({
@@ -139,6 +228,7 @@ const IndicatorPicker = memo(function IndicatorPicker({
   onSearchChange,
   activeIndicators,
   onToggleIndicator,
+  isMobile,
 }: IndicatorPickerProps) {
   const sortedIndicators = useMemo(
     () => [...indicatorRegistry].sort((a, b) => a.name.localeCompare(b.name)),
@@ -156,53 +246,64 @@ const IndicatorPicker = memo(function IndicatorPicker({
   }, [sortedIndicators, searchQuery]);
 
   return (
-    <div className="relative">
+    <div className="relative shrink-0">
       <button
         onClick={onToggle}
-        className="flex items-center justify-center px-1.5 py-1 hover:bg-hover rounded-md transition-colors min-h-[40px] min-w-[36px] text-gray-400 hover:text-primary"
-        title="Indicators"
+        className="flex items-center gap-1 px-1.5 py-1 text-[11px] text-secondary hover:text-primary hover:bg-hover/60 rounded transition-colors cursor-pointer"
+        title="Technical Indicators"
       >
-        <span className="text-xs font-semibold flex items-center">
-          <span className="italic font-serif text-[15px] select-none">ƒ</span>x
-        </span>
+        <span className="italic font-serif font-bold text-[13px] leading-none">fx</span>
+        <span className="hidden 2xl:inline font-medium">Indicators</span>
+        {activeIndicators.length > 0 && (
+          <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-brand text-white font-bold leading-tight">
+            {activeIndicators.length}
+          </span>
+        )}
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-20 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm pointer-events-auto select-none animate-fade-in">
-          <div className="fixed inset-0 cursor-default" onClick={onToggle} />
-          <div className="bg-secondary w-full sm:max-w-[460px] shadow-2xl pt-5 pb-8 sm:pb-5 relative text-primary flex flex-col h-[85vh] sm:h-[520px] sm:max-h-[85vh] z-10 pointer-events-auto rounded-t-3xl sm:rounded-xl">
-            <div className="flex items-center justify-between pb-3 px-4 mb-2">
-              <span className="text-sm font-bold uppercase tracking-wider text-primary">
-                Indicators
+        <>
+          <div className="fixed inset-0 z-40 bg-black/40 sm:bg-transparent" onClick={onToggle} />
+          <div
+            className={`fixed sm:absolute z-50 bg-secondary border border-color shadow-xl overflow-hidden flex flex-col ${
+              isMobile
+                ? 'inset-x-0 bottom-0 rounded-t-2xl max-h-[70vh]'
+                : 'top-full left-0 mt-1 rounded-lg w-[320px] max-h-[380px]'
+            }`}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-color shrink-0">
+              <span className="text-[11px] font-bold text-primary uppercase tracking-wide">
+                Indicators ({filteredIndicators.length})
               </span>
               <button
                 onClick={onToggle}
-                className="p-1 hover:bg-hover rounded-md text-gray-400 hover:text-primary transition-colors"
-                title="Close Menu"
+                className="p-1 hover:bg-hover rounded text-secondary hover:text-primary transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            <div className="mb-4 relative w-full">
-              <Search
-                size={18}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
-              <input
-                type="text"
-                placeholder="Search indicators..."
-                value={searchQuery}
-                onChange={e => onSearchChange(e.target.value)}
-                className="w-full bg-primary text-sm border border-gray-600 border-l-0 border-r-0 pl-10 pr-3.5 py-3 focus:outline-none focus:border-gray-600 placeholder-gray-500 text-primary"
-                autoFocus
-              />
-            </div>
-            <div className="text-sm uppercase tracking-wider text-muted/60 font-bold mb-2 px-4">
-              Script Name
+            {/* Search */}
+            <div className="p-2 border-b border-color shrink-0">
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+                />
+                <input
+                  type="text"
+                  placeholder="Search indicators..."
+                  value={searchQuery}
+                  onChange={e => onSearchChange(e.target.value)}
+                  className="w-full bg-primary text-[11px] border border-color rounded px-2 pl-7 py-1 text-primary placeholder-muted focus:outline-none focus:border-brand"
+                  autoFocus
+                />
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-1 space-y-0.5 px-4">
+            {/* List */}
+            <div className="flex-1 overflow-y-auto p-1 space-y-0.5">
               {filteredIndicators.map(ind => {
                 const firstActive = activeIndicators.find(a => a.indicatorId === ind.id);
                 const isActive = !!firstActive;
@@ -210,43 +311,35 @@ const IndicatorPicker = memo(function IndicatorPicker({
                   <button
                     key={ind.id}
                     onClick={() => onToggleIndicator(ind.id, firstActive?.instanceId ?? null)}
-                    className={`w-full px-3.5 py-2 hover:bg-hover text-left text-xs transition-colors flex items-center justify-between rounded-md group ${
-                      isActive ? 'bg-brand/5' : ''
+                    className={`w-full px-2.5 py-1.5 rounded text-left text-[11px] transition-colors flex items-center justify-between group cursor-pointer ${
+                      isActive ? 'bg-brand/10 text-brand' : 'hover:bg-hover text-primary'
                     }`}
                   >
-                    <div className="flex flex-col gap-0.5 max-w-[85%]">
-                      <span
-                        className={`truncate text-left font-semibold ${
-                          isActive ? 'text-brand' : 'text-primary group-hover:text-brand'
-                        }`}
-                      >
-                        {ind.name}
-                      </span>
+                    <div className="flex flex-col truncate pr-2">
+                      <span className="truncate font-medium">{ind.name}</span>
                       {ind.description && (
-                        <span className="text-[10px] text-muted/50 font-normal line-clamp-1 truncate text-left">
-                          {ind.description}
-                        </span>
+                        <span className="text-[9px] text-muted truncate">{ind.description}</span>
                       )}
                     </div>
-                    {isActive && <Check className="w-4 h-4 text-brand shrink-0" />}
+                    {isActive && <Check className="w-3 h-3 text-brand shrink-0" />}
                   </button>
                 );
               })}
 
               {filteredIndicators.length === 0 && (
-                <div className="text-center py-12 text-xs text-muted/50">
-                  No indicators match your search.
-                </div>
+                <div className="text-center py-6 text-[11px] text-muted">No indicators found.</div>
               )}
             </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
 });
 
-// ---- Settings dropdown ----
+// ============================================================================
+// Clean Display Settings Dropdown
+// ============================================================================
 interface SettingsDropdownProps {
   open: boolean;
   onToggle: () => void;
@@ -256,6 +349,8 @@ interface SettingsDropdownProps {
   onToggleGrid: () => void;
   showCrosshair: boolean;
   onToggleCrosshair: () => void;
+  priceSource?: 'last' | 'mark';
+  onPriceSourceChange?: (v: 'last' | 'mark') => void;
 }
 
 const SettingsDropdown = memo(function SettingsDropdown({
@@ -267,66 +362,71 @@ const SettingsDropdown = memo(function SettingsDropdown({
   onToggleGrid,
   showCrosshair,
   onToggleCrosshair,
+  priceSource,
+  onPriceSourceChange,
 }: SettingsDropdownProps) {
-  const renderToggleRow = (
-    label: string,
-    value: boolean,
-    onToggleFn: () => void,
-    dotColor: string
-  ) => (
-    <div className="w-full px-4 py-2.5 hover:bg-hover transition-colors flex items-center justify-between group">
-      <button
-        onClick={onToggleFn}
-        className="flex-1 text-left text-xs flex items-center justify-between text-primary pr-2"
+  const renderRow = (label: string, value: boolean, toggleFn: () => void) => (
+    <button
+      onClick={toggleFn}
+      className="w-full px-2.5 py-1.5 hover:bg-hover transition-colors flex items-center justify-between text-[11px] text-primary cursor-pointer"
+    >
+      <span>{label}</span>
+      <div
+        className={`w-6 h-3.5 rounded-full transition-colors relative ${value ? 'bg-brand' : 'bg-tertiary'}`}
       >
-        <span className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${dotColor}`} />
-          {label}
-        </span>
         <div
-          className={`w-9 h-5 rounded-full transition-colors ${
-            value ? 'bg-brand' : 'bg-gray-600'
-          } relative shrink-0`}
-        >
-          <div
-            className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-transform ${
-              value ? 'translate-x-4.5' : 'translate-x-0.5'
-            }`}
-          />
-        </div>
-      </button>
-    </div>
+          className={`w-2.5 h-2.5 rounded-full bg-white absolute top-0.5 transition-transform ${
+            value ? 'translate-x-3' : 'translate-x-0.5'
+          }`}
+        />
+      </div>
+    </button>
   );
 
   return (
-    <div className="relative">
+    <div className="relative shrink-0">
       <button
         onClick={onToggle}
-        className="flex items-center justify-center px-1.5 py-1 hover:bg-hover rounded-md transition-colors min-h-[40px] min-w-[36px] text-gray-400 hover:text-primary"
-        title="Display Settings"
+        className="p-1 text-secondary hover:text-primary hover:bg-hover/60 rounded transition-colors cursor-pointer"
+        title="Chart Settings"
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
-          <circle cx="12" cy="12" r="3"></circle>
-        </svg>
+        <Settings className="w-3.5 h-3.5" />
       </button>
+
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={onToggle} />
-          <div className="absolute top-full right-0 mt-1 bg-secondary rounded-lg shadow-xl border border-color py-1 min-w-[160px] z-50">
-            {renderToggleRow('Volume', showVolume, onToggleVolume, 'bg-gray-400')}
-            {renderToggleRow('Grid', showGrid, onToggleGrid, 'bg-gray-400')}
-            {renderToggleRow('Crosshair', showCrosshair, onToggleCrosshair, 'bg-gray-400')}
+          <div className="absolute top-full left-0 sm:left-auto sm:right-0 mt-1 bg-secondary rounded-md shadow-lg border border-color py-1 min-w-[140px] z-50">
+            {onPriceSourceChange && (
+              <div className="px-2.5 py-1.5 border-b border-color/40 flex items-center justify-between text-[11px]">
+                <span className="text-secondary">Price Source:</span>
+                <div className="flex items-center gap-0.5 bg-tertiary/40 rounded p-0.5">
+                  <button
+                    onClick={() => onPriceSourceChange('last')}
+                    className={`px-1.5 py-0.5 text-[10px] font-medium rounded transition-colors cursor-pointer ${
+                      priceSource === 'last'
+                        ? 'bg-brand text-white font-bold'
+                        : 'text-secondary hover:text-primary'
+                    }`}
+                  >
+                    Last
+                  </button>
+                  <button
+                    onClick={() => onPriceSourceChange('mark')}
+                    className={`px-1.5 py-0.5 text-[10px] font-medium rounded transition-colors cursor-pointer ${
+                      priceSource === 'mark'
+                        ? 'bg-brand text-white font-bold'
+                        : 'text-secondary hover:text-primary'
+                    }`}
+                  >
+                    Mark
+                  </button>
+                </div>
+              </div>
+            )}
+            {renderRow('Volume', showVolume, onToggleVolume)}
+            {renderRow('Grid Lines', showGrid, onToggleGrid)}
+            {renderRow('Crosshair', showCrosshair, onToggleCrosshair)}
           </div>
         </>
       )}
@@ -334,7 +434,71 @@ const SettingsDropdown = memo(function SettingsDropdown({
   );
 });
 
-//  Main ChartHeader
+// ============================================================================
+// Clean Price Source Dropdown (Last Price / Mark Price)
+// ============================================================================
+interface PriceSourceDropdownProps {
+  value: 'last' | 'mark';
+  onChange: (v: 'last' | 'mark') => void;
+}
+
+const PriceSourceDropdown = memo(function PriceSourceDropdown({
+  value,
+  onChange,
+}: PriceSourceDropdownProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-secondary hover:text-primary hover:bg-hover/60 rounded transition-colors cursor-pointer"
+        title="Price Reference"
+      >
+        <span>{value === 'mark' ? 'Mark Price' : 'Last Price'}</span>
+        <ChevronDown
+          className={`w-3 h-3 transition-transform duration-150 ${open ? 'rotate-180' : 'opacity-60'}`}
+        />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 mt-1 bg-secondary rounded-md shadow-lg border border-color py-1 min-w-[110px] z-50">
+            <button
+              onClick={() => {
+                onChange('last');
+                setOpen(false);
+              }}
+              className={`w-full text-left px-2.5 py-1.5 text-[11px] hover:bg-hover transition-colors flex items-center justify-between cursor-pointer ${
+                value === 'last' ? 'text-brand font-semibold' : 'text-primary'
+              }`}
+            >
+              <span>Last Price</span>
+              {value === 'last' && <Check className="w-3 h-3 text-brand" />}
+            </button>
+            <button
+              onClick={() => {
+                onChange('mark');
+                setOpen(false);
+              }}
+              className={`w-full text-left px-2.5 py-1.5 text-[11px] hover:bg-hover transition-colors flex items-center justify-between cursor-pointer ${
+                value === 'mark' ? 'text-brand font-semibold' : 'text-primary'
+              }`}
+            >
+              <span>Mark Price</span>
+              {value === 'mark' && <Check className="w-3 h-3 text-brand" />}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+});
+
+// ============================================================================
+// Main ChartHeader Component
+// ============================================================================
 export interface ChartHeaderProps {
   timeframe: CandleResolution;
   onTimeframeChange: (v: CandleResolution) => void;
@@ -362,6 +526,8 @@ export interface ChartHeaderProps {
   isMobile: boolean;
   activeChartTab?: 'price' | 'depth' | 'details';
   onChartTabChange?: (tab: 'price' | 'depth' | 'details') => void;
+  priceSource?: 'last' | 'mark';
+  onPriceSourceChange?: (v: 'last' | 'mark') => void;
 }
 
 export const ChartHeader = memo(function ChartHeader(props: ChartHeaderProps) {
@@ -388,99 +554,116 @@ export const ChartHeader = memo(function ChartHeader(props: ChartHeaderProps) {
     onToggleCrosshair,
     isFullscreen,
     onToggleFullscreen,
-    onDownload,
     isMobile,
     activeChartTab,
     onChartTabChange,
+    priceSource = 'last',
+    onPriceSourceChange,
   } = props;
 
   return (
-    <div
-      className={`relative z-50 bg-secondary  flex-shrink-0 ${isFullscreen ? 'safe-area-top' : ''}`}
-    >
-      <div className="flex items-center justify-between px-2 ">
+    <div className="relative z-30 bg-secondary shrink-0 h-9 flex items-center justify-between px-2 select-none">
+      <div className="flex items-center gap-1 min-w-0">
         <TimeframeSelector value={timeframe} onChange={onTimeframeChange} />
-        <div className="flex items-center gap-0.5 sm:gap-1 px-1 shrink-0">
-          <div className="w-px h-3.5 bg-color opacity-60 mx-1.5" />
-          <ChartTypeDropdown
-            value={chartType}
-            open={showChartTypeMenu}
-            onToggle={onToggleChartTypeMenu}
-            onSelect={onSelectChartType}
-          />
-          <div className="w-px h-3.5 bg-color opacity-60 mx-1.5" />
-          <IndicatorPicker
-            open={showIndicatorMenu}
-            onToggle={onToggleIndicatorMenu}
-            searchQuery={searchQuery}
-            onSearchChange={onSearchChange}
-            activeIndicators={activeIndicators}
-            onToggleIndicator={onToggleIndicator}
-          />
-          <div className="w-px h-3.5 bg-color opacity-60 mx-1.5" />
-          <SettingsDropdown
-            open={showSettingsMenu}
-            onToggle={onToggleSettingsMenu}
-            showVolume={showVolume}
-            onToggleVolume={onToggleVolume}
-            showGrid={showGrid}
-            onToggleGrid={onToggleGrid}
-            showCrosshair={showCrosshair}
-            onToggleCrosshair={onToggleCrosshair}
-          />
-          <div className="w-px h-3.5 bg-color opacity-60 mx-1.5" />
 
-          {activeChartTab && onChartTabChange && (
-            <div className="flex items-center gap-3 mr-2 ml-2 text-[11px] text-muted">
-              <button
-                onClick={() => onChartTabChange('price')}
-                className={`transition-colors hover:text-primary ${activeChartTab === 'price' ? 'text-primary font-medium' : ''}`}
-              >
-                Chart
-              </button>
-              <button
-                onClick={() => onChartTabChange('depth')}
-                className={`transition-colors hover:text-primary ${activeChartTab === 'depth' ? 'text-primary font-medium' : ''}`}
-              >
-                Depth
-              </button>
-              <button
-                onClick={() => onChartTabChange('details')}
-                className={`transition-colors hover:text-primary ${activeChartTab === 'details' ? 'text-primary font-medium' : ''}`}
-              >
-                Details
-              </button>
-            </div>
-          )}
+        <div className="w-px h-3 bg-color opacity-40 mx-0.5 shrink-0" />
 
-          {!isMobile && (
-            <>
-              <button
-                onClick={onDownload}
-                className="p-1.5 hover:bg-hover rounded-md transition-colors hidden sm:flex items-center justify-center min-w-[36px] min-h-[40px]"
-                title="Download Chart"
-              >
-                <Download className="w-4 h-4 text-gray-400" />
-              </button>
-              <div className="w-px h-3.5 bg-color opacity-60 mx-1.5" />
-            </>
-          )}
-          <button
-            onClick={onToggleFullscreen}
-            className="p-1 sm:p-1.5 hover:bg-hover rounded-md transition-colors flex items-center justify-center min-w-[36px] min-h-[40px]"
-            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? (
-              isMobile ? (
-                <X className="w-4 h-4 text-gray-400" />
-              ) : (
-                <Minimize2 className="w-4 h-4 text-gray-400" />
-              )
+        <ChartTypeDropdown
+          value={chartType}
+          open={showChartTypeMenu}
+          onToggle={onToggleChartTypeMenu}
+          onSelect={onSelectChartType}
+        />
+
+        <div className="w-px h-3 bg-color opacity-40 mx-0.5 shrink-0" />
+
+        <IndicatorPicker
+          open={showIndicatorMenu}
+          onToggle={onToggleIndicatorMenu}
+          searchQuery={searchQuery}
+          onSearchChange={onSearchChange}
+          activeIndicators={activeIndicators}
+          onToggleIndicator={onToggleIndicator}
+          isMobile={isMobile}
+        />
+
+        <div className="w-px h-3 bg-color opacity-40 mx-0.5 shrink-0" />
+
+        <SettingsDropdown
+          open={showSettingsMenu}
+          onToggle={onToggleSettingsMenu}
+          showVolume={showVolume}
+          onToggleVolume={onToggleVolume}
+          showGrid={showGrid}
+          onToggleGrid={onToggleGrid}
+          showCrosshair={showCrosshair}
+          onToggleCrosshair={onToggleCrosshair}
+          priceSource={priceSource}
+          onPriceSourceChange={onPriceSourceChange}
+        />
+
+        {!isMobile && onPriceSourceChange && (
+          <div className="hidden 2xl:flex items-center">
+            <div className="w-px h-3 bg-color opacity-40 mx-0.5 shrink-0" />
+            <PriceSourceDropdown value={priceSource} onChange={onPriceSourceChange} />
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 ml-auto pl-2">
+        {activeChartTab && onChartTabChange && (
+          <div className="flex items-center gap-1.5 sm:gap-2 mr-1 sm:mr-2 text-[11px]">
+            <button
+              onClick={() => onChartTabChange('price')}
+              className={`px-1 py-0.5 rounded transition-colors cursor-pointer ${
+                activeChartTab === 'price'
+                  ? 'text-brand font-semibold'
+                  : 'text-secondary hover:text-primary'
+              }`}
+            >
+              Chart
+            </button>
+            <button
+              onClick={() => onChartTabChange('depth')}
+              className={`px-1 py-0.5 rounded transition-colors cursor-pointer ${
+                activeChartTab === 'depth'
+                  ? 'text-brand font-semibold'
+                  : 'text-secondary hover:text-primary'
+              }`}
+            >
+              Depth
+            </button>
+            <button
+              onClick={() => onChartTabChange('details')}
+              className={`px-1 py-0.5 rounded transition-colors cursor-pointer ${
+                activeChartTab === 'details'
+                  ? 'text-brand font-semibold'
+                  : 'text-secondary hover:text-primary'
+              }`}
+            >
+              Details
+            </button>
+          </div>
+        )}
+
+        {activeChartTab && onChartTabChange && (
+          <div className="w-px h-3 bg-color opacity-40 mx-0.5" />
+        )}
+
+        <button
+          onClick={onToggleFullscreen}
+          className="p-1 text-secondary hover:text-primary hover:bg-hover/60 rounded transition-colors flex cursor-pointer"
+          title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+        >
+          {isFullscreen ? (
+            isMobile ? (
+              <X className="w-3.5 h-3.5" />
             ) : (
-              <Maximize2 className="w-4 h-4 text-gray-400" />
-            )}
-          </button>
-        </div>
+              <Minimize2 className="w-3.5 h-3.5" />
+            )
+          ) : (
+            <Maximize2 className="w-3.5 h-3.5" />
+          )}
+        </button>
       </div>
     </div>
   );

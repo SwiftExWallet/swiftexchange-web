@@ -1,32 +1,55 @@
+import type { PerpNetwork } from '../../core/config/networks';
 import type { PerpExchange } from '../../core/interfaces/exchange';
 import type { Candle, Market, OrderBook, Ticker } from '../../core/models';
+import { orderBookStore } from '../../core/stores/orderbookStore';
 import { type AssetCtx, useTickerStore } from '../../core/stores/tickerStore';
-import { ASTER_ENDPOINTS, ASTER_REST_URL } from './constants';
+import { ASTER_ENDPOINTS, getAsterRestUrl } from './constants';
 import { AsterMapper } from './mapper';
 import { AsterWebSocket } from './websocket';
 
 export class AsterClient implements PerpExchange {
   private wsClient: AsterWebSocket;
+  public readonly network: PerpNetwork;
 
-  constructor() {
-    this.wsClient = AsterWebSocket.getInstance();
+  constructor(network: PerpNetwork = 'mainnet') {
+    this.network = network;
+    this.wsClient = AsterWebSocket.getInstance(network);
+  }
+
+  private get restUrl(): string {
+    return getAsterRestUrl(this.network);
   }
 
   public async connect(): Promise<void> {
-    await this.wsClient.connect();
+    await this.wsClient.connect(this.network);
   }
 
   public async disconnect(): Promise<void> {
     this.wsClient.disconnect();
   }
 
-  public async getMarkets(): Promise<Market[]> {
-    const [infoResponse, tickerResponse] = await Promise.all([
-      fetch(`${ASTER_REST_URL}${ASTER_ENDPOINTS.EXCHANGE_INFO}`),
-      fetch(`${ASTER_REST_URL}${ASTER_ENDPOINTS.TICKER_24HR}`),
-    ]);
+  private static cachedExchangeInfo: { data: any; timestamp: number } | null = null;
+  private static cachedTickerData: { data: any; timestamp: number } | null = null;
 
-    const [infoData, tickerData] = await Promise.all([infoResponse.json(), tickerResponse.json()]);
+  public async getMarkets(): Promise<Market[]> {
+    const now = Date.now();
+    let infoData = AsterClient.cachedExchangeInfo?.data;
+    if (!infoData || now - (AsterClient.cachedExchangeInfo?.timestamp || 0) > 15_000) {
+      const res = await fetch(`${this.restUrl}${ASTER_ENDPOINTS.EXCHANGE_INFO}`);
+      if (res.ok) {
+        infoData = await res.json();
+        AsterClient.cachedExchangeInfo = { data: infoData, timestamp: now };
+      }
+    }
+
+    let tickerData = AsterClient.cachedTickerData?.data;
+    if (!tickerData || now - (AsterClient.cachedTickerData?.timestamp || 0) > 3_000) {
+      const res = await fetch(`${this.restUrl}${ASTER_ENDPOINTS.TICKER_24HR}`);
+      if (res.ok) {
+        tickerData = await res.json();
+        AsterClient.cachedTickerData = { data: tickerData, timestamp: now };
+      }
+    }
 
     if (!infoData || !infoData.symbols) return [];
 
@@ -35,7 +58,9 @@ export class AsterClient implements PerpExchange {
       const contexts: Record<string, AssetCtx> = {};
       for (const t of tickerData) {
         const symbol = t.symbol.replace('USDT', '-USDT');
-        contexts[symbol] = AsterMapper.mapTicker(t);
+        const mapped = AsterMapper.mapTicker(t);
+        contexts[symbol] = mapped;
+        contexts[t.symbol] = mapped;
       }
       useTickerStore.getState().setMultipleAssetCtxs(contexts);
     }
@@ -49,7 +74,7 @@ export class AsterClient implements PerpExchange {
     const coin = this.extractCoinFromSymbol(symbol);
     const asterSymbol = `${coin}USDT`;
     const response = await fetch(
-      `${ASTER_REST_URL}${ASTER_ENDPOINTS.DEPTH}?symbol=${asterSymbol}&limit=100`
+      `${this.restUrl}${ASTER_ENDPOINTS.DEPTH}?symbol=${asterSymbol}&limit=100`
     );
     const data = await response.json();
 
@@ -62,7 +87,29 @@ export class AsterClient implements PerpExchange {
     _callback?: (ob: OrderBook) => void
   ): Promise<void> {
     const coin = this.extractCoinFromSymbol(symbol);
+    // 1. Subscribe to WebSocket depth updates
     this.wsClient.subscribeOrderBook(coin);
+
+    // 2. Concurrently fetch instant REST depth snapshot to guarantee instant orderbook render
+    this.getOrderBook(symbol)
+      .then(ob => {
+        if (ob && ob.bids && ob.asks && (ob.bids.length > 0 || ob.asks.length > 0)) {
+          const updateId = ob.updateId ?? 0;
+          orderBookStore.applySnapshot(symbol, ob.bids, ob.asks, updateId);
+          const altSymbol = symbol.includes('-')
+            ? symbol.replace('-', '')
+            : symbol.replace(/USDT$/, '-USDT');
+          orderBookStore.applySnapshot(altSymbol, ob.bids, ob.asks, updateId);
+        }
+      })
+      .catch(err => {
+        console.warn('[AsterClient] HTTP initial depth snapshot fetch error:', err);
+      });
+  }
+
+  public async unsubscribeOrderBook(symbol: string): Promise<void> {
+    const coin = this.extractCoinFromSymbol(symbol);
+    this.wsClient.unsubscribeOrderBook(coin);
   }
 
   public async subscribeTicker(
@@ -72,6 +119,11 @@ export class AsterClient implements PerpExchange {
   ): Promise<void> {
     const coin = this.extractCoinFromSymbol(symbol);
     this.wsClient.subscribeTrades(coin);
+  }
+
+  public async unsubscribeTicker(symbol: string): Promise<void> {
+    const coin = this.extractCoinFromSymbol(symbol);
+    this.wsClient.unsubscribeTrades(coin);
   }
 
   public subscribeCandles(coin: string, interval: string): void {
@@ -89,7 +141,7 @@ export class AsterClient implements PerpExchange {
     endTime: number
   ): Promise<Candle[]> {
     const asterSymbol = `${coin}USDT`;
-    const url = `${ASTER_REST_URL}${ASTER_ENDPOINTS.KLINES}?symbol=${asterSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=500`;
+    const url = `${this.restUrl}${ASTER_ENDPOINTS.KLINES}?symbol=${asterSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=500`;
     const response = await fetch(url);
     const data = await response.json();
 
@@ -99,90 +151,6 @@ export class AsterClient implements PerpExchange {
 
     const uiSymbol = `${coin}-USDT`;
     return data.map((k: any) => AsterMapper.mapCandle(uiSymbol, interval, k));
-  }
-
-  private async signedFetch(
-    endpoint: string,
-    params: Record<string, string> = {},
-    method = 'GET'
-  ): Promise<any> {
-    const query = new URLSearchParams(params);
-    query.append('timestamp', Date.now().toString());
-    query.append('signature', 'DUMMY_SIGNATURE');
-
-    const url = `${ASTER_REST_URL}${endpoint}?${query.toString()}`;
-    const response = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        // 'X-MBX-APIKEY': '...', // Will be added with user's listenKey or public key
-      },
-    });
-    return response.json();
-  }
-
-  public async getPositions(): Promise<import('../../core/models').Position[]> {
-    try {
-      const data = await this.signedFetch(ASTER_ENDPOINTS.POSITION_RISK);
-      if (Array.isArray(data)) {
-        return data.filter(p => parseFloat(p.positionAmt) !== 0).map(AsterMapper.mapPosition);
-      }
-      return [];
-    } catch (e) {
-      console.error('Failed to fetch positions', e);
-      return [];
-    }
-  }
-
-  public async getOpenOrders(): Promise<import('../../core/models').Order[]> {
-    try {
-      const data = await this.signedFetch(ASTER_ENDPOINTS.OPEN_ORDERS);
-      if (Array.isArray(data)) {
-        return data.map(AsterMapper.mapOrder);
-      }
-      return [];
-    } catch (e) {
-      console.error('Failed to fetch open orders', e);
-      return [];
-    }
-  }
-
-  public async getTradeHistory(): Promise<import('../../core/models').UserTrade[]> {
-    try {
-      const data = await this.signedFetch(ASTER_ENDPOINTS.USER_TRADES);
-      if (Array.isArray(data)) {
-        return data.map(AsterMapper.mapUserTrade);
-      }
-      return [];
-    } catch (e) {
-      console.error('Failed to fetch trade history', e);
-      return [];
-    }
-  }
-
-  public async getBalances(): Promise<import('../../core/models').AccountBalance[]> {
-    try {
-      const data = await this.signedFetch(ASTER_ENDPOINTS.BALANCE);
-      if (Array.isArray(data)) {
-        return data.map(AsterMapper.mapAccountBalance);
-      }
-      return [];
-    } catch (e) {
-      console.error('Failed to fetch balances', e);
-      return [];
-    }
-  }
-
-  //Trade Execution
-
-  public async placeOrder(order: any): Promise<any> {
-    console.log('placeOrder requested', order);
-    return null;
-  }
-
-  public async cancelOrder(orderId: string, symbol: string): Promise<any> {
-    console.log('cancelOrder requested', { orderId, symbol });
-    return null;
   }
 
   private extractCoinFromSymbol(symbol: string): string {

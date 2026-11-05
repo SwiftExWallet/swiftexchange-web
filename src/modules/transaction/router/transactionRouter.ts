@@ -2,12 +2,8 @@ import { ethers } from 'ethers';
 
 import { sendCustomNotification } from '../../../service/notificationService';
 import { sendEVMTransaction } from '../../../utils/walletConnectUtils';
+import { parseRawChainId, switchOrAddChain } from '../../evm/utils/evmChainUtils';
 import { WalletType } from '../../walletconnect/constants/Wallet';
-import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
-
-function isMainnet(): boolean {
-  return useWalletStore.getState().network === 'mainnet';
-}
 
 export interface TransactionRequest {
   type: 'evm' | 'stellar';
@@ -239,6 +235,25 @@ class TransactionRouter {
           ? request.networkKey
           : parseInt(String(session.chainId)) || 1;
 
+      // Pre-flight check: ensure connected wallet is on target chain before simulation/signing
+      if (typeof provider.request === 'function') {
+        try {
+          const rawChainId = await provider.request({ method: 'eth_chainId' });
+          const currentChainId = parseRawChainId(rawChainId);
+          if (currentChainId !== Number(chainId)) {
+            console.log(
+              `[Router] Chain mismatch detected. Active: ${currentChainId}, Target: ${chainId}. Requesting chain switch...`
+            );
+            await switchOrAddChain(provider, chainId);
+          }
+        } catch (switchErr: any) {
+          console.error('[Router] Chain switch before send failed:', switchErr);
+          throw new Error(
+            `Wallet is on the wrong network. Please switch your wallet to ${request.network || `Chain ID ${chainId}`} to proceed.`
+          );
+        }
+      }
+
       let txParams: any = {};
       let gasLimitBigInt: bigint = BigInt(21000);
 
@@ -324,6 +339,7 @@ class TransactionRouter {
         }
 
         txParams.gasLimit = '0x' + gasLimitBigInt.toString(16);
+        txParams.gas = txParams.gasLimit;
       }
 
       // Enforce minGasGwei safety check on txParams
@@ -358,21 +374,8 @@ class TransactionRouter {
         console.warn('[Router] Failed to enforce minGasGwei check:', minGasError);
       }
 
-      let lastTxHash: string;
-
-      if (isMainnet()) {
-        lastTxHash = await sendEVMTransaction(provider, chainId, txParams);
-      } else {
-        const ethersProvider = new ethers.BrowserProvider(provider);
-        const signer = await ethersProvider.getSigner();
-        const txResponse = await signer.sendTransaction(txParams);
-        const receipt = await txResponse.wait();
-
-        if (!receipt || receipt.status === 0) {
-          throw new Error('Transaction failed on-chain');
-        }
-        lastTxHash = txResponse.hash;
-      }
+      // Send EVM transaction via unified provider dispatcher (supports both WalletConnect and Injected on all networks)
+      const lastTxHash = await sendEVMTransaction(provider, chainId, txParams);
 
       return { hash: lastTxHash, status: 'success' };
     } catch (error: any) {

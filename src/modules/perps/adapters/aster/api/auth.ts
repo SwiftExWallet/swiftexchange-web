@@ -1,14 +1,21 @@
-import type { Signer } from 'ethers';
+import { type Signer, getAddress } from 'ethers';
 
-import { ASTER_CHAIN_ID, ASTER_REST_URL } from '../constants';
-import { parseAsterError } from './errors';
+import { getAsterChainId, getAsterRestUrl } from '../constants';
+import { AsterRateLimitError, parseAsterError } from './errors';
 
-const EIP712_DOMAIN = {
-  name: 'AsterSignTransaction',
-  version: '1',
-  chainId: ASTER_CHAIN_ID,
-  verifyingContract: '0x0000000000000000000000000000000000000000',
-} as const;
+export function buildSortedQueryString(params: Record<string, string>): string {
+  const keys = Object.keys(params).sort();
+  return keys.map(k => `${k}=${params[k]}`).join('&');
+}
+
+export function getAsterDomain(chainId: number = getAsterChainId()) {
+  return {
+    name: 'AsterSignTransaction',
+    version: '1',
+    chainId,
+    verifyingContract: '0x0000000000000000000000000000000000000000',
+  } as const;
+}
 
 const EIP712_TYPES = {
   Message: [{ name: 'msg', type: 'string' }],
@@ -20,11 +27,11 @@ export interface TypedDataPayload {
     Message: { name: string; type: string }[];
   };
   primaryType: 'Message';
-  domain: typeof EIP712_DOMAIN;
+  domain: ReturnType<typeof getAsterDomain>;
   message: { msg: string };
 }
 
-export function buildTypedData(msg: string): TypedDataPayload {
+export function buildTypedData(msg: string, chainId: number = getAsterChainId()): TypedDataPayload {
   return {
     types: {
       EIP712Domain: [
@@ -36,7 +43,7 @@ export function buildTypedData(msg: string): TypedDataPayload {
       Message: [{ name: 'msg', type: 'string' }],
     },
     primaryType: 'Message',
-    domain: EIP712_DOMAIN,
+    domain: getAsterDomain(chainId),
     message: { msg },
   };
 }
@@ -45,6 +52,7 @@ export class AsterApiError extends Error {
   readonly code: number;
   readonly msg: string;
   readonly userMessage: string;
+  readonly isRetryable: boolean;
 
   constructor(raw: { code: number; msg: string }) {
     const detail = parseAsterError(raw);
@@ -52,6 +60,7 @@ export class AsterApiError extends Error {
     this.code = raw.code;
     this.msg = raw.msg;
     this.userMessage = detail.userMessage;
+    this.isRetryable = !!detail.isRetryable;
   }
 }
 
@@ -63,25 +72,60 @@ function throwIfApiError(data: any): void {
 
 let serverTimeOffset = 0;
 let lastTimeSync = 0;
+let lastGeneratedNonce = 0n;
+let pendingTimeSyncPromise: Promise<number> | null = null;
 
-export async function getSyncedServerTime(): Promise<number> {
+export function generateMonotonicNonce(serverTimeMs: number): string {
+  const baseMicro = BigInt(Math.floor(serverTimeMs)) * 1000n;
+  if (baseMicro > lastGeneratedNonce) {
+    lastGeneratedNonce = baseMicro;
+  } else {
+    lastGeneratedNonce += 1n;
+  }
+  return lastGeneratedNonce.toString();
+}
+
+export async function getSyncedServerTime(baseUrl?: string): Promise<number> {
   const now = Date.now();
   if (now - lastTimeSync < 60000 && lastTimeSync > 0) {
     return now + serverTimeOffset;
   }
-  try {
-    const res = await fetch(`${ASTER_REST_URL}/fapi/v3/time`);
-    const data = await res.json();
-    if (data && typeof data.serverTime === 'number') {
-      serverTimeOffset = data.serverTime - Date.now();
-      lastTimeSync = Date.now();
-      return data.serverTime;
-    }
-  } catch (err) {
-    console.warn('[aster] Failed to sync server time, falling back to local time', err);
+
+  if (pendingTimeSyncPromise) {
+    return pendingTimeSyncPromise;
   }
-  return Date.now();
+
+  const restUrl = baseUrl || getAsterRestUrl();
+  pendingTimeSyncPromise = (async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1500);
+      const res = await fetch(`${restUrl}/fapi/v3/time`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      const data = await res.json();
+      if (data && typeof data.serverTime === 'number') {
+        serverTimeOffset = data.serverTime - Date.now();
+        lastTimeSync = Date.now();
+        return data.serverTime;
+      }
+    } catch {
+      // Quiet fallback to local time without blocking the UI
+      lastTimeSync = Date.now();
+    } finally {
+      pendingTimeSyncPromise = null;
+    }
+    return Date.now() + serverTimeOffset;
+  })();
+
+  return pendingTimeSyncPromise;
 }
+
+const ALLOWED_ASTER_HOSTNAMES = new Set([
+  'fapi.asterdex.com',
+  'fapi.asterdex-testnet.com',
+  'sapi.asterdex.com',
+  'www.asterdex.com',
+]);
 
 export async function signedRequest(
   signer: Signer,
@@ -89,42 +133,102 @@ export async function signedRequest(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   params: Record<string, string> = {},
-  baseUrl: string = ASTER_REST_URL
+  baseUrl?: string,
+  signal?: AbortSignal
 ): Promise<any> {
+  const defaultBaseUrl = getAsterRestUrl();
+  let effectiveBaseUrl = defaultBaseUrl;
+  if (baseUrl) {
+    try {
+      const parsed = new URL(baseUrl);
+      if (parsed.protocol !== 'https:') {
+        throw new Error(`Insecure protocol: ${parsed.protocol}`);
+      }
+      if (!ALLOWED_ASTER_HOSTNAMES.has(parsed.hostname)) {
+        throw new Error(`Unauthorized base URL hostname: ${parsed.hostname}`);
+      }
+      effectiveBaseUrl = baseUrl;
+    } catch (err) {
+      throw new Error(
+        `Unauthorized base URL for signed request: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+  const chainId = getAsterChainId();
   const signerAddr = await signer.getAddress();
-  const serverTime = await getSyncedServerTime();
-  const nonce = String(serverTime * 1000);
+  const serverTime = await getSyncedServerTime(effectiveBaseUrl);
+  const nonce = generateMonotonicNonce(serverTime);
 
-  const ordered: Record<string, string> = {
-    user: userAddr,
-    signer: signerAddr,
+  const allParams: Record<string, string> = {
     ...params,
+    user: getAddress(userAddr),
+    signer: getAddress(signerAddr),
     nonce,
+    timestamp: String(serverTime),
+    recvWindow: '5000',
   };
 
-  const qs = new URLSearchParams(ordered).toString();
-  const typedData = buildTypedData(qs);
+  const sortedQs = buildSortedQueryString(allParams);
+  const typedData = buildTypedData(sortedQs, chainId);
 
   const signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
-
-  const finalQs = `${qs}&signature=${signature}`;
+  const finalQs = `${sortedQs}&signature=${signature}`;
 
   let url: string;
   let fetchOptions: RequestInit;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timeoutId);
+      throw new Error('Request aborted');
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
   if (method === 'GET') {
-    url = `${baseUrl}${path}?${finalQs}`;
-    fetchOptions = { method: 'GET' };
+    url = `${effectiveBaseUrl}${path}?${finalQs}`;
+    fetchOptions = { method: 'GET', signal: controller.signal };
   } else {
-    url = `${baseUrl}${path}`;
+    url = `${effectiveBaseUrl}${path}`;
     fetchOptions = {
       method,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: finalQs,
+      signal: controller.signal,
     };
   }
 
-  const res = await fetch(url, fetchOptions);
+  let res: Response;
+  try {
+    res = await fetch(url, fetchOptions);
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (signal?.aborted || err?.name === 'AbortError') {
+      if (signal?.aborted) {
+        throw new Error('Request aborted');
+      }
+      throw new Error(`Aster API request timed out after 15s: ${method} ${path}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (res.status === 429 || res.status === 418) {
+    const retryHeader = res.headers.get('Retry-After');
+    const retrySec = retryHeader ? parseInt(retryHeader, 10) || 60 : 60;
+    throw new AsterRateLimitError(res.status, retrySec);
+  }
+
+  if (res.status >= 500) {
+    throw new Error(
+      `Aster server error (HTTP ${res.status}) on ${method} ${path}. Execution status unknown.`
+    );
+  }
+
   const data = await res.json();
   throwIfApiError(data);
   return data;

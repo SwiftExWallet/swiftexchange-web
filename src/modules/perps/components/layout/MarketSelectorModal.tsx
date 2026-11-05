@@ -63,11 +63,14 @@ export const MarketSelectorModal: React.FC<MarketSelectorModalProps> = ({ isOpen
         onClick={onClose}
       >
         <div
-          className="w-full sm:max-w-3xl bg-secondary border border-color rounded-t-xl sm:rounded-xl flex flex-col shadow-2xl font-body h-[85vh] sm:h-auto max-h-[85vh] animate-slide-up-modal"
+          className="w-full sm:max-w-3xl bg-secondary border border-color rounded-t-2xl sm:rounded-xl flex flex-col shadow-2xl font-body h-[85vh] sm:h-auto max-h-[85vh] animate-slide-up-modal"
           onClick={e => e.stopPropagation()}
         >
+          {/* Mobile Drag Pill */}
+          <div className="w-10 h-1 rounded-full bg-tertiary mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
+
           {/* Search */}
-          <div className="p-4 border-b border-color">
+          <div className="p-3 sm:p-4 border-b border-color">
             <div className="relative">
               <svg
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"
@@ -86,7 +89,7 @@ export const MarketSelectorModal: React.FC<MarketSelectorModalProps> = ({ isOpen
               </svg>
               <input
                 type="text"
-                className="w-full bg-secondary border border-color rounded-lg py-2.5 pl-10 pr-4 text-sm text-primary outline-none focus:border-brand transition-colors"
+                className="w-full bg-primary sm:bg-secondary border border-color rounded-xl py-2.5 pl-10 pr-4 text-sm text-primary outline-none focus:border-brand transition-colors placeholder:text-muted"
                 placeholder="Search by name or ticker"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -96,20 +99,20 @@ export const MarketSelectorModal: React.FC<MarketSelectorModalProps> = ({ isOpen
           </div>
 
           {/* Tabs */}
-          <div className="px-4 border-b border-color flex items-center gap-2 overflow-x-auto">
+          <div className="px-3 sm:px-4 border-b border-color flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none">
             {tabs.map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`whitespace-nowrap px-3 py-3 text-[13px] font-medium border-b-2 transition-colors ${activeTab === tab ? 'text-primary border-brand' : 'text-secondary border-transparent hover:text-primary'}`}
+                className={`whitespace-nowrap px-3 py-2.5 text-xs sm:text-[13px] font-medium border-b-2 transition-colors cursor-pointer ${activeTab === tab ? 'text-primary border-brand font-bold' : 'text-secondary border-transparent hover:text-primary'}`}
               >
                 {tab}
               </button>
             ))}
           </div>
 
-          {/* Column Headers */}
-          <div className="grid grid-cols-5 px-4 py-3 text-[11px] font-medium text-secondary border-b border-color">
+          {/* Column Headers (Desktop only, mobile renders clean 2-side layout) */}
+          <div className="hidden sm:grid grid-cols-5 px-4 py-3 text-[11px] font-medium text-secondary border-b border-color">
             <div className="col-span-2">Name</div>
             <div className="text-right">Mark Price</div>
             <div className="text-right">24h Change</div>
@@ -193,16 +196,16 @@ const MarketRow = React.memo(function MarketRow({
   return (
     <div
       onClick={() => onSelect(market.symbol)}
-      className="grid grid-cols-5 px-4 py-3 items-center hover:bg-secondary cursor-pointer border-b border-color/50 transition-colors"
+      className="flex sm:grid sm:grid-cols-5 justify-between px-3 sm:px-4 py-3 items-center hover:bg-hover active:bg-tertiary/40 cursor-pointer border-b border-color/40 transition-colors"
     >
-      <div className="col-span-2 flex items-center gap-3">
-        {/* Asset Icon */}
+      {/* Asset Info */}
+      <div className="sm:col-span-2 flex items-center gap-3">
         <CoinIcon symbol={market.baseAsset} size={28} />
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-bold text-primary">{market.symbol}</span>
-            {/* Leverage Pill */}
-            <span className="px-1.5 py-[1px] rounded text-[9px] font-semibold bg-tertiary border border-color text-muted">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[13px] sm:text-sm font-bold text-primary">{market.symbol}</span>
+            {/* Leverage Badge (matching modal exactly) */}
+            <span className="px-1.5 py-[1px] rounded text-[9px] font-bold bg-tertiary border border-color text-muted">
               {maxLeverage}x
             </span>
           </div>
@@ -210,17 +213,22 @@ const MarketRow = React.memo(function MarketRow({
         </div>
       </div>
 
-      <div className="text-right text-[13px] font-medium text-primary font-mono-tabular">
-        {formatPrice(markPx)}
+      {/* Mobile Right: Stacked Price and 24h Change */}
+      <div className="flex sm:contents flex-col items-end">
+        <div className="text-right text-[13px] sm:text-sm font-bold text-primary font-mono-tabular">
+          {formatPrice(markPx)}
+        </div>
+        <div
+          className={`text-right text-[11px] font-semibold ${isPositive ? 'text-success' : 'text-danger'}`}
+        >
+          {markPx > 0 ? `${isPositive ? '+' : ''}${changePct.toFixed(2)}%` : '—'}
+        </div>
       </div>
 
-      <div
-        className={`text-right text-[13px] font-medium ${isPositive ? 'text-success' : 'text-danger'}`}
-      >
-        {markPx > 0 ? `${isPositive ? '+' : ''}${changePct.toFixed(2)}%` : '—'}
+      {/* Desktop only volume */}
+      <div className="hidden sm:block text-right text-[13px] text-secondary font-mono-tabular">
+        {formatVolume(dayNtlVlm)}
       </div>
-
-      <div className="text-right text-[13px] text-secondary">{formatVolume(dayNtlVlm)}</div>
     </div>
   );
 });

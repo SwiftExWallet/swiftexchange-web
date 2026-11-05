@@ -41,8 +41,13 @@ vi.mock('@stellar/stellar-sdk', () => {
     Horizon: {
       Server: MockServer,
     },
+    Networks: {
+      PUBLIC: 'Public Global Stellar Network ; September 2015',
+      TESTNET: 'Test SDF Network ; September 2015',
+    },
     StrKey: {
       isValidEd25519PublicKey: (addr: string) => addr.startsWith('G') && addr.length === 56,
+      isValidContract: (addr: string) => addr.startsWith('C') && addr.length === 56,
     },
   };
 });
@@ -165,6 +170,15 @@ describe('StellarBaseService', () => {
       expect(usdcToken).toBeDefined();
       expect(usdcToken!.balance).toBe('0');
       expect(usdcToken!.hasTrustline).toBe(false);
+    });
+  });
+
+  describe('getOrCreateServer', () => {
+    it('creates and pools server instance for https URL', () => {
+      const server = StellarBaseService.getOrCreateServer('https://horizon-test.stellar.org');
+      expect(server).toBeDefined();
+      const cached = StellarBaseService.getOrCreateServer('https://horizon-test.stellar.org');
+      expect(cached).toBe(server);
     });
   });
 });

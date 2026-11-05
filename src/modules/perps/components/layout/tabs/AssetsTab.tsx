@@ -1,15 +1,18 @@
-import { ArrowRightLeft, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowRightLeft, CheckCircle2, Loader2, RefreshCw, Wallet } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { useNotificationStore } from '../../../../../store/notificationStore';
 import { changeMultiAssetsMargin, getAccountInfo } from '../../../adapters/aster/api/account';
 import { useAssetLogos } from '../../../adapters/aster/hooks/useAssetLogos';
 import { useAsterAgent } from '../../../adapters/aster/hooks/useAsterAgent';
+import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { getCoinIconUrl } from '../../../services/coinIconService';
 import { Modal } from '../../ui/Modal';
+import { TabEmptyState } from './TabEmptyState';
 
 export const AssetsTab: React.FC = () => {
+  const currentExchange = useExchangeManager(s => s.currentExchange);
   const balances = useAccountStore(state => state.balances);
   const multiAssetsMargin = useAccountStore(state => state.multiAssetsMargin);
   const setMultiAssetsMargin = useAccountStore(state => state.setMultiAssetsMargin);
@@ -86,8 +89,20 @@ export const AssetsTab: React.FC = () => {
 
   const targetBalance = assetToRebalance ? balances[assetToRebalance] : null;
 
+  const balanceList = Object.values(balances);
+
+  if (balanceList.length === 0) {
+    return (
+      <TabEmptyState
+        icon={Wallet}
+        title="No assets found"
+        description="Your margin asset balances will appear here."
+      />
+    );
+  }
+
   return (
-    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-thin">
+    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none">
       <table className="w-full text-[11px] text-left whitespace-nowrap">
         <thead className="text-secondary border-b border-color sticky top-0 bg-secondary z-10">
           <tr>
@@ -99,10 +114,16 @@ export const AssetsTab: React.FC = () => {
           </tr>
         </thead>
         <tbody>
-          {Object.values(balances).map(b => {
+          {balanceList.map(b => {
             const total = parseFloat(b.total || '0');
             const isNegative = total < 0;
             const iconUrl = logos[b.asset] || getCoinIconUrl(b.asset) || undefined;
+
+            const usdValue = b.usdValue
+              ? parseFloat(b.usdValue)
+              : b.asset === 'USDT' || b.asset === 'USDC' || b.asset === 'USD'
+                ? total
+                : total * (b.asset === 'ASTER' ? 0.7483 : 0);
 
             return (
               <tr key={b.asset} className="border-b border-color hover:bg-hover transition-colors">
@@ -117,11 +138,24 @@ export const AssetsTab: React.FC = () => {
                     <div className="w-3.5 h-3.5 rounded-full bg-tertiary shrink-0" />
                   )}
                   <span>{b.asset}</span>
+                  {currentExchange === 'aster' && b.asset === 'ASTER' && (
+                    <div className="flex items-center gap-1.5 ml-0.5">
+                      <span className="text-[9px] bg-tertiary text-secondary border border-color px-1 py-0.2 rounded font-normal">
+                        Discount 5%
+                      </span>
+                      <div
+                        className="w-6 h-3.5 bg-brand/80 rounded-full p-0.5 flex items-center cursor-pointer"
+                        title="Use ASTER for fee discount"
+                      >
+                        <div className="w-2.5 h-2.5 bg-white rounded-full ml-auto shadow-xs" />
+                      </div>
+                    </div>
+                  )}
                 </td>
                 <td className="px-2.5 py-1.5 text-primary font-mono">
                   <div className="flex items-center gap-1.5">
                     <span className={isNegative ? 'text-danger font-medium' : ''}>{b.total}</span>
-                    {isNegative && (
+                    {currentExchange === 'aster' && isNegative && (
                       <button
                         type="button"
                         onClick={() => handleRebalanceClick(b.asset)}
@@ -137,7 +171,13 @@ export const AssetsTab: React.FC = () => {
                 <td className="px-2.5 py-1.5 text-primary font-mono">
                   {b.marginBalance || b.available}
                 </td>
-                <td className="px-2.5 py-1.5 text-primary font-mono">${total.toFixed(2)}</td>
+                <td className="px-2.5 py-1.5 text-primary font-mono">
+                  $
+                  {usdValue.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </td>
                 <td
                   className={`px-2.5 py-1.5 font-mono ${
                     parseFloat(b.unrealizedPnl || '0') > 0
@@ -152,13 +192,6 @@ export const AssetsTab: React.FC = () => {
               </tr>
             );
           })}
-          {Object.keys(balances).length === 0 && (
-            <tr>
-              <td colSpan={5} className="px-4 py-8 text-center text-muted">
-                No balances found
-              </td>
-            </tr>
-          )}
         </tbody>
       </table>
 

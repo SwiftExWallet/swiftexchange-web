@@ -1,8 +1,27 @@
+import BigNumber from 'bignumber.js';
 import { ethers } from 'ethers';
 
 import { switchOrAddChain } from '../../../../evm/utils/evmChainUtils';
+import { rpcManager } from '../../../../evm/utils/rpcProvider';
 import { EVM_CHAINS, getAsterDepositBridge } from '../constants';
 import type { DepositAsset } from './account';
+
+export const ASTER_TREASURY_ABI = [
+  'function depositNative(uint256 broker) payable',
+  'function deposit(address currency, uint256 amount, uint256 broker)',
+];
+
+export const REQUIRED_CONFIRMATIONS: Record<number, number> = {
+  1: 2, // ETH
+  56: 3, // BSC
+  42161: 2, // Arbitrum
+  97: 3, // BSC Testnet
+  421614: 2, // Arb Sepolia
+  11155111: 2, // Sepolia
+};
+
+export const MAX_DEPOSIT_GAS_LIMIT = 500_000n;
+export const DEFAULT_BROKER_ID = 1n;
 
 const ERC20_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
@@ -46,19 +65,31 @@ export async function fetchOnChainWalletBalance(
   userAddress: string,
   asset: DepositAsset
 ): Promise<string> {
-  if (!provider || !userAddress || !asset) return '0';
+  if (!userAddress || !asset) return '0';
   try {
-    const browserProvider = new ethers.BrowserProvider(provider);
+    let readProvider: ethers.AbstractProvider | null = null;
+    if (asset.chainId) {
+      try {
+        readProvider = rpcManager.getProviders(asset.chainId)[0] || null;
+      } catch {
+        readProvider = null;
+      }
+    }
+    if (!readProvider && provider) {
+      readProvider = new ethers.BrowserProvider(provider);
+    }
+    if (!readProvider) return '0';
+
     const isNative =
       asset.isNative ||
       !asset.contractAddress ||
       asset.contractAddress === '0x0000000000000000000000000000000000000000';
 
     if (isNative) {
-      const bal = await browserProvider.getBalance(userAddress);
+      const bal = await readProvider.getBalance(userAddress);
       return ethers.formatEther(bal);
     } else {
-      const contract = new ethers.Contract(asset.contractAddress, ERC20_ABI, browserProvider);
+      const contract = new ethers.Contract(asset.contractAddress, ERC20_ABI, readProvider);
       const bal = await contract.balanceOf(userAddress);
       return ethers.formatUnits(bal, asset.decimals || 18);
     }
@@ -69,20 +100,20 @@ export async function fetchOnChainWalletBalance(
 }
 
 // Execute on-chain deposit of an asset to Aster DEX deposit bridge
-
 export async function depositAssetOnChain(
   provider: any,
   asset: DepositAsset,
   amount: string,
   chainId: number,
-  onProgress?: (p: DepositProgress) => void
+  onProgress?: (p: DepositProgress) => void,
+  broker: bigint = DEFAULT_BROKER_ID
 ): Promise<DepositResult> {
   if (!provider) {
     throw new Error('Wallet provider not available. Please connect your Web3 wallet.');
   }
 
-  const numAmount = parseFloat(amount);
-  if (isNaN(numAmount) || numAmount <= 0) {
+  const bnAmount = new BigNumber(amount);
+  if (bnAmount.isNaN() || !bnAmount.isFinite() || bnAmount.isLessThanOrEqualTo(0)) {
     throw new Error('Please enter a valid positive deposit amount.');
   }
 
@@ -113,8 +144,18 @@ export async function depositAssetOnChain(
     !asset.contractAddress ||
     asset.contractAddress === '0x0000000000000000000000000000000000000000';
 
-  const decimals = asset.decimals || 18;
+  let decimals = asset.decimals || 18;
+  if (!isNative && asset.contractAddress) {
+    try {
+      const probeContract = new ethers.Contract(asset.contractAddress, ERC20_ABI, browserProvider);
+      decimals = Number(await probeContract.decimals());
+    } catch {
+      decimals = asset.decimals || 18;
+    }
+  }
+
   const parsedAmount = ethers.parseUnits(amount, decimals);
+  const confirmations = REQUIRED_CONFIRMATIONS[chainId] || 2;
 
   if (isNative) {
     const nativeBal = await browserProvider.getBalance(userAddress);
@@ -125,24 +166,25 @@ export async function depositAssetOnChain(
       );
     }
 
-    // Native transfer to Aster bridge
+    // Call Aster Treasury depositNative(broker)
     onProgress?.({
       step: 'AWAITING_SIGNATURE',
-      message: `Please confirm the ${amount} ${asset.name} deposit transaction in your wallet...`,
+      message: `Please confirm the ${amount} ${asset.name} deposit to Aster Treasury in your wallet...`,
     });
 
-    const tx = await signer.sendTransaction({
-      to: bridgeAddress,
+    const treasury = new ethers.Contract(bridgeAddress, ASTER_TREASURY_ABI, signer);
+    const tx = await treasury.depositNative(broker, {
       value: parsedAmount,
+      gasLimit: MAX_DEPOSIT_GAS_LIMIT,
     });
 
     onProgress?.({
       step: 'CONFIRMING',
-      message: 'Transaction broadcasted. Waiting for on-chain confirmation...',
+      message: `Transaction broadcasted. Waiting for ${confirmations} on-chain confirmation(s)...`,
       txHash: tx.hash,
     });
 
-    const receipt = await tx.wait(1);
+    const receipt = await tx.wait(confirmations);
     if (!receipt || receipt.status === 0) {
       throw new Error('Deposit transaction failed or was reverted on-chain.');
     }
@@ -158,7 +200,7 @@ export async function depositAssetOnChain(
       explorerUrl: explorer ? `${explorer}/tx/${tx.hash}` : undefined,
     };
   } else {
-    // ERC-20 token transfer to Aster bridge
+    // ERC-20 token deposit to Aster bridge
     const tokenContract = new ethers.Contract(asset.contractAddress, ERC20_ABI, signer);
 
     const tokenBal: bigint = await tokenContract.balanceOf(userAddress);
@@ -177,20 +219,47 @@ export async function depositAssetOnChain(
       );
     }
 
+    // Check current allowance and approve Aster treasury if needed
+    const currentAllowance: bigint = await tokenContract.allowance(userAddress, bridgeAddress);
+    if (currentAllowance < parsedAmount) {
+      onProgress?.({
+        step: 'AWAITING_SIGNATURE',
+        message: `Please approve Aster Treasury to spend ${amount} ${asset.name}...`,
+      });
+
+      const approveTx = await tokenContract.approve(bridgeAddress, parsedAmount, {
+        gasLimit: MAX_DEPOSIT_GAS_LIMIT,
+      });
+
+      onProgress?.({
+        step: 'CONFIRMING',
+        message: `Approval submitted. Waiting for ${confirmations} on-chain confirmation(s)...`,
+        txHash: approveTx.hash,
+      });
+
+      const approveReceipt = await approveTx.wait(confirmations);
+      if (!approveReceipt || approveReceipt.status === 0) {
+        throw new Error('Token approval transaction failed or was reverted on-chain.');
+      }
+    }
+
     onProgress?.({
       step: 'AWAITING_SIGNATURE',
-      message: `Please confirm the ${amount} ${asset.name} transfer to Aster bridge in your wallet...`,
+      message: `Please confirm the ${amount} ${asset.name} deposit to Aster Treasury in your wallet...`,
     });
 
-    const tx = await tokenContract.transfer(bridgeAddress, parsedAmount);
+    const treasury = new ethers.Contract(bridgeAddress, ASTER_TREASURY_ABI, signer);
+    const tx = await treasury.deposit(asset.contractAddress, parsedAmount, broker, {
+      gasLimit: MAX_DEPOSIT_GAS_LIMIT,
+    });
 
     onProgress?.({
       step: 'CONFIRMING',
-      message: 'Transaction broadcasted. Waiting for on-chain confirmation...',
+      message: `Deposit broadcasted. Waiting for ${confirmations} on-chain confirmation(s)...`,
       txHash: tx.hash,
     });
 
-    const receipt = await tx.wait(1);
+    const receipt = await tx.wait(confirmations);
     if (!receipt || receipt.status === 0) {
       throw new Error('Deposit token transfer failed or was reverted on-chain.');
     }

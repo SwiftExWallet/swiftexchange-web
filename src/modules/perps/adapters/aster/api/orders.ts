@@ -1,5 +1,6 @@
 import type { Signer } from 'ethers';
 
+import { generateClientOrderId } from '../../../utils/precision';
 import { ASTER_ENDPOINTS } from '../constants';
 import type {
   AsterOrderResponse,
@@ -29,19 +30,83 @@ export async function placeOrder(
     type: params.type,
   };
 
-  if (params.quantity !== undefined) p.quantity = params.quantity;
-  if (params.price !== undefined) p.price = params.price;
-  if (params.timeInForce !== undefined) p.timeInForce = params.timeInForce;
-  if (params.stopPrice !== undefined) p.stopPrice = params.stopPrice;
-  if (params.activationPrice !== undefined) p.activationPrice = params.activationPrice;
-  if (params.callbackRate !== undefined) p.callbackRate = params.callbackRate;
-  if (params.workingType !== undefined) p.workingType = params.workingType;
-  if (params.priceProtect !== undefined) p.priceProtect = String(params.priceProtect).toUpperCase();
-  if (params.reduceOnly !== undefined) p.reduceOnly = String(params.reduceOnly);
-  if (params.closePosition !== undefined) p.closePosition = String(params.closePosition);
-  if (params.positionSide !== undefined) p.positionSide = params.positionSide;
-  if (params.newClientOrderId !== undefined) p.newClientOrderId = params.newClientOrderId;
-  if (params.newOrderRespType !== undefined) p.newOrderRespType = params.newOrderRespType;
+  const orderType = (params.type || '').toUpperCase();
+
+  if (params.quantity !== undefined && params.quantity !== '') {
+    p.quantity = params.quantity;
+  }
+
+  // Price is ONLY for LIMIT, STOP, TAKE_PROFIT (never MARKET or STOP_MARKET)
+  if (
+    (orderType === 'LIMIT' || orderType === 'STOP' || orderType === 'TAKE_PROFIT') &&
+    params.price !== undefined &&
+    params.price !== '' &&
+    params.price !== '0'
+  ) {
+    p.price = params.price;
+  }
+
+  // TimeInForce is REQUIRED for LIMIT, STOP, TAKE_PROFIT (NEVER for MARKET or TRAILING_STOP_MARKET)
+  if (orderType === 'LIMIT' || orderType === 'STOP' || orderType === 'TAKE_PROFIT') {
+    p.timeInForce = params.timeInForce || 'GTC';
+  }
+
+  // StopPrice for STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET
+  if (
+    (orderType === 'STOP' ||
+      orderType === 'STOP_MARKET' ||
+      orderType === 'TAKE_PROFIT' ||
+      orderType === 'TAKE_PROFIT_MARKET') &&
+    params.stopPrice !== undefined &&
+    params.stopPrice !== '' &&
+    params.stopPrice !== '0'
+  ) {
+    p.stopPrice = params.stopPrice;
+  }
+
+  // Trailing stop specific parameters (POST /fapi/v3/order)
+  if (orderType === 'TRAILING_STOP_MARKET') {
+    p.callbackRate = params.callbackRate ? String(params.callbackRate) : '1.0';
+    if (
+      params.activationPrice !== undefined &&
+      params.activationPrice !== '' &&
+      params.activationPrice !== '0'
+    ) {
+      p.activationPrice = String(params.activationPrice);
+    }
+  }
+
+  if (
+    params.workingType !== undefined &&
+    (orderType.includes('STOP') || orderType.includes('PROFIT'))
+  ) {
+    p.workingType = params.workingType;
+  }
+
+  if (
+    params.priceProtect !== undefined &&
+    (orderType.includes('STOP') || orderType.includes('PROFIT'))
+  ) {
+    p.priceProtect = String(params.priceProtect).toUpperCase();
+  }
+
+  // Only send reduceOnly if true! Sending reduceOnly: "false" causes unnecessary parameter error on MARKET orders!
+  if (params.reduceOnly === true || String(params.reduceOnly).toLowerCase() === 'true') {
+    p.reduceOnly = 'true';
+  }
+
+  if (params.closePosition === true || String(params.closePosition).toLowerCase() === 'true') {
+    p.closePosition = 'true';
+    delete p.quantity;
+    delete p.reduceOnly;
+  }
+
+  if (params.positionSide !== undefined && params.positionSide !== 'BOTH') {
+    p.positionSide = params.positionSide;
+  }
+
+  p.newClientOrderId = params.newClientOrderId || generateClientOrderId();
+  p.newOrderRespType = params.newOrderRespType || 'RESULT';
 
   return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.ORDER, p);
 }
@@ -59,11 +124,17 @@ export async function placeChaseOrder(
   };
 
   if (params.positionSide !== undefined) p.positionSide = params.positionSide;
-  if (params.reduceOnly !== undefined) p.reduceOnly = String(params.reduceOnly);
-  if (params.chaseOffset !== undefined) p.chaseOffset = params.chaseOffset;
-  if (params.chaseOffsetType !== undefined) p.chaseOffsetType = params.chaseOffsetType;
-  if (params.maxChaseOffset !== undefined) p.maxChaseOffset = params.maxChaseOffset;
-  if (params.maxChaseOffsetType !== undefined) p.maxChaseOffsetType = params.maxChaseOffsetType;
+  if (params.reduceOnly === true || String(params.reduceOnly).toLowerCase() === 'true') {
+    p.reduceOnly = 'true';
+  }
+  if (params.chaseOffset !== undefined) {
+    p.chaseOffset = String(params.chaseOffset);
+    p.chaseOffsetType = params.chaseOffsetType || 'ABSOLUTE';
+  }
+  if (params.maxChaseOffset !== undefined && parseFloat(String(params.maxChaseOffset)) > 0) {
+    p.maxChaseOffset = String(params.maxChaseOffset);
+    p.maxChaseOffsetType = params.maxChaseOffsetType || 'ABSOLUTE';
+  }
   if (params.timeInForce !== undefined) p.timeInForce = params.timeInForce;
   if (params.clientStrategyId !== undefined) p.clientStrategyId = params.clientStrategyId;
 
@@ -121,7 +192,12 @@ export async function cancelAllOpenOrders(
   userAddr: string,
   symbol: string
 ): Promise<{ code: number; msg: string }> {
-  return signedRequest(signer, userAddr, 'DELETE', ASTER_ENDPOINTS.ALL_OPEN_ORDERS, { symbol });
+  if (!symbol || !symbol.trim()) {
+    throw new Error('symbol parameter is mandatory for cancelAllOpenOrders on Aster API v3.');
+  }
+  return signedRequest(signer, userAddr, 'DELETE', ASTER_ENDPOINTS.ALL_OPEN_ORDERS, {
+    symbol: symbol.trim(),
+  });
 }
 
 //Cancel a batch of orders by ID lists.
@@ -164,13 +240,54 @@ export async function getOpenOrders(
 export async function getAllOrders(
   signer: Signer,
   userAddr: string,
-  params: Omit<GetAllOrdersParams, 'symbol'> & { symbol?: string }
+  params: GetAllOrdersParams,
+  signal?: AbortSignal
 ): Promise<AsterOrderResponse[]> {
-  const p: Record<string, string> = {};
-  if (params.symbol) p.symbol = params.symbol;
+  if (!params.symbol) {
+    throw new Error('symbol parameter is mandatory for getAllOrders on Aster API v3.');
+  }
+  const p: Record<string, string> = { symbol: params.symbol };
   if (params.orderId !== undefined) p.orderId = String(params.orderId);
   if (params.startTime !== undefined) p.startTime = String(params.startTime);
   if (params.endTime !== undefined) p.endTime = String(params.endTime);
   if (params.limit !== undefined) p.limit = String(params.limit);
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ALL_ORDERS, p);
+
+  if (
+    params.startTime &&
+    params.endTime &&
+    Number(params.endTime) - Number(params.startTime) > 7 * 24 * 3600 * 1000
+  ) {
+    throw new Error('Query time window cannot exceed 7 days for getAllOrders.');
+  }
+
+  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ALL_ORDERS, p, undefined, signal);
+}
+
+/**
+ * Auto-Cancel All Open Orders (Dead Man's Switch).
+ * @param countdownTime Countdown time in milliseconds. 10000 = 10s. Set to 0 to cancel/disable.
+ */
+export async function countdownCancelAll(
+  signer: Signer,
+  userAddr: string,
+  symbol: string,
+  countdownTime: number
+): Promise<{ symbol: string; countdownTime: number }> {
+  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.COUNTDOWN_CANCEL_ALL, {
+    symbol,
+    countdownTime: String(countdownTime),
+  });
+}
+
+/**
+ * Modify a batch of orders in one request.
+ */
+export async function batchModifyOrders(
+  signer: Signer,
+  userAddr: string,
+  batchOrders: any[]
+): Promise<any[]> {
+  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.BATCH_MODIFY_ORDERS, {
+    batchOrders: JSON.stringify(batchOrders),
+  });
 }

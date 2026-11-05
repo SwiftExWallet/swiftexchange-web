@@ -1,9 +1,10 @@
 import { PerpEvent, perpEventBus } from '../../core/events';
+import { usePositionStore } from '../../core/stores/positionStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { tradeStore } from '../../core/stores/tradeStore';
 import { OrderbookEngine } from './OrderbookEngine';
-import { getAggTrades } from './api/trades';
-import { ASTER_WS_STREAMS, ASTER_WS_URL } from './constants';
+import { getRecentTrades } from './api/trades';
+import { ASTER_WS_STREAMS, getAsterWsUrl } from './constants';
 import { AsterMapper } from './mapper';
 
 type StreamHandler = (data: unknown) => void;
@@ -43,21 +44,40 @@ export class AsterWebSocket {
   // handles all routing internally (depth, aggTrade, kline).
   private readonly _noop: StreamHandler = () => {};
 
+  private network: import('../../core/config/networks').PerpNetwork = 'mainnet';
+
   private constructor(opts: WsOptions = {}) {
     this.reconnectBaseMs = opts.reconnectBaseMs ?? 1000;
     this.maxReconnectMs = opts.maxReconnectMs ?? 30000;
   }
 
-  public static getInstance(): AsterWebSocket {
+  public static getInstance(
+    network?: import('../../core/config/networks').PerpNetwork
+  ): AsterWebSocket {
     if (!AsterWebSocket.instance) {
       AsterWebSocket.instance = new AsterWebSocket();
+    }
+    if (network) {
+      AsterWebSocket.instance.setNetwork(network);
     }
     return AsterWebSocket.instance;
   }
 
+  public setNetwork(network: import('../../core/config/networks').PerpNetwork): void {
+    if (this.network !== network) {
+      this.network = network;
+      if (this.ws) {
+        this.disconnect();
+      }
+    }
+  }
+
   private refCount = 0;
 
-  public connect(): Promise<void> {
+  public connect(network?: import('../../core/config/networks').PerpNetwork): Promise<void> {
+    if (network && this.network !== network) {
+      this.setNetwork(network);
+    }
     this.refCount++;
     if (
       this.ws &&
@@ -68,7 +88,8 @@ export class AsterWebSocket {
 
     return new Promise(resolve => {
       // Combined stream endpoint — payload always wrapped: { stream, data }
-      const baseUrl = ASTER_WS_URL.replace('/ws', '/stream');
+      const rawWsUrl = getAsterWsUrl(this.network);
+      const baseUrl = rawWsUrl.replace('/ws', '/stream');
       const url = `${baseUrl}?streams=${ASTER_WS_STREAMS.TICKER}/${ASTER_WS_STREAMS.MARK_PRICE}`;
       const ws = new WebSocket(url);
       this.ws = ws;
@@ -254,6 +275,31 @@ export class AsterWebSocket {
       const store = useTickerStore.getState();
       const existing = store.getAssetCtx(uiSymbol) || AsterMapper.mapTicker({});
       store.setAssetCtx(uiSymbol, { ...existing, ...markData });
+
+      // Live update open position for this symbol
+      if (markData.markPx) {
+        const posState = usePositionStore.getState();
+        const pos =
+          posState.positions[uiSymbol] ||
+          posState.positions[uiSymbol.replace('-', '')] ||
+          posState.positions[(payload.s as string) || ''];
+        if (pos && parseFloat(pos.size || '0') !== 0) {
+          const markVal = parseFloat(markData.markPx);
+          const entryVal = parseFloat(pos.entryPrice || '0');
+          const sizeVal = parseFloat(pos.size || '0');
+          if (markVal > 0 && entryVal > 0) {
+            const isLong = sizeVal > 0;
+            const livePnl = isLong
+              ? (markVal - entryVal) * Math.abs(sizeVal)
+              : (entryVal - markVal) * Math.abs(sizeVal);
+            posState.updatePosition({
+              ...pos,
+              markPrice: markData.markPx,
+              unrealizedPnl: livePnl.toFixed(4),
+            });
+          }
+        }
+      }
       return;
     }
 
@@ -266,6 +312,9 @@ export class AsterWebSocket {
 
   private handleGlobalArray(items: Record<string, unknown>[]): void {
     const contexts: Record<string, Partial<import('../../core/stores/tickerStore').AssetCtx>> = {};
+    const posState = usePositionStore.getState();
+    const hasPositions = Object.keys(posState.positions).length > 0;
+    const updatedPositions: import('../../core/models').Position[] = [];
 
     for (const item of items) {
       const rawSymbol = item.s as string | undefined;
@@ -276,7 +325,38 @@ export class AsterWebSocket {
         contexts[uiSymbol] = { ...contexts[uiSymbol], ...AsterMapper.mapTicker(item) };
       } else if (item.e === 'markPriceUpdate') {
         contexts[uiSymbol] = { ...contexts[uiSymbol], ...AsterMapper.mapMarkPrice(item) };
+
+        // Live update position store on mark price tick (batched)
+        if (hasPositions) {
+          const markPxStr = item.p as string;
+          if (markPxStr) {
+            const pos =
+              posState.positions[uiSymbol] ||
+              posState.positions[rawSymbol] ||
+              posState.positions[uiSymbol.replace('-', '')];
+            if (pos && parseFloat(pos.size || '0') !== 0) {
+              const markVal = parseFloat(markPxStr);
+              const entryVal = parseFloat(pos.entryPrice || '0');
+              const sizeVal = parseFloat(pos.size || '0');
+              if (markVal > 0 && entryVal > 0) {
+                const isLong = sizeVal > 0;
+                const livePnl = isLong
+                  ? (markVal - entryVal) * Math.abs(sizeVal)
+                  : (entryVal - markVal) * Math.abs(sizeVal);
+                updatedPositions.push({
+                  ...pos,
+                  markPrice: markPxStr,
+                  unrealizedPnl: livePnl.toFixed(4),
+                });
+              }
+            }
+          }
+        }
       }
+    }
+
+    if (updatedPositions.length > 0) {
+      posState.batchUpdatePositions({ upsert: updatedPositions });
     }
 
     if (Object.keys(contexts).length === 0) return;
@@ -318,18 +398,18 @@ export class AsterWebSocket {
   public async subscribeTrades(coin: string): Promise<void> {
     this.subscribe(`${coin.toLowerCase()}usdt@aggTrade`, this._noop);
 
-    // Fetch initial snapshot of trades
+    // Fetch initial snapshot of trades using 1-weight /fapi/v3/trades endpoint (MKT-04)
     try {
       const asterSymbol = `${coin.toUpperCase()}USDT`;
       const uiSymbol = `${coin.toUpperCase()}-USDT`;
-      const trades = await getAggTrades(asterSymbol, 80);
+      const trades = await getRecentTrades(asterSymbol, 50);
       const mappedTrades = trades.map(AsterMapper.mapTrade).map(t => {
         t.symbol = uiSymbol;
         return t;
       });
       tradeStore.addTrades(uiSymbol, mappedTrades);
     } catch (e) {
-      console.error('Failed to fetch initial aggTrades snapshot', e);
+      console.error('Failed to fetch initial trades snapshot', e);
     }
   }
 

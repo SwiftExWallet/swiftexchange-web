@@ -65,24 +65,33 @@ export const StellarActivationModal: React.FC<StellarActivationModalProps> = ({
     setBuyAssetAddress,
   } = useSwapStore();
 
+  const [isFundingFriendbot, setIsFundingFriendbot] = useState(false);
+  const [friendbotError, setFriendbotError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (isActive === true) {
+    let timer: NodeJS.Timeout;
+    if (isActive) {
       setActivationSuccess(true);
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         if (onActivated) onActivated();
         onClose();
-      }, 1500);
+      }, 1200);
       return () => clearTimeout(timer);
     }
   }, [isActive, onActivated, onClose]);
 
   useEffect(() => {
     if (isOpen) {
+      if (network === 'testnet') {
+        setNearIntentTokens([]);
+        setLoadingTokens(false);
+        return;
+      }
       let isMounted = true;
       const loadTokens = async () => {
         setLoadingTokens(true);
         try {
-          const tokens = await fetchNearIntentTokens();
+          const tokens = await fetchNearIntentTokens('mainnet');
           if (isMounted) setNearIntentTokens(tokens);
         } catch (err) {
           console.error('Failed to fetch near intent tokens', err);
@@ -95,7 +104,7 @@ export const StellarActivationModal: React.FC<StellarActivationModalProps> = ({
         isMounted = false;
       };
     }
-  }, [isOpen]);
+  }, [isOpen, network]);
 
   const swappableAssets = useMemo(() => {
     if (!userAssets || !nearIntentTokens.length) return [];
@@ -110,6 +119,33 @@ export const StellarActivationModal: React.FC<StellarActivationModalProps> = ({
       return !!match;
     });
   }, [userAssets, nearIntentTokens]);
+
+  const handleFriendbotFunding = async () => {
+    if (!address) return;
+    setIsFundingFriendbot(true);
+    setFriendbotError(null);
+    try {
+      const response = await fetch(
+        `https://friendbot.stellar.org?addr=${encodeURIComponent(address)}`
+      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          errorData.detail || errorData.title || `Friendbot response status ${response.status}`
+        );
+      }
+      setActivationSuccess(true);
+      await checkStatus(true);
+      setTimeout(() => {
+        if (onActivated) onActivated();
+        onClose();
+      }, 1200);
+    } catch (err: any) {
+      setFriendbotError(err.message || 'Failed to fund account via Friendbot');
+    } finally {
+      setIsFundingFriendbot(false);
+    }
+  };
 
   const handleManualCheck = async () => {
     const active = await checkStatus(true);
@@ -187,92 +223,134 @@ export const StellarActivationModal: React.FC<StellarActivationModalProps> = ({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-muted uppercase tracking-wider flex items-center gap-2">
-                <Repeat size={14} className="text-brand" /> Cross-Chain Swap
+                <Repeat size={14} className="text-brand" />{' '}
+                {network === 'testnet' ? 'Testnet Faucet Activation' : 'Cross-Chain Swap'}
               </h3>
             </div>
 
-            <div className="bg-tertiary border border-color rounded-2xl p-2 min-h-[160px] max-h-[220px] overflow-y-auto hide-scrollbar shadow-inner relative">
-              {loadingTokens || assetsLoading ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-tertiary/50 backdrop-blur-sm z-10 rounded-2xl">
-                  <Loader2 size={24} className="animate-spin text-brand" />
-                  <span className="text-[11px] font-bold text-muted tracking-widest uppercase">
-                    Loading Assets...
-                  </span>
-                </div>
-              ) : swappableAssets.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-36 gap-3 text-center px-4">
-                  <div className="w-12 h-12 rounded-full bg-secondary border border-color flex items-center justify-center shadow-sm">
-                    <Wallet size={20} className="text-muted opacity-50" />
+            {network === 'testnet' ? (
+              <div className="bg-tertiary border border-color rounded-2xl p-4 shadow-inner space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center text-brand shrink-0">
+                    <Repeat size={18} />
                   </div>
                   <div>
-                    <span className="text-sm font-bold text-primary block mb-1">
-                      No Swappable Assets
-                    </span>
-                    <span className="text-xs text-muted max-w-xs block leading-relaxed">
-                      You don't have any EVM balances supported for 1-click Stellar swaps.
-                    </span>
+                    <h4 className="font-bold text-primary text-sm">Stellar Testnet Friendbot</h4>
+                    <p className="text-xs text-muted mt-1 leading-relaxed">
+                      Cross-chain swaps via NEAR Intents are not supported on Testnet. You can
+                      activate your Stellar testnet wallet instantly for free via official
+                      Friendbot.
+                    </p>
                   </div>
                 </div>
-              ) : (
-                <div className="flex flex-col gap-1.5">
-                  {swappableAssets.map(asset => (
-                    <button
-                      key={`${asset.chainId}-${asset.symbol}-${asset.address}`}
-                      onClick={() => handleAssetClick(asset)}
-                      className="flex items-center gap-3 w-full bg-secondary hover:bg-hover active:scale-[0.98] border border-transparent hover:border-color rounded-xl p-3 transition-all text-left group shadow-sm"
-                    >
-                      <div className="relative shrink-0">
-                        <img
-                          src={asset.image}
-                          className="w-10 h-10 rounded-full bg-tertiary shadow-sm"
-                          alt={asset.symbol}
-                          onError={e => {
-                            e.currentTarget.src = `https://ui-avatars.com/api/?name=${asset.symbol}&background=random`;
-                          }}
-                        />
-                        <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-secondary border border-color flex items-center justify-center shadow-sm">
-                          {getChainLogoUrl(asset.chainId || 0) ? (
-                            <img
-                              src={getChainLogoUrl(asset.chainId || 0)}
-                              alt={asset.chainName}
-                              className="w-2.5 h-2.5 rounded-full"
-                            />
-                          ) : (
-                            <span className="text-[6px] font-bold text-muted">
-                              {asset.chainName?.[0] || '?'}
+
+                {friendbotError && (
+                  <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-2.5">
+                    {friendbotError}
+                  </p>
+                )}
+
+                <button
+                  onClick={handleFriendbotFunding}
+                  disabled={isFundingFriendbot}
+                  className="w-full bg-brand hover:bg-brand/90 active:scale-[0.98] text-white font-bold text-xs py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  {isFundingFriendbot ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Activating via Friendbot...
+                    </>
+                  ) : (
+                    'Activate with Free Testnet XLM'
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="bg-tertiary border border-color rounded-2xl p-2 min-h-[160px] max-h-[220px] overflow-y-auto hide-scrollbar shadow-inner relative">
+                {loadingTokens || assetsLoading ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-tertiary/50 backdrop-blur-sm z-10 rounded-2xl">
+                    <Loader2 size={24} className="animate-spin text-brand" />
+                    <span className="text-[11px] font-bold text-muted tracking-widest uppercase">
+                      Loading Assets...
+                    </span>
+                  </div>
+                ) : swappableAssets.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-36 gap-3 text-center px-4">
+                    <div className="w-12 h-12 rounded-full bg-secondary border border-color flex items-center justify-center shadow-sm">
+                      <Wallet size={20} className="text-muted opacity-50" />
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-primary block mb-1">
+                        No Swappable Assets
+                      </span>
+                      <span className="text-xs text-muted max-w-xs block leading-relaxed">
+                        You don't have any EVM balances supported for 1-click Stellar swaps.
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {swappableAssets.map(asset => (
+                      <button
+                        key={`${asset.chainId}-${asset.symbol}-${asset.address}`}
+                        onClick={() => handleAssetClick(asset)}
+                        className="flex items-center gap-3 w-full bg-secondary hover:bg-hover active:scale-[0.98] border border-transparent hover:border-color rounded-xl p-3 transition-all text-left group shadow-sm"
+                      >
+                        <div className="relative shrink-0">
+                          <img
+                            src={asset.image}
+                            className="w-10 h-10 rounded-full bg-tertiary shadow-sm"
+                            alt={asset.symbol}
+                            onError={e => {
+                              e.currentTarget.src = `https://ui-avatars.com/api/?name=${asset.symbol}&background=random`;
+                            }}
+                          />
+                          <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-secondary border border-color flex items-center justify-center shadow-sm">
+                            {getChainLogoUrl(asset.chainId || 0) ? (
+                              <img
+                                src={getChainLogoUrl(asset.chainId || 0)}
+                                alt={asset.chainName}
+                                className="w-2.5 h-2.5 rounded-full"
+                              />
+                            ) : (
+                              <span className="text-[6px] font-bold text-muted">
+                                {asset.chainName?.[0] || '?'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-[15px] text-primary">
+                              {asset.symbol}
                             </span>
-                          )}
+                          </div>
+                          <span className="text-[11px] font-medium text-muted truncate block mt-0.5">
+                            on {asset.chainName}
+                          </span>
                         </div>
-                      </div>
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-[15px] text-primary">{asset.symbol}</span>
+                        <div className="text-right shrink-0 mr-2">
+                          <div className="text-[13px] font-bold text-primary">
+                            {portfolioUtils.formatBalance(asset.balance)}
+                          </div>
+                          <div className="text-[10px] font-medium text-muted mt-0.5">
+                            {portfolioUtils.formatUSD(
+                              (asset.balance || 0) * (asset.current_price || 0)
+                            )}
+                          </div>
                         </div>
-                        <span className="text-[11px] font-medium text-muted truncate block mt-0.5">
-                          on {asset.chainName}
-                        </span>
-                      </div>
 
-                      <div className="text-right shrink-0 mr-2">
-                        <div className="text-[13px] font-bold text-primary">
-                          {portfolioUtils.formatBalance(asset.balance)}
+                        <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-muted group-hover:bg-brand group-hover:text-white transition-colors shrink-0 shadow-sm border border-color/50">
+                          <ArrowRight size={14} strokeWidth={2.5} />
                         </div>
-                        <div className="text-[10px] font-medium text-muted mt-0.5">
-                          {portfolioUtils.formatUSD(
-                            (asset.balance || 0) * (asset.current_price || 0)
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-muted group-hover:bg-brand group-hover:text-white transition-colors shrink-0 shadow-sm border border-color/50">
-                        <ArrowRight size={14} strokeWidth={2.5} />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4 my-2 opacity-60">

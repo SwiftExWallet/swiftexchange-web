@@ -19,8 +19,8 @@ export function extractErrorMessage(error: any): string {
           }
           return match[1];
         }
-      } catch (e) {
-        console.log(e);
+      } catch {
+        // Ignore JSON parse errors in string error payloads
       }
     }
     return error;
@@ -38,8 +38,8 @@ export function extractErrorMessage(error: any): string {
         }
         return match[1];
       }
-    } catch (e) {
-      console.log(e);
+    } catch {
+      // Ignore JSON parse errors in string error payloads
     }
   }
 
@@ -58,13 +58,19 @@ export function isUserRejection(error: any): boolean {
   if (!error) return false;
 
   const msg = extractErrorMessage(error)?.toLowerCase() || '';
+  const code = error?.code ?? error?.info?.error?.code ?? error?.error?.code;
 
   return (
-    error?.code === 4001 ||
-    error?.code === 'ACTION_REJECTED' ||
+    code === 4001 ||
+    code === 5000 ||
+    code === -32004 ||
+    code === 'ACTION_REJECTED' ||
     msg.includes('reject') ||
     msg.includes('denied') ||
+    msg.includes('disapproved') ||
+    msg.includes('user cancelled') ||
     msg.includes('user closed modal') ||
+    msg.includes('user closed the modal') ||
     msg.includes('signature_timeout')
   );
 }

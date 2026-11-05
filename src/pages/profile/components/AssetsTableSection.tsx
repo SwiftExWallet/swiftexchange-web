@@ -1,5 +1,5 @@
 import { Search, TrendingDown, TrendingUp } from 'lucide-react';
-import React from 'react';
+import React, { useMemo } from 'react';
 
 import { getChainLogoUrl } from '../../../modules/evm/utils/Chainregistry';
 import { type ChainFilter } from '../../../modules/walletconnect/hooks/useProfilePortfolio';
@@ -37,6 +37,60 @@ export const AssetsTableSection: React.FC<AssetsTableSectionProps> = ({
     return getChainLogoUrl(chainId || 0);
   };
 
+  // Provide realistic zero-balance default tokens when user has no assets, preserving full table structure
+  const displayAssets: Asset[] = useMemo(() => {
+    if (filteredAssets.length > 0) return filteredAssets;
+    if (searchQuery.trim() !== '') return [];
+
+    const defaultAssets: Asset[] = [
+      {
+        id: 'stellar-native-xlm',
+        symbol: 'XLM',
+        name: 'Stellar Lumens',
+        image: 'https://assets.coingecko.com/coins/images/100/small/Stellar_symbol_black_RGB.png',
+        balance: 0,
+        current_price: 0,
+        price_change_percentage_24h: 0,
+        chainName: 'Stellar',
+        chainType: 'stellar',
+        chainId: 'pubnet',
+        isNative: true,
+      },
+      {
+        id: 'evm-native-eth',
+        symbol: 'ETH',
+        name: 'Ethereum',
+        image: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png',
+        balance: 0,
+        current_price: 0,
+        price_change_percentage_24h: 0,
+        chainName: 'Ethereum',
+        chainType: 'evm',
+        chainId: 1,
+        isNative: true,
+      },
+      {
+        id: 'stellar-usdc-token',
+        symbol: 'USDC',
+        name: 'USD Coin',
+        image: 'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+        balance: 0,
+        current_price: 1.0,
+        price_change_percentage_24h: 0,
+        chainName: 'Stellar',
+        chainType: 'stellar',
+        chainId: 'pubnet',
+      },
+    ];
+
+    if (selectedChainFilter !== 'all') {
+      return defaultAssets.filter(
+        a => String(a.chainId).toLowerCase() === String(selectedChainFilter).toLowerCase()
+      );
+    }
+    return defaultAssets;
+  }, [filteredAssets, searchQuery, selectedChainFilter]);
+
   return (
     <div className="bg-(--color-bg-secondary) border border-(--color-border) rounded-2xl overflow-hidden shadow-sm w-full max-w-[100vw]">
       <div className="p-3 border-b border-(--color-border) space-y-3 md:space-y-0 md:flex md:items-center md:justify-between gap-2">
@@ -65,26 +119,29 @@ export const AssetsTableSection: React.FC<AssetsTableSectionProps> = ({
             >
               All
             </button>
-            {availableChains.map(chain => (
-              <button
-                key={chain.id}
-                onClick={() => setSelectedChainFilter(chain.id)}
-                className={`px-2.5 py-1 rounded-lg text-[10.5px] font-semibold transition shrink-0 flex items-center gap-1 ${
-                  selectedChainFilter === chain.id
-                    ? 'bg-brand text-white'
-                    : 'bg-secondary text-(--color-text-secondary) hover:bg-(--color-bg-secondary) border border-(--color-border)'
-                }`}
-              >
-                {getChainLogoUrl(chain.id) && (
-                  <img
-                    src={getChainLogoUrl(chain.id)}
-                    alt={chain.name}
-                    className="w-3 h-3 rounded-full shrink-0"
-                  />
-                )}
-                {chain.name}
-              </button>
-            ))}
+            {availableChains?.map(chain => {
+              const isSelected =
+                selectedChainFilter !== 'all' &&
+                String(selectedChainFilter).toLowerCase() === String(chain.id).toLowerCase();
+              const logoUrl = getChainLogoUrl(chain.id);
+
+              return (
+                <button
+                  key={chain.id}
+                  onClick={() => setSelectedChainFilter(chain.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[10.5px] font-semibold transition shrink-0 flex items-center gap-1 cursor-pointer ${
+                    isSelected
+                      ? 'bg-brand text-white'
+                      : 'bg-secondary text-(--color-text-secondary) hover:bg-(--color-bg-secondary) border border-(--color-border)'
+                  }`}
+                >
+                  {logoUrl && (
+                    <img src={logoUrl} alt={chain.name} className="w-3 h-3 rounded-full shrink-0" />
+                  )}
+                  {chain.name}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -114,14 +171,16 @@ export const AssetsTableSection: React.FC<AssetsTableSectionProps> = ({
                 </div>
               </div>
             ))
-          ) : filteredAssets.length === 0 ? (
+          ) : displayAssets.length === 0 ? (
             <div className="p-10 text-center text-(--color-text-secondary) space-y-1.5">
               <Search size={24} className="mx-auto text-(--color-text-secondary) opacity-50" />
-              <p className="text-sm font-semibold">No assets found</p>
+              <p className="text-sm font-semibold">
+                {searchQuery.trim() ? `No assets matching "${searchQuery}"` : 'No assets found'}
+              </p>
               <p className="text-xs">Try adjusting your filters or search keywords.</p>
             </div>
           ) : (
-            filteredAssets.map(asset => {
+            displayAssets.map(asset => {
               const usdValue = (asset.balance || 0) * (asset.current_price || 0);
               const isPriceDown = asset.price_change_percentage_24h < 0;
 

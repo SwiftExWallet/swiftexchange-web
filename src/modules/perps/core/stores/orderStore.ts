@@ -8,6 +8,7 @@ interface OrderStoreState {
   updateOrder: (order: Order) => void;
   removeOrder: (orderId: string) => void;
   getOpenOrders: () => Order[];
+  clear: () => void;
 }
 
 export const useOrderStore = create<OrderStoreState>((set, get) => ({
@@ -34,4 +35,5 @@ export const useOrderStore = create<OrderStoreState>((set, get) => ({
     }),
   getOpenOrders: () =>
     Object.values(get().orders).filter(o => o.status === 'new' || o.status === 'partially_filled'),
+  clear: () => set({ orders: {} }),
 }));

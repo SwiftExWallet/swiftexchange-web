@@ -1,8 +1,6 @@
 import { ethers } from 'ethers';
 
 import { ERC20_ABI } from '../../../abi/Erc20AbI';
-import PancakeTokens from '../../../data/swap/PancakeList.json';
-import UniswapTokens from '../../../data/swap/UniswapList.json';
 import { CHAIN_REGISTRY, getChainById, normalizeTokenForDisplay } from '../utils/Chainregistry';
 import { NATIVE_ADDRESS } from '../utils/assetmanagement/constants';
 
@@ -16,6 +14,8 @@ export interface TokenInfo {
   balance?: string;
   isNative?: boolean;
   type?: string;
+  contract?: string;
+  issuer?: string;
 }
 
 export interface ChainNativeConfig {
@@ -40,27 +40,32 @@ export function getTokensForChain(chainId: number | string): TokenInfo[] {
   const chainConfig = getChainById(chainId);
   if (!chainConfig) return [];
 
-  let rawTokens: any[] = [];
-  const platform = chainConfig.coingeckoPlatform.toLowerCase();
-  const slug = chainConfig.slug.toLowerCase();
-
-  if (
-    platform === 'binance-smart-chain' ||
-    platform === 'bnb' ||
-    slug === 'smartchain' ||
-    slug === 'binance'
-  ) {
-    rawTokens = PancakeTokens;
-  } else {
-    rawTokens = UniswapTokens;
+  if (chainId === 'pubnet' || chainId === 'testnet' || chainId === 'stellar') {
+    const stellarAssets = chainConfig.assets || [];
+    return stellarAssets.map(t => {
+      const isNative = t.symbol?.toUpperCase() === 'XLM' && (!t.issuer || t.issuer === 'native');
+      return {
+        chainId: (t as any).chainId || chainId,
+        address: t.address,
+        contract: (t as any).contract,
+        issuer: (t as any).issuer,
+        name: t.name || t.symbol,
+        symbol: t.symbol,
+        decimals: t.decimals || 7,
+        logoURI: t.logoURI,
+        balance: undefined,
+        isNative,
+        type: t.type || (isNative ? 'NATIVE' : 'STELLAR'),
+      };
+    });
   }
 
-  const combinedTokens = [...(chainConfig.assets || []), ...rawTokens].filter(
-    t => String(t.chainId) === String(chainId) || !t.chainId
-  );
+  // ── EVM chains (Mainnet & Testnet) ──────────────────────────────────────────
+  // Remote token list dynamically loaded from GitHub resources into chainConfig.assets
+  const rawTokens = chainConfig.assets || [];
 
   const uniqueTokensMap = new Map<string, any>();
-  for (const t of combinedTokens) {
+  for (const t of rawTokens) {
     const addr = t.address?.toLowerCase();
     if (addr && !uniqueTokensMap.has(addr)) {
       uniqueTokensMap.set(addr, t);

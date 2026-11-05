@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { useDepositTrackerStore } from '../depositTrackerStore';
 import { leverageStore, useLeverageStore } from '../leverageStore';
 import { marketStore, useMarketStore } from '../marketStore';
 import { useOrderEntryStore } from '../orderEntryStore';
@@ -13,6 +14,11 @@ describe('Perps Core Stores', () => {
     usePositionStore.setState({ positions: {} });
     useOrderStore.setState({ orders: {} });
     useOrderEntryStore.getState().reset();
+    useDepositTrackerStore.setState({
+      activeTransaction: null,
+      pendingDeposits: [],
+      pendingWithdrawals: [],
+    });
   });
 
   describe('marketStore', () => {
@@ -192,6 +198,170 @@ describe('Perps Core Stores', () => {
       expect(resetState.size).toBe('');
       expect(resetState.price).toBe('');
       expect(resetState.isReduceOnly).toBe(false);
+    });
+  });
+
+  describe('depositTrackerStore & Active Transactions', () => {
+    it('manages active transaction lifecycle across steps', () => {
+      const store = useDepositTrackerStore.getState();
+
+      // 1. Initial state is empty
+      expect(store.activeTransaction).toBeNull();
+      expect(store.hasActiveTransactions()).toBe(false);
+
+      // 2. Start deposit transaction
+      store.setActiveTransaction({
+        id: 'dep-101',
+        type: 'DEPOSIT',
+        step: 'AWAITING_SIGNATURE',
+        asset: 'USDT',
+        amount: '100',
+        chainId: 97,
+        chainName: 'BSC Testnet',
+        message: 'Awaiting wallet signature...',
+        timestamp: Date.now(),
+      });
+
+      expect(useDepositTrackerStore.getState().activeTransaction?.step).toBe('AWAITING_SIGNATURE');
+      expect(useDepositTrackerStore.getState().hasActiveTransactions()).toBe(true);
+
+      // 3. Update to CONFIRMING on blockchain
+      store.updateActiveTransaction({
+        step: 'CONFIRMING',
+        txHash: '0x123abc',
+        message: 'Confirming on-chain...',
+      });
+
+      const confirmingState = useDepositTrackerStore.getState().activeTransaction;
+      expect(confirmingState?.step).toBe('CONFIRMING');
+      expect(confirmingState?.txHash).toBe('0x123abc');
+
+      // 4. Update to SUCCESS
+      store.updateActiveTransaction({
+        step: 'SUCCESS',
+        message: 'Deposit confirmed!',
+      });
+      expect(useDepositTrackerStore.getState().activeTransaction?.step).toBe('SUCCESS');
+
+      // 5. Clear on "Done" / modal dismissal
+      store.clearActiveTransaction();
+      expect(useDepositTrackerStore.getState().activeTransaction).toBeNull();
+    });
+
+    it('tracks withdrawals and pending withdrawal state correctly', () => {
+      const store = useDepositTrackerStore.getState();
+
+      store.addWithdrawal({
+        asset: 'USDT',
+        amount: '50',
+        chainId: 97,
+        chainName: 'BSC Testnet',
+        destination: '0x1111111111111111111111111111111111111111',
+        status: 'PROCESSING',
+      });
+
+      expect(useDepositTrackerStore.getState().hasActiveWithdrawals()).toBe(true);
+      expect(useDepositTrackerStore.getState().pendingWithdrawals).toHaveLength(1);
+
+      const withdrawId = useDepositTrackerStore.getState().pendingWithdrawals[0].id;
+
+      // Update to confirmed
+      store.updateWithdrawalStatus(withdrawId, 'CONFIRMED');
+      expect(useDepositTrackerStore.getState().hasActiveWithdrawals()).toBe(false);
+      expect(useDepositTrackerStore.getState().pendingWithdrawals[0].status).toBe('CONFIRMED');
+
+      // Clear completed
+      store.clearCompleted();
+      expect(useDepositTrackerStore.getState().pendingWithdrawals).toHaveLength(0);
+    });
+
+    it('handles partial updates and graceful null updates for activeTransaction', () => {
+      const store = useDepositTrackerStore.getState();
+
+      // Graceful no-op when activeTransaction is null
+      expect(() => {
+        store.updateActiveTransaction({ step: 'CONFIRMING' });
+      }).not.toThrow();
+      expect(store.activeTransaction).toBeNull();
+
+      // Set initial
+      store.setActiveTransaction({
+        id: 'tx-202',
+        type: 'WITHDRAW',
+        step: 'AWAITING_SIGNATURE',
+        asset: 'USDC',
+        amount: '200',
+        chainId: 42161,
+        chainName: 'Arbitrum',
+        timestamp: Date.now(),
+      });
+
+      // Partial update only message
+      store.updateActiveTransaction({ message: 'Authorizing signature...' });
+      const current = useDepositTrackerStore.getState().activeTransaction;
+      expect(current?.message).toBe('Authorizing signature...');
+      expect(current?.step).toBe('AWAITING_SIGNATURE');
+      expect(current?.amount).toBe('200');
+    });
+
+    it('correctly evaluates hasActiveTransactions across states', () => {
+      const store = useDepositTrackerStore.getState();
+
+      // Empty state
+      expect(store.hasActiveTransactions()).toBe(false);
+
+      // AWAITING_SIGNATURE -> true
+      store.setActiveTransaction({
+        id: 'tx-301',
+        type: 'DEPOSIT',
+        step: 'AWAITING_SIGNATURE',
+        asset: 'USDT',
+        amount: '100',
+        chainId: 56,
+        chainName: 'BSC',
+        timestamp: Date.now(),
+      });
+      expect(store.hasActiveTransactions()).toBe(true);
+
+      // CONFIRMING -> true
+      store.updateActiveTransaction({ step: 'CONFIRMING' });
+      expect(store.hasActiveTransactions()).toBe(true);
+
+      // SUCCESS -> false (poller stops, allows user to start new transaction)
+      store.updateActiveTransaction({ step: 'SUCCESS' });
+      expect(store.hasActiveTransactions()).toBe(false);
+
+      // FAILED -> false
+      store.updateActiveTransaction({ step: 'FAILED' });
+      expect(store.hasActiveTransactions()).toBe(false);
+    });
+
+    it('allows removing specific withdrawals by ID', () => {
+      const store = useDepositTrackerStore.getState();
+
+      store.addWithdrawal({
+        asset: 'USDT',
+        amount: '10',
+        chainId: 97,
+        chainName: 'BSC Testnet',
+        destination: '0x123',
+        status: 'PROCESSING',
+      });
+      store.addWithdrawal({
+        asset: 'BTC',
+        amount: '0.1',
+        chainId: 97,
+        chainName: 'BSC Testnet',
+        destination: '0x456',
+        status: 'PROCESSING',
+      });
+
+      expect(useDepositTrackerStore.getState().pendingWithdrawals).toHaveLength(2);
+      const firstId = useDepositTrackerStore.getState().pendingWithdrawals[0].id;
+
+      store.removeWithdrawal(firstId);
+      expect(useDepositTrackerStore.getState().pendingWithdrawals).toHaveLength(1);
+      expect(useDepositTrackerStore.getState().pendingWithdrawals[0].asset).toBe('USDT');
     });
   });
 });

@@ -9,6 +9,7 @@ export interface LiqCalcParams {
   balances?: Record<string, AccountBalance> | AccountBalance[];
   isMultiAsset?: boolean;
   bracketsBySymbol?: Record<string, LeverageBracket[]>;
+  assetPrices?: Record<string, number | string>;
 }
 
 /**
@@ -63,11 +64,18 @@ export function calculateLiquidationPrice({
   balances = {},
   isMultiAsset = false,
   bracketsBySymbol = {},
+  assetPrices = {},
 }: LiqCalcParams): number | null {
   const size = new BigNumber(position.size || '0');
   const entryPrice = new BigNumber(position.entryPrice || '0');
 
   if (size.isZero() || entryPrice.lte(0)) return null;
+
+  // If the exchange already computed official liquidation price, use it directly
+  const officialLiq = new BigNumber(position.liquidationPrice || '0');
+  if (officialLiq.gt(0)) {
+    return officialLiq.toNumber();
+  }
 
   const isLong = size.gt(0);
   const absSize = size.abs();
@@ -118,16 +126,30 @@ export function calculateLiquidationPrice({
   // Calculate Cross Wallet Balance
   let crossWalletBalance = new BigNumber(0);
   if (isMultiAsset) {
-    // Multi-asset mode: sum total margin balance across all assets
+    // Multi-asset mode: sum total margin balance converted to USD using asset prices
     Object.values(balanceMap).forEach(b => {
       const total = new BigNumber(b.total || b.marginBalance || '0');
-      if (total.gt(0)) crossWalletBalance = crossWalletBalance.plus(total);
+      if (total.gt(0)) {
+        const asset = b.asset.toUpperCase();
+        let price = new BigNumber(1);
+        if (asset !== 'USDT' && asset !== 'USDC' && asset !== 'USD') {
+          const matchedPrice =
+            assetPrices[asset] ||
+            assetPrices[`${asset}USDT`] ||
+            assetPrices[`${asset}-USD`] ||
+            assetPrices[`${asset}USD`];
+          if (matchedPrice) {
+            price = new BigNumber(matchedPrice);
+          }
+        }
+        crossWalletBalance = crossWalletBalance.plus(total.times(price));
+      }
     });
   } else {
-    // Single-asset mode (USDT-M)
-    const usdtBal = balanceMap['USDT'] || balanceMap['USD'];
-    if (usdtBal) {
-      crossWalletBalance = new BigNumber(usdtBal.total || usdtBal.marginBalance || '0');
+    // Single-asset mode (USDT-M / USDC-M / USD)
+    const quoteBal = balanceMap['USDT'] || balanceMap['USDC'] || balanceMap['USD'];
+    if (quoteBal) {
+      crossWalletBalance = new BigNumber(quoteBal.total || quoteBal.marginBalance || '0');
     }
   }
 
@@ -180,31 +202,49 @@ export function calculateLiquidationPrice({
 }
 
 /**
- * Formats a price with full accuracy matching exchange tick precision
- * Prevents premature truncation to 2 decimals on lower-priced assets (e.g. 0.60430)
+ * Formats a price with full accuracy matching exchange tick precision and commas.
+ * Prices >= 1 use at least 2 decimal places (e.g. 79,865.00) matching Aster's UI.
+ * Low-priced assets use the asset's full tick precision.
  */
 export function formatPricePrecision(
   price: number | string | null | undefined,
-  tickSize?: number | string
+  tickSize?: number | string,
+  explicitDecimals?: number
 ): string {
   if (price === null || price === undefined) return '--';
   const bn = new BigNumber(price);
   if (bn.isNaN() || bn.lte(0)) return '--';
 
-  // If explicit tickSize is provided, determine decimal count
-  if (tickSize) {
+  let decimals = 2;
+  if (explicitDecimals !== undefined) {
+    decimals = explicitDecimals;
+  } else if (tickSize) {
     const tickStr = String(tickSize);
     if (tickStr.includes('.')) {
-      const decimals = tickStr.split('.')[1].length;
-      return bn.toFixed(decimals);
+      const tickDecs = tickStr.split('.')[1].length;
+      decimals = bn.gte(1) ? Math.max(2, tickDecs) : tickDecs;
+    } else {
+      decimals = 2;
     }
+  } else {
+    if (bn.gte(100)) decimals = 2;
+    else if (bn.gte(10)) decimals = 3;
+    else if (bn.gte(1)) decimals = 4;
+    else if (bn.gte(0.01)) decimals = 5;
+    else decimals = 6;
   }
 
-  // Dynamic smart precision
-  if (bn.gte(1000)) return bn.toFixed(2);
-  if (bn.gte(100)) return bn.toFixed(2);
-  if (bn.gte(10)) return bn.toFixed(3);
-  if (bn.gte(1)) return bn.toFixed(4);
-  if (bn.gte(0.01)) return bn.toFixed(5);
-  return bn.toFixed(6);
+  const num = bn.toNumber();
+  const minDec =
+    explicitDecimals !== undefined
+      ? explicitDecimals
+      : bn.gte(1)
+        ? Math.max(2, decimals)
+        : decimals;
+  const maxDec = Math.max(minDec, decimals);
+
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: minDec,
+    maximumFractionDigits: maxDec,
+  });
 }

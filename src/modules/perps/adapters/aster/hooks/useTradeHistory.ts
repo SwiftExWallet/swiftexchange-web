@@ -3,41 +3,94 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Signer } from 'ethers';
 
 import { useHistoryStore } from '../../../core/stores/historyStore';
+import { useMarketStore } from '../../../core/stores/marketStore';
+import { useOrderStore } from '../../../core/stores/orderStore';
+import { usePositionStore } from '../../../core/stores/positionStore';
 import { getUserTrades } from '../api/account';
 import type { AsterUserTrade } from '../types/account';
+import type { TimeRange } from './useOrderHistory';
 
-const PAGE_LIMIT = 50;
-const CACHE_TTL = 30000; // 30 seconds
+const PAGE_LIMIT = 100;
+const CACHE_TTL = 30000;
 
-// Module-level global cache that persists across tab switches
-const globalTradeCache: Record<
-  string,
-  { data: AsterUserTrade[]; timestamp: number; hasMore: boolean }
-> = {};
+interface CacheEntry {
+  data: AsterUserTrade[];
+  timestamp: number;
+  hasMore: boolean;
+  oldestQueried: number;
+}
+
+const globalTradeCache: Record<string, CacheEntry> = {};
 
 const sortDesc = (items: AsterUserTrade[]) => {
   return [...items].sort((a, b) => (b.time || 0) - (a.time || 0));
 };
 
+function getTargetSymbols(specificSymbol?: string | null): string[] {
+  if (specificSymbol && specificSymbol.trim()) {
+    return [specificSymbol.replace('-', '').toUpperCase()];
+  }
+  const symbolSet = new Set<string>();
+  const cur = useMarketStore.getState().selectedSymbol;
+  if (cur) symbolSet.add(cur.replace('-', '').toUpperCase());
+
+  // Add all active markets
+  const allMarkets = Object.keys(useMarketStore.getState().markets);
+  allMarkets.forEach(m => {
+    symbolSet.add(m.replace('-', '').toUpperCase());
+  });
+
+  // Open positions
+  Object.keys(usePositionStore.getState().positions).forEach(s => {
+    symbolSet.add(s.replace('-', '').toUpperCase());
+  });
+
+  // Open orders
+  Object.values(useOrderStore.getState().orders).forEach(o => {
+    if (o.symbol) symbolSet.add(o.symbol.replace('-', '').toUpperCase());
+  });
+
+  // Always include major traded pairs as baseline fallback
+  ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'].forEach(s => symbolSet.add(s));
+
+  return Array.from(symbolSet);
+}
+
+const deduplicateTrades = (existing: AsterUserTrade[], incoming: AsterUserTrade[]) => {
+  const seen = new Set<string>();
+  const combined: AsterUserTrade[] = [];
+  for (const item of [...incoming, ...existing]) {
+    const id = String(item.id);
+    if (!seen.has(id)) {
+      seen.add(id);
+      combined.push(item);
+    }
+  }
+  return sortDesc(combined);
+};
+
 export const useTradeHistory = (
   signer: Signer | null,
   userAddr: string | null,
-  symbol: string | null
+  symbol: string | null,
+  timeRange: TimeRange = '1m'
 ) => {
-  const cacheKey = userAddr ? `${userAddr}_${symbol || 'all'}_trades` : '';
+  const marketCount = useMarketStore(state => Object.keys(state.markets).length);
+  const cacheKey = userAddr ? `${userAddr}_${symbol || 'all'}_${timeRange}_trades` : '';
   const cachedEntry = cacheKey ? globalTradeCache[cacheKey] : undefined;
 
   const [trades, setTrades] = useState<AsterUserTrade[]>(() => cachedEntry?.data || []);
-  const [isLoading, setIsLoading] = useState(() => !cachedEntry);
+  const [isLoading, setIsLoading] = useState(() => !cachedEntry || cachedEntry.data.length === 0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(() => (cachedEntry ? cachedEntry.hasMore : true));
 
   const isFetchingMoreRef = useRef(false);
+  const oldestQueriedRef = useRef<number>(cachedEntry?.oldestQueried || Date.now());
 
   useEffect(() => {
     if (!signer || !userAddr) {
       setTrades([]);
-      setHasMore(true);
+      setHasMore(false);
       setIsLoading(false);
       return;
     }
@@ -45,32 +98,68 @@ export const useTradeHistory = (
     let isMounted = true;
     const currentCached = globalTradeCache[cacheKey];
 
-    // If cache is fresh, don't show loading and don't spam API
-    if (currentCached && Date.now() - currentCached.timestamp < CACHE_TTL) {
+    // Only skip fetching if we have valid non-empty cached data within TTL
+    if (
+      currentCached &&
+      currentCached.data.length > 0 &&
+      Date.now() - currentCached.timestamp < CACHE_TTL
+    ) {
       setTrades(currentCached.data);
       setHasMore(currentCached.hasMore);
+      oldestQueriedRef.current = currentCached.oldestQueried;
       setIsLoading(false);
       return;
     }
 
-    if (!currentCached) {
-      setIsLoading(true);
-    }
+    setIsLoading(true);
 
     const fetchHistory = async () => {
       try {
-        const data = await getUserTrades(signer, userAddr, symbol || undefined, {
-          limit: PAGE_LIMIT,
-        });
-        if (isMounted) {
-          const sorted = sortDesc(Array.isArray(data) ? data : []);
-          const more = sorted.length > 0;
-          setTrades(sorted);
-          setHasMore(more);
-          globalTradeCache[cacheKey] = { data: sorted, timestamp: Date.now(), hasMore: more };
+        const now = Date.now();
+        const targetSymbols = getTargetSymbols(symbol);
+
+        // Fetch recent trades up to `now` without specifying a 30-day startTime to prevent Aster's 7-day interval error
+        const requests = targetSymbols.map(sym =>
+          getUserTrades(signer, userAddr, sym, {
+            endTime: Math.floor(now),
+            limit: PAGE_LIMIT,
+          })
+        );
+
+        const results = await Promise.allSettled(requests);
+        if (!isMounted) return;
+
+        const collected: AsterUserTrade[] = [];
+        for (const res of results) {
+          if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+            collected.push(...res.value);
+          }
         }
-      } catch (err) {
-        console.error('Failed to load trade history:', err);
+
+        const sorted = sortDesc(
+          collected.filter((item, idx, arr) => {
+            const id = String(item.id);
+            return arr.findIndex(x => String(x.id) === id) === idx;
+          })
+        );
+
+        const oldest = sorted.length > 0 ? sorted[sorted.length - 1].time || now : now;
+        const more = sorted.length >= PAGE_LIMIT;
+
+        setTrades(sorted);
+        setHasMore(more);
+        oldestQueriedRef.current = oldest;
+
+        if (sorted.length > 0) {
+          globalTradeCache[cacheKey] = {
+            data: sorted,
+            timestamp: Date.now(),
+            hasMore: more,
+            oldestQueried: oldest,
+          };
+        }
+      } catch (err: any) {
+        console.error('[Aster Trade History] Failed to load trade history:', err);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -81,51 +170,65 @@ export const useTradeHistory = (
     return () => {
       isMounted = false;
     };
-  }, [signer, userAddr, symbol, cacheKey]);
+  }, [signer, userAddr, symbol, timeRange, cacheKey, marketCount]);
 
   const loadMore = useCallback(async () => {
     if (!signer || !userAddr || isLoadingMore || !hasMore || isFetchingMoreRef.current) return;
-    if (trades.length === 0) return;
 
-    const oldestTime = trades[trades.length - 1]?.time;
-    if (!oldestTime) return;
+    const curEnd = oldestQueriedRef.current - 1;
+    if (curEnd <= 0) {
+      setHasMore(false);
+      if (globalTradeCache[cacheKey]) globalTradeCache[cacheKey].hasMore = false;
+      return;
+    }
 
     isFetchingMoreRef.current = true;
     setIsLoadingMore(true);
 
     try {
-      const nextBatch = await getUserTrades(signer, userAddr, symbol || undefined, {
-        endTime: oldestTime - 1,
-        limit: PAGE_LIMIT,
-      });
+      const targetSymbols = getTargetSymbols(symbol);
+      const requests = targetSymbols.map(sym =>
+        getUserTrades(signer, userAddr, sym, {
+          endTime: Math.floor(curEnd),
+          limit: PAGE_LIMIT,
+        })
+      );
+      const results = await Promise.allSettled(requests);
 
-      const list = Array.isArray(nextBatch) ? nextBatch : [];
-      if (list.length === 0) {
-        setHasMore(false);
-        if (globalTradeCache[cacheKey]) globalTradeCache[cacheKey].hasMore = false;
-      } else {
-        setTrades(prev => {
-          const existingIds = new Set(prev.map(t => String(t.id)));
-          const uniqueNew = list.filter(t => !existingIds.has(String(t.id)));
-          if (uniqueNew.length === 0) {
-            setHasMore(false);
-            if (globalTradeCache[cacheKey]) globalTradeCache[cacheKey].hasMore = false;
-            return prev;
-          }
-          const combined = sortDesc([...prev, ...uniqueNew]);
-          const more = uniqueNew.length > 0;
-          setHasMore(more);
-          globalTradeCache[cacheKey] = { data: combined, timestamp: Date.now(), hasMore: more };
-          return combined;
-        });
+      const nextBatch: AsterUserTrade[] = [];
+      for (const res of results) {
+        if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+          nextBatch.push(...res.value);
+        }
       }
+
+      const sortedNext = sortDesc(nextBatch);
+      const oldest =
+        sortedNext.length > 0 ? sortedNext[sortedNext.length - 1].time || curEnd : curEnd;
+      const more = sortedNext.length >= PAGE_LIMIT;
+
+      oldestQueriedRef.current = oldest;
+
+      setTrades(prev => {
+        const combined = deduplicateTrades(prev, sortedNext);
+        if (globalTradeCache[cacheKey]) {
+          globalTradeCache[cacheKey] = {
+            data: combined,
+            timestamp: Date.now(),
+            hasMore: more,
+            oldestQueried: oldest,
+          };
+        }
+        return combined;
+      });
+      setHasMore(more);
     } catch (err) {
-      console.error('Failed to load more trade history:', err);
+      console.error('[Aster Trade History] Failed to load more trade history:', err);
     } finally {
       setIsLoadingMore(false);
       isFetchingMoreRef.current = false;
     }
-  }, [signer, userAddr, symbol, isLoadingMore, hasMore, trades, cacheKey]);
+  }, [signer, userAddr, symbol, timeRange, isLoadingMore, hasMore, cacheKey]);
 
   const recentTrades = useHistoryStore(state => state.recentTrades);
 

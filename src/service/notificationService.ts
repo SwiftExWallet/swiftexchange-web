@@ -15,7 +15,7 @@ export async function sendCustomNotification(
   deviceToken: string,
   payload: CustomNotificationPayload
 ): Promise<CustomNotificationResponse> {
-  const url = `${API_CONFIG.proxyUrl}/swap/1inch/customNotification`;
+  const url = `${API_CONFIG.serverUrl}/swap/1inch/customNotification`;
   const response = await fetch(url, {
     method: 'POST',
     headers: {

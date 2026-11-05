@@ -1,9 +1,13 @@
 import { RefreshCw } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ROUTES } from '../../constants/routes';
+import { SWIFTEX_SOCIAL_LINKS } from '../../constants/socials';
 import { IS_TESTNET_ENABLED } from '../../modules/walletconnect/config/chains';
 import { useWalletStore } from '../../modules/walletconnect/store/walletConnectStore';
+import router from '../../routes';
 import { API_CONFIG } from '../../service/apiConfig';
+import { useAppAvailabilityStore } from '../../store/appAvailabilityStore';
 
 type ConnectionQuality = 'optimal' | 'good' | 'fair' | 'poor' | 'offline';
 
@@ -26,6 +30,8 @@ export const NetworkMonitor: React.FC = () => {
   const evmWallet = connectedWallets.evm;
   const stellarWallet = connectedWallets.stellar;
   const isAnyConnected = Boolean(evmWallet || stellarWallet);
+
+  const overallStatus = useAppAvailabilityStore(state => state.getOverallStatus());
 
   const [stats, setStats] = useState<PingStats>({
     latency: null,
@@ -202,18 +208,67 @@ export const NetworkMonitor: React.FC = () => {
       ref={dropdownRef}
       className="fixed bottom-0 lg:left-16 left-0 right-0 z-30 h-6 bg-[var(--color-bg-primary)] border-t border-[var(--color-border)]/40 text-[10px] sm:text-[10.5px] font-mono text-[var(--color-text-muted)] select-none px-2 sm:px-3 flex items-center justify-between"
     >
-      {/* Left side: System status & UTC clock & Wallet info */}
+      {/* Left side: System status & Social links & UTC clock & Wallet info */}
       <div className="flex items-center gap-2 sm:gap-2.5 truncate min-w-0">
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className={`w-1.5 h-1.5 rounded-full ${qualityDot}`} />
-          <span className="font-medium text-[var(--color-text-secondary)]">
-            {stats.quality === 'offline' ? 'Offline' : 'Operational'}
+        <button
+          type="button"
+          onClick={() => router.navigate(ROUTES.STATUS)}
+          className="flex items-center gap-1.5 shrink-0 hover:opacity-85 transition-opacity group cursor-pointer bg-transparent border-0 p-0 text-left"
+          title="Click to view System & Regulatory Availability"
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              stats.quality === 'offline'
+                ? 'bg-rose-500 animate-ping'
+                : overallStatus === 'down'
+                  ? 'bg-rose-500 animate-pulse'
+                  : overallStatus === 'maintenance'
+                    ? 'bg-amber-400 animate-pulse'
+                    : overallStatus === 'degraded'
+                      ? 'bg-yellow-400'
+                      : qualityDot
+            }`}
+          />
+          <span className="font-medium text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] transition-colors">
+            {stats.quality === 'offline'
+              ? 'Offline'
+              : overallStatus === 'down'
+                ? 'Outage'
+                : overallStatus === 'maintenance'
+                  ? 'Maintenance'
+                  : overallStatus === 'degraded'
+                    ? 'Degraded'
+                    : 'Operational'}
           </span>
-        </div>
+          <span className="text-[9px] px-1 py-0.2 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hidden sm:inline group-hover:bg-cyan-500/20 transition-colors">
+            Status ↗
+          </span>
+        </button>
 
         <span className="text-[var(--color-border)] opacity-40">/</span>
 
-        <span className="text-[var(--color-text-muted)] shrink-0">{utcTime || '--:--:-- UTC'}</span>
+        {/* SwiftEx Official Social Channels */}
+        <div className="flex items-center gap-1.5 shrink-0" title="SwiftEx Official Channels">
+          {SWIFTEX_SOCIAL_LINKS.map(item => (
+            <a
+              key={item.id}
+              href={item.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`text-[var(--color-text-muted)] ${item.hoverColor} transition-all duration-150 hover:scale-115 flex items-center justify-center p-0.5 cursor-pointer`}
+              title={`SwiftEx Official ${item.name}`}
+              aria-label={item.name}
+            >
+              {item.renderIcon('w-3 h-3')}
+            </a>
+          ))}
+        </div>
+
+        <span className="text-[var(--color-border)] opacity-40 hidden sm:inline">/</span>
+
+        <span className="text-[var(--color-text-muted)] shrink-0 hidden sm:inline">
+          {utcTime || '--:--:-- UTC'}
+        </span>
 
         {/* Connected Wallet info (tablet/desktop) */}
         {isAnyConnected && (
@@ -260,7 +315,7 @@ export const NetworkMonitor: React.FC = () => {
 
       {/* Minimalist Native Diagnostics Popover */}
       {isOpen && (
-        <div className="absolute bottom-7 right-2 sm:right-3 w-64 max-w-[calc(100vw-1rem)] rounded-md bg-[var(--color-bg-secondary)] border border-[var(--color-border)] shadow-xl p-2.5 text-[11px] font-mono animate-in fade-in duration-100 z-50">
+        <div className="absolute bottom-7 right-2 sm:right-3 w-68 max-w-[calc(100vw-1rem)] rounded-md bg-[var(--color-bg-secondary)] border border-[var(--color-border)] shadow-xl p-2.5 text-[11px] font-mono animate-in fade-in duration-100 z-50">
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--color-border)] text-xs font-sans font-semibold text-[var(--color-text-primary)]">
             <span>Network Status</span>
             <button
@@ -314,6 +369,51 @@ export const NetworkMonitor: React.FC = () => {
                 Updated {stats.lastChecked.toLocaleTimeString()}
               </div>
             )}
+
+            {/* Official SwiftEx Social Channels in popover */}
+            <div className="pt-2 border-t border-[var(--color-border)]/40">
+              <div className="flex items-center justify-between text-[10px] text-[var(--color-text-muted)] mb-1.5 font-sans">
+                <span>Official Channels</span>
+                <span className="text-[9px] text-cyan-400/80 font-mono">Community</span>
+              </div>
+              <div className="grid grid-cols-5 gap-1">
+                {SWIFTEX_SOCIAL_LINKS.map(item => (
+                  <a
+                    key={item.id}
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`flex flex-col items-center justify-center py-1.5 px-0.5 rounded bg-[var(--color-bg-primary)]/60 hover:bg-[var(--color-bg-tertiary)] border border-[var(--color-border)]/40 text-[var(--color-text-muted)] ${item.hoverColor} transition-all duration-150 group cursor-pointer`}
+                    title={`Follow SwiftEx on ${item.name}`}
+                  >
+                    {item.renderIcon('w-3.5 h-3.5 transition-transform group-hover:scale-110')}
+                    <span className="text-[8px] mt-1 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)] truncate max-w-full">
+                      {item.id === 'facebook'
+                        ? 'FB'
+                        : item.id === 'linkedin'
+                          ? 'LinkedIn'
+                          : item.id === 'instagram'
+                            ? 'Insta'
+                            : item.id === 'discord'
+                              ? 'Discord'
+                              : '𝕏'}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                router.navigate(ROUTES.STATUS);
+              }}
+              className="mt-2 flex items-center justify-center gap-1.5 w-full py-1.5 px-2 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/25 font-sans text-[11px] font-semibold transition-all cursor-pointer shadow-xs text-center"
+            >
+              <span>View System Status & Availability</span>
+              <span>→</span>
+            </button>
           </div>
         </div>
       )}

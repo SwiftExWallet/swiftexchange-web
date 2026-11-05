@@ -20,9 +20,32 @@ export interface StoredAuthSession {
 const STORAGE_KEY_PREFIX = '_sx_auth_';
 const ACTIVE_ADDRESS_KEY = '_sx_active_auth_addr';
 
-export const AUTH_API_BASE_URL =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BASE_SERVER_URL) ||
-  'https://dev.swiftexchange.io/api/v1';
+export function getAuthApiBaseUrl(): string {
+  try {
+    const isTestnet = localStorage.getItem('network') === 'testnet';
+    if (isTestnet) {
+      return (
+        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BASE_SERVER_URL_TEST) ||
+        'https://hackathon.swiftexchange.io/api/v1'
+      );
+    }
+    return (
+      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BASE_SERVER_URL_PROD) ||
+      'https://beta-v2.swiftexchange.io/api/v1'
+    );
+  } catch {
+    return 'https://beta-v2.swiftexchange.io/api/v1';
+  }
+}
+
+export const AUTH_API_BASE_URL = {
+  toString() {
+    return getAuthApiBaseUrl();
+  },
+  valueOf() {
+    return getAuthApiBaseUrl();
+  },
+};
 
 let currentToken: AuthTokens | null = null;
 
@@ -57,34 +80,35 @@ function removeStoredSession(address?: string): void {
     if (targetAddr) {
       localStorage.removeItem(`${STORAGE_KEY_PREFIX}${targetAddr}`);
     }
-    localStorage.removeItem(ACTIVE_ADDRESS_KEY);
+
+    const currentActive = (localStorage.getItem(ACTIVE_ADDRESS_KEY) || '').toLowerCase();
+    if (currentActive === targetAddr || !targetAddr) {
+      // Look for another remaining session
+      let remainingAddr: string | null = null;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+          const addr = key.slice(STORAGE_KEY_PREFIX.length);
+          if (addr && addr !== targetAddr) {
+            remainingAddr = addr;
+            break;
+          }
+        }
+      }
+      if (remainingAddr) {
+        localStorage.setItem(ACTIVE_ADDRESS_KEY, remainingAddr);
+      } else {
+        localStorage.removeItem(ACTIVE_ADDRESS_KEY);
+      }
+    }
   } catch {
     // ignore
   }
 }
 
 // ============================================================================
-// JWT Helper (Standard Base64URL JWT for client-side / simulated auth)
+// Public Token & Session API
 // ============================================================================
-
-function base64UrlEncode(str: string): string {
-  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function createLocalJWT(address: string, chainId: number, expiresInSec: number): string {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const payload = {
-    sub: address.toLowerCase(),
-    chainId,
-    iat: nowSec,
-    exp: nowSec + expiresInSec,
-    iss: 'swiftexchange.io',
-    jti: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-  };
-
-  return `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(JSON.stringify(payload))}.${base64UrlEncode(`swiftex_${address.toLowerCase()}_${nowSec}`)}`;
-}
 
 // ============================================================================
 // Public Token & Session API
@@ -129,6 +153,29 @@ export function getCurrentTokenInfo(): AuthTokens | null {
   return currentToken;
 }
 
+// ============================================================================
+// JWT session change listeners
+// External code (e.g. apiService) can register here without circular imports.
+// ============================================================================
+
+type JwtSessionListener = (accessToken: string, walletAddress: string) => void;
+const jwtSessionListeners = new Set<JwtSessionListener>();
+
+export function onJwtSessionSet(listener: JwtSessionListener): () => void {
+  jwtSessionListeners.add(listener);
+  return () => jwtSessionListeners.delete(listener);
+}
+
+function fireJwtSessionListeners(accessToken: string, walletAddress: string): void {
+  jwtSessionListeners.forEach(listener => {
+    try {
+      listener(accessToken, walletAddress);
+    } catch (e) {
+      console.error('[auth] Error in JWT session listener:', e);
+    }
+  });
+}
+
 export function setAccessToken(tokens: AuthTokens, address?: string): void {
   currentToken = tokens;
   const userAddr = address || tokens.address || '';
@@ -141,6 +188,8 @@ export function setAccessToken(tokens: AuthTokens, address?: string): void {
       issuedAt: Date.now(),
       chainId: tokens.chainId,
     });
+    // Notify listeners (e.g. wallet-device linking) that a JWT was just set
+    fireJwtSessionListeners(tokens.accessToken, userAddr);
   }
 }
 
@@ -149,18 +198,16 @@ export function clearAccessToken(address?: string): void {
   removeStoredSession(address);
 }
 
-export async function buildSiweMessage(_address: string, _chainId: number): Promise<string> {
-  const API_URL = AUTH_API_BASE_URL;
-  console.log(_address, _chainId, API_URL, 'API_URL');
+export async function buildSiweMessage(_address?: string, _chainId?: number): Promise<string> {
+  void _address;
+  void _chainId;
+  const API_URL = getAuthApiBaseUrl();
   try {
-    console.log('[auth] Requesting signing payload from:', `${API_URL}/signing/request`);
-
     const res = await fetch(`${API_URL}/signing/request`);
     if (!res.ok) {
       throw new Error(`Failed to fetch signing payload, status: ${res.status}`);
     }
     const data = await res.json();
-    console.log('[auth] Received signing payload:', data);
 
     if (data.payload) {
       return data.payload;
@@ -188,18 +235,15 @@ export async function verifySiwe(
   signature: string,
   options?: SiweVerifyOptions
 ): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> {
-  const API_URL = AUTH_API_BASE_URL;
+  const API_URL = getAuthApiBaseUrl();
 
   if (API_URL) {
     try {
-      console.log('[auth] Verifying signature on backend:', `${API_URL}/signing/verify`);
+      // Backend only accepts { payload, signature } — extra fields cause 400
       const payloadBody = {
         payload: message,
         signature: signature,
-        address: options?.address,
-        chainId: options?.chainId,
       };
-      console.log('[auth] Verify request body:', payloadBody);
 
       const res = await fetch(`${API_URL}/signing/verify`, {
         method: 'POST',
@@ -271,122 +315,76 @@ export async function verifySiwe(
           message,
           signature,
         });
+        // Fire listeners immediately after verify succeeds so wallet-device linking triggers
+        // without waiting for a separate setAccessToken() call.
+        if (accessToken) {
+          fireJwtSessionListeners(accessToken, options.address);
+        }
       }
 
       return { accessToken, expiresIn, refreshToken };
     } catch (err: any) {
-      console.error('[auth] Backend verify failed, falling back to local session:', err);
+      console.error('[auth] Backend verify failed:', err);
+      throw err instanceof Error
+        ? err
+        : new Error(String(err?.message || 'Authentication signature verification failed'));
     }
   }
 
-  const expiresIn = 7 * 24 * 60 * 60;
-  const userAddress = options?.address || '0x';
-  const chainId = options?.chainId || 1;
-  const accessToken = createLocalJWT(userAddress, chainId, expiresIn);
-  const refreshToken = `ref_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-
-  if (options?.address) {
-    saveStoredSession({
-      address: options.address,
-      accessToken,
-      refreshToken,
-      expiresAt: Date.now() + expiresIn * 1000,
-      issuedAt: Date.now(),
-      chainId,
-      message,
-      signature,
-    });
-  }
-
-  return { accessToken, expiresIn, refreshToken };
+  throw new Error('Authentication server URL is not configured');
 }
 
-// NOT IN USE: Stellar wallets no longer require verification upon connection
-export async function buildStellarChallenge(
-  publicKey: string
-): Promise<{ xdr: string; networkPassphrase: string }> {
-  const API_URL = AUTH_API_BASE_URL;
-  console.log(
-    '[auth] Requesting Stellar signing payload from:',
-    `${API_URL}/signing/stellar/request?account=${publicKey}`
-  );
+export async function buildStellarPayload(): Promise<string> {
+  const API_URL = getAuthApiBaseUrl();
   try {
-    const res = await fetch(`${API_URL}/signing/stellar/request?account=${publicKey}`);
+    const res = await fetch(`${API_URL}/signing/request`);
     if (!res.ok) {
-      throw new Error(`Failed to fetch Stellar signing payload, status: ${res.status}`);
+      throw new Error(`Failed to fetch signing payload, status: ${res.status}`);
     }
     const data = await res.json();
-    console.log('[auth] Received Stellar signing payload:', data);
 
-    const xdr = data.xdr || data.data?.xdr;
-    const networkPassphrase = data.networkPassphrase || data.data?.networkPassphrase;
+    if (data.payload) return data.payload;
+    if (data.data?.payload) return data.data.payload;
 
-    if (xdr && networkPassphrase) {
-      return { xdr, networkPassphrase };
-    }
-
-    throw new Error('Stellar challenge (xdr or networkPassphrase) not found in backend response');
+    throw new Error('Payload not found in backend response');
   } catch (err) {
-    console.warn(
-      '[auth] Error fetching Stellar signing payload. Falling back to mock challenge for testing.',
-      err
-    );
-    try {
-      const { Keypair, TransactionBuilder, Account, Networks, Operation } =
-        await import('@stellar/stellar-sdk');
-      const serverKeypair = Keypair.random();
-      const account = new Account(serverKeypair.publicKey(), '0');
-      const networkPassphrase = Networks.TESTNET;
-      const now = Math.floor(Date.now() / 1000);
-
-      const tx = new TransactionBuilder(account, {
-        fee: '100',
-        networkPassphrase,
-        timebounds: {
-          minTime: now,
-          maxTime: now + 300,
-        },
-      })
-        .addOperation(
-          Operation.manageData({
-            source: publicKey,
-            name: 'SwiftEx Auth',
-            value: Math.random().toString(36).substring(2, 15),
-          })
-        )
-        .build();
-
-      tx.sign(serverKeypair);
-      return { xdr: tx.toXDR(), networkPassphrase };
-    } catch (mockErr) {
-      console.error('[auth] Mock fallback generation also failed:', mockErr);
-      throw err;
-    }
+    console.error('[auth] Error fetching Stellar signing payload:', err);
+    throw err;
   }
 }
 
-// NOT IN USE: Stellar wallets no longer require verification upon connection
-export async function verifyStellarChallenge(
-  signedXdr: string,
-  networkPassphrase: string,
-  options?: SiweVerifyOptions
+export async function verifyStellarPayload(
+  payload: string,
+  signatureOrSignedXdr: string | { signedXdr?: string; signature?: string },
+  options?: SiweVerifyOptions & { stellarAddress?: string; signedXdr?: string }
 ): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> {
-  const API_URL = AUTH_API_BASE_URL;
+  const API_URL = getAuthApiBaseUrl();
 
   if (API_URL) {
     try {
-      console.log(
-        '[auth] Verifying Stellar signature on backend:',
-        `${API_URL}/signing/stellar/verify`
-      );
-      const payloadBody = {
-        signedXdr,
-        networkPassphrase,
-        address: options?.address,
+      const stellarAddress = options?.stellarAddress || options?.address || '';
+      const payloadBody: Record<string, string> = {
+        chain: 'stellar',
+        payload,
+        stellarAddress,
       };
-      console.log('[auth] Verify request body:', payloadBody);
 
-      const res = await fetch(`${API_URL}/signing/stellar/verify`, {
+      if (typeof signatureOrSignedXdr === 'object' && signatureOrSignedXdr !== null) {
+        if (signatureOrSignedXdr.signedXdr) payloadBody.signedXdr = signatureOrSignedXdr.signedXdr;
+        if (signatureOrSignedXdr.signature) payloadBody.signature = signatureOrSignedXdr.signature;
+      } else if (typeof signatureOrSignedXdr === 'string') {
+        if (signatureOrSignedXdr.startsWith('AAAA')) {
+          payloadBody.signedXdr = signatureOrSignedXdr;
+        } else {
+          payloadBody.signature = signatureOrSignedXdr;
+        }
+      }
+
+      if (options?.signedXdr) {
+        payloadBody.signedXdr = options.signedXdr;
+      }
+
+      const res = await fetch(`${API_URL}/signing/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payloadBody),
@@ -394,18 +392,19 @@ export async function verifyStellarChallenge(
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        console.error('[auth] Backend verify error response:', errData);
-        throw new Error(
+        const err: any = new Error(
           errData.message || errData.error || 'Signature verification failed on server'
         );
+        err.status = res.status;
+        throw err;
       }
 
       const data = await res.json();
-      console.log('[auth] Backend verify success response:', data);
 
-      if (data.valid === false) {
+      if (data.valid === false || data.result?.valid === false) {
         throw new Error(
           data.message ||
+            data.result?.message ||
             data.error ||
             'Signature verification failed on server (invalid signature)'
         );
@@ -415,6 +414,9 @@ export async function verifyStellarChallenge(
         data.accessToken ||
         data.jwt ||
         data.token ||
+        data.result?.jwt ||
+        data.result?.accessToken ||
+        data.result?.token ||
         data.data?.accessToken ||
         data.data?.token ||
         data.data?.jwt;
@@ -425,11 +427,9 @@ export async function verifyStellarChallenge(
         try {
           const payloadPart = accessToken.split('.')[1];
           if (payloadPart) {
-            const decodedPayload = JSON.parse(
-              atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/'))
-            );
-            if (decodedPayload.exp) {
-              parsedExpiresIn = decodedPayload.exp - Math.floor(Date.now() / 1000);
+            const decoded = JSON.parse(atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/')));
+            if (decoded.exp) {
+              parsedExpiresIn = decoded.exp - Math.floor(Date.now() / 1000);
             }
           }
         } catch (e) {
@@ -452,37 +452,24 @@ export async function verifyStellarChallenge(
           expiresAt: Date.now() + expiresIn * 1000,
           issuedAt: Date.now(),
           chainId: options.chainId,
-          message: 'Stellar Challenge',
-          signature: signedXdr,
+          message: payload,
+          signature: payloadBody.signedXdr || payloadBody.signature || '',
         });
+        if (accessToken) {
+          fireJwtSessionListeners(accessToken, options.address);
+        }
       }
 
       return { accessToken, expiresIn, refreshToken };
     } catch (err: any) {
-      console.error('[auth] Backend verify failed, falling back to local session:', err);
+      console.error('[auth] Stellar verify failed:', err);
+      throw err instanceof Error
+        ? err
+        : new Error(String(err?.message || 'Stellar signature verification failed'));
     }
   }
 
-  const expiresIn = 7 * 24 * 60 * 60;
-  const userAddress = options?.address || '0x';
-  const chainId = options?.chainId || 1;
-  const accessToken = createLocalJWT(userAddress, chainId, expiresIn);
-  const refreshToken = `ref_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-
-  if (options?.address) {
-    saveStoredSession({
-      address: options.address,
-      accessToken,
-      refreshToken,
-      expiresAt: Date.now() + expiresIn * 1000,
-      issuedAt: Date.now(),
-      chainId,
-      message: 'Stellar Challenge Local',
-      signature: signedXdr,
-    });
-  }
-
-  return { accessToken, expiresIn, refreshToken };
+  throw new Error('Authentication server URL is not configured');
 }
 
 // Restores active session from localStorage if not expired
@@ -509,14 +496,15 @@ export async function restoreAuthSession(address?: string): Promise<StoredAuthSe
 }
 
 export async function logoutServer(address?: string): Promise<void> {
-  const API_URL = AUTH_API_BASE_URL;
-  if (API_URL && currentToken) {
+  const API_URL = getAuthApiBaseUrl();
+  const tokenToRevoke = currentToken?.accessToken || getStoredSession(address)?.accessToken;
+  if (API_URL && tokenToRevoke) {
     try {
       await fetch(`${API_URL}/auth/logout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${currentToken.accessToken}`,
+          Authorization: `Bearer ${tokenToRevoke}`,
         },
       });
     } catch {

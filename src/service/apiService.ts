@@ -1,3 +1,4 @@
+import { getAccessToken, onJwtSessionSet } from '../modules/walletconnect/services/Siweauthservice';
 import { useWalletStore } from '../modules/walletconnect/store/walletConnectStore';
 import type { ApiResponse } from '../types/evm/apiResponse.type';
 import {
@@ -12,7 +13,230 @@ import {
   setPnlInflight,
   writeLocalCache,
 } from './apiCache';
-import { API_CONFIG } from './apiConfig';
+import {
+  API_CONFIG,
+  getValidDeviceToken,
+  onDeviceTokenChange,
+  setWalletAddressGetter,
+} from './apiConfig';
+
+export interface RegisterWalletPayload {
+  addresses: {
+    multi?: string;
+    xlm?: string;
+    [key: string]: string | undefined;
+  };
+  isPrimary?: boolean;
+}
+
+export interface RegisterWalletResponse {
+  success?: boolean;
+  message?: string;
+  data?: any;
+  [key: string]: any;
+}
+
+export interface ActivateWalletResponse {
+  success?: boolean;
+  message?: string;
+  data?: any;
+  [key: string]: any;
+}
+
+const linkedWalletsCache = new Set<string>();
+const inflightWalletLinks = new Map<string, Promise<boolean>>();
+
+function getLinkCacheKey(token: string, evmAddr?: string, stellarAddr?: string): string {
+  const e = (evmAddr || '').toLowerCase();
+  const s = (stellarAddr || '').toLowerCase();
+  return `_sx_wallet_linked_${token.slice(-16)}_${e}_${s}`;
+}
+
+export function getEffectiveAuthToken(explicitToken?: string): string {
+  if (explicitToken && explicitToken.trim()) return explicitToken.trim();
+  const devToken = getValidDeviceToken();
+  if (devToken && devToken.trim()) return devToken.trim();
+  const jwt = getAccessToken();
+  if (jwt && jwt.trim()) return jwt.trim();
+  const configAuth = API_CONFIG.deviceAuth;
+  if (configAuth && configAuth.trim()) return configAuth.trim();
+  return '';
+}
+
+export function isWalletLinkedToDevice(walletAddress?: string, deviceToken?: string): boolean {
+  if (typeof window === 'undefined') return false;
+  const token = getEffectiveAuthToken(deviceToken);
+  if (!token) return false;
+
+  const stateWallets = useWalletStore?.getState?.()?.connectedWallets;
+  const evm =
+    (walletAddress?.startsWith('0x') ? walletAddress : stateWallets?.evm?.address) ||
+    getConnectedWalletAddress('evm') ||
+    '';
+  const stellar =
+    (walletAddress?.startsWith('G') || walletAddress?.startsWith('C')
+      ? walletAddress
+      : stateWallets?.stellar?.address) ||
+    getConnectedWalletAddress('stellar') ||
+    '';
+
+  if (!evm && !stellar && !walletAddress) return false;
+
+  const key = getLinkCacheKey(token, evm, stellar);
+  return linkedWalletsCache.has(key) || sessionStorage.getItem(key) === 'true';
+}
+
+export async function registerWalletToDevice(
+  walletAddress?: string,
+  deviceToken?: string
+): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  const token = getEffectiveAuthToken(deviceToken);
+  if (!token) {
+    return false;
+  }
+
+  const stateWallets = useWalletStore?.getState?.()?.connectedWallets;
+  let evmAddress =
+    (walletAddress?.startsWith('0x') ? walletAddress : stateWallets?.evm?.address) ||
+    getConnectedWalletAddress('evm') ||
+    '';
+  let stellarAddress =
+    (walletAddress?.startsWith('G') || walletAddress?.startsWith('C')
+      ? walletAddress
+      : stateWallets?.stellar?.address) ||
+    getConnectedWalletAddress('stellar') ||
+    '';
+
+  if (!evmAddress && !stellarAddress && walletAddress) {
+    if (walletAddress.startsWith('0x')) {
+      evmAddress = walletAddress;
+    } else {
+      stellarAddress = walletAddress;
+    }
+  }
+
+  if (!evmAddress && !stellarAddress) {
+    return false;
+  }
+
+  const key = getLinkCacheKey(token, evmAddress, stellarAddress);
+  if (linkedWalletsCache.has(key) || sessionStorage.getItem(key) === 'true') {
+    return true;
+  }
+
+  if (inflightWalletLinks.has(key)) {
+    return inflightWalletLinks.get(key)!;
+  }
+
+  const linkPromise = (async () => {
+    try {
+      const url = `${API_CONFIG.serverUrl}/wallet`;
+      const addresses: { multi?: string; xlm?: string } = {};
+
+      if (evmAddress && evmAddress.startsWith('0x')) {
+        addresses.multi = evmAddress;
+      }
+      if (stellarAddress && (stellarAddress.startsWith('G') || stellarAddress.startsWith('C'))) {
+        addresses.xlm = stellarAddress;
+      }
+
+      if (!addresses.multi && !addresses.xlm) {
+        if (evmAddress) addresses.multi = evmAddress;
+        else if (stellarAddress) addresses.xlm = stellarAddress;
+      }
+
+      const payload: RegisterWalletPayload = {
+        addresses,
+        isPrimary: true,
+      };
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-auth-device-token': token,
+        Authorization: `Bearer ${token}`,
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok || res.status === 409) {
+        linkedWalletsCache.add(key);
+        try {
+          sessionStorage.setItem(key, 'true');
+        } catch (e) {
+          void e;
+        }
+        return true;
+      }
+
+      console.warn(
+        `[apiService] Wallet registration returned status ${res.status}: ${res.statusText}`
+      );
+      return false;
+    } catch (err) {
+      console.warn('[apiService] Failed to register wallet to device token:', err);
+      return false;
+    } finally {
+      inflightWalletLinks.delete(key);
+    }
+  })();
+
+  inflightWalletLinks.set(key, linkPromise);
+  return linkPromise;
+}
+
+export async function ensureWalletLinkedToDevice(
+  walletAddress?: string,
+  deviceToken?: string
+): Promise<boolean> {
+  if (isWalletLinkedToDevice(walletAddress, deviceToken)) {
+    return true;
+  }
+  return registerWalletToDevice(walletAddress, deviceToken);
+}
+
+if (typeof window !== 'undefined') {
+  onDeviceTokenChange(token => {
+    const stateWallets = useWalletStore?.getState?.()?.connectedWallets;
+    const address =
+      stateWallets?.evm?.address || stateWallets?.stellar?.address || getConnectedWalletAddress();
+    if (address && token) {
+      ensureWalletLinkedToDevice(address, token).catch(() => {});
+    }
+  });
+
+  onJwtSessionSet((accessToken, walletAddress) => {
+    if (!walletAddress) return;
+    const token = getEffectiveAuthToken(accessToken);
+    if (!token) return;
+    ensureWalletLinkedToDevice(walletAddress, token).catch(() => {});
+  });
+
+  try {
+    useWalletStore.subscribe(
+      state => {
+        const evmAddr = state.connectedWallets.evm?.address;
+        const stellarAddr = state.connectedWallets.stellar?.address;
+        return `${evmAddr || ''}:${stellarAddr || ''}`;
+      },
+      combo => {
+        const token = getEffectiveAuthToken();
+        if (!token) return;
+        const [evm, stellar] = combo.split(':');
+        if (evm || stellar) {
+          ensureWalletLinkedToDevice(evm || stellar, token).catch(() => {});
+        }
+      }
+    );
+  } catch {
+    void 0;
+  }
+}
 
 async function fetchWithRetry(
   url: string,
@@ -24,7 +248,7 @@ async function fetchWithRetry(
     try {
       const res = await fetch(url, options);
       if (res.ok) return res;
-      if (res.status >= 400 && res.status < 500) return res; // never retry 4xx
+      if (res.status >= 400 && res.status < 500) return res;
       if (i === retries - 1) return res;
     } catch (err) {
       if (i === retries - 1) throw err;
@@ -43,18 +267,200 @@ async function parseError(res: Response): Promise<string> {
     if (Array.isArray(raw)) return raw.join('. ');
     if (typeof raw === 'string') return raw;
   } catch {
-    /* ignore */
+    void 0;
   }
   return res.statusText;
 }
 
-function makeHeaders(extra?: Record<string, string>): Record<string, string> {
-  const token = API_CONFIG.deviceAuth;
+export function resolveConnectedWalletAddress(chainType?: 'evm' | 'stellar' | string): string {
+  try {
+    const state = useWalletStore.getState();
+    const evmAddr = state?.connectedWallets?.evm?.address;
+    const stellarAddr = state?.connectedWallets?.stellar?.address;
+
+    let storedEvm = '';
+    let storedStellar = '';
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('wallet_sessions');
+      if (stored) {
+        try {
+          const data = JSON.parse(stored);
+          storedEvm = data.evm?.evmAddress || data.evm?.address || '';
+          storedStellar = data.stellar?.stellarAddress || data.stellar?.address || '';
+        } catch {
+          void 0;
+        }
+      }
+    }
+
+    const effectiveEvm = evmAddr || storedEvm;
+    const effectiveStellar = stellarAddr || storedStellar;
+
+    if (chainType) {
+      const raw = chainType.trim();
+      if (raw.startsWith('G') || raw.startsWith('C')) {
+        return raw;
+      }
+      if (raw.startsWith('0x')) {
+        return raw;
+      }
+
+      const lower = raw.toLowerCase();
+      if (
+        lower === 'stellar' ||
+        lower === 'soroban' ||
+        lower.includes('/stellar') ||
+        lower.includes('/soroswap') ||
+        lower.includes('stellar') ||
+        lower.includes('soroban')
+      ) {
+        return effectiveStellar || '';
+      }
+      if (
+        lower === 'evm' ||
+        lower === 'eth' ||
+        lower.includes('/eth') ||
+        lower.includes('/evm') ||
+        lower.includes('eth') ||
+        lower.includes('evm')
+      ) {
+        return effectiveEvm || '';
+      }
+    }
+
+    if (state?.authenticatedChain === 'stellar') {
+      return effectiveStellar || effectiveEvm || '';
+    }
+    if (state?.authenticatedChain === 'evm') {
+      return effectiveEvm || effectiveStellar || '';
+    }
+
+    return effectiveEvm || effectiveStellar || '';
+  } catch {
+    return '';
+  }
+}
+
+setWalletAddressGetter(resolveConnectedWalletAddress);
+
+export function getConnectedWalletAddress(chainType?: 'evm' | 'stellar' | string): string {
+  return resolveConnectedWalletAddress(chainType);
+}
+
+export function inferChainType(
+  chainTypeOrEndpoint?: string,
+  extra?: Record<string, string>,
+  body?: unknown
+): 'evm' | 'stellar' | undefined {
+  if (extra?.['x-wallet-chain']) {
+    const c = extra['x-wallet-chain'].toLowerCase();
+    if (c === 'stellar' || c === 'soroban') return 'stellar';
+    if (c === 'evm' || c === 'eth') return 'evm';
+  }
+
+  if (extra?.['x-wallet-address']) {
+    const addr = extra['x-wallet-address'];
+    if (addr.startsWith('G') || addr.startsWith('C')) return 'stellar';
+    if (addr.startsWith('0x')) return 'evm';
+  }
+
+  if (chainTypeOrEndpoint) {
+    const lower = chainTypeOrEndpoint.toLowerCase();
+    if (
+      lower === 'stellar' ||
+      lower === 'soroban' ||
+      lower.includes('/stellar') ||
+      lower.includes('/soroswap') ||
+      lower.includes('stellar') ||
+      lower.includes('soroban')
+    ) {
+      return 'stellar';
+    }
+    if (
+      lower === 'evm' ||
+      lower === 'eth' ||
+      lower.includes('/eth') ||
+      lower.includes('/evm') ||
+      lower.includes('eth') ||
+      lower.includes('evm')
+    ) {
+      return 'evm';
+    }
+  }
+
+  if (body && typeof body === 'object') {
+    const b = body as Record<string, any>;
+    const candidateAddr =
+      b.address ||
+      b.walletAddress ||
+      b.fromAddress ||
+      b.from ||
+      b.sender ||
+      b.userAddress ||
+      b.recipient ||
+      b.toAddress;
+
+    if (typeof candidateAddr === 'string') {
+      if (candidateAddr.startsWith('G') || candidateAddr.startsWith('C')) {
+        return 'stellar';
+      }
+      if (candidateAddr.startsWith('0x')) {
+        return 'evm';
+      }
+    }
+
+    const candidateChain =
+      b.chainId ||
+      b.fromChainId ||
+      b.toChainId ||
+      b.sourceChain ||
+      b.destChain ||
+      b.fromChain ||
+      b.toChain ||
+      b.chain;
+
+    if (typeof candidateChain === 'string') {
+      const lower = candidateChain.toLowerCase();
+      if (lower.includes('stellar') || lower.includes('soroban')) {
+        return 'stellar';
+      }
+      if (
+        lower.includes('eth') ||
+        lower.includes('evm') ||
+        lower.includes('polygon') ||
+        lower.includes('arbitrum') ||
+        lower.includes('base') ||
+        lower.includes('optimism') ||
+        lower.includes('bnb')
+      ) {
+        return 'evm';
+      }
+    }
+  }
+
+  return undefined;
+}
+
+export function makeHeaders(
+  extra?: Record<string, string>,
+  chainTypeOrEndpoint?: 'evm' | 'stellar' | string,
+  body?: unknown
+): Record<string, string> {
+  const token = getEffectiveAuthToken();
+  const inferredChain = inferChainType(chainTypeOrEndpoint, extra, body);
+  const walletAddress =
+    extra?.['x-wallet-address'] || getConnectedWalletAddress(inferredChain || chainTypeOrEndpoint);
+
+  const cleanExtra = { ...extra };
+  delete cleanExtra['x-wallet-chain'];
+
   return {
     'Content-Type': 'application/json',
+    'x-auth-wallet-token': token,
     'x-auth-device-token': token,
+    ...(walletAddress ? { 'x-wallet-address': walletAddress } : {}),
     Authorization: token ? `Bearer ${token}` : '',
-    ...extra,
+    ...cleanExtra,
   };
 }
 
@@ -68,20 +474,33 @@ async function parseBody<T>(res: Response): Promise<T> {
   }
 }
 
-// Public API
 export async function fetchApiResponseFromProxy<T>(
   endpoint: string,
   method: 'GET' | 'POST' | 'PUT' = 'POST',
   body?: unknown,
   retries?: number,
   keepalive: boolean = false,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  chainTypeOverride?: 'evm' | 'stellar'
 ): Promise<ApiResponse<T>> {
+  const targetChain = chainTypeOverride || inferChainType(endpoint, undefined, body);
+  if (
+    !endpoint.startsWith('/wallet') &&
+    !endpoint.startsWith('/device') &&
+    !endpoint.startsWith('/app-available')
+  ) {
+    const token = API_CONFIG.deviceAuth;
+    const walletAddress = getConnectedWalletAddress(targetChain || endpoint);
+    if (token && walletAddress && !isWalletLinkedToDevice(walletAddress, token)) {
+      await ensureWalletLinkedToDevice(walletAddress, token);
+    }
+  }
+
   const res = await fetchWithRetry(
-    `${API_CONFIG.proxyUrl}${endpoint}`,
+    `${API_CONFIG.serverUrl}${endpoint}`,
     {
       method,
-      headers: makeHeaders(),
+      headers: makeHeaders(undefined, targetChain || endpoint, body),
       body: body ? JSON.stringify(body) : undefined,
       keepalive,
       signal,
@@ -96,15 +515,88 @@ export async function fetchApiResponseFromServer<T>(
   endpoint: string,
   method: 'GET' | 'POST' | 'PATCH' = 'POST',
   body?: unknown,
-  retries?: number
+  retries?: number,
+  chainTypeOverride?: 'evm' | 'stellar'
 ): Promise<ApiResponse<T>> {
+  const targetChain = chainTypeOverride || inferChainType(endpoint, undefined, body);
+  if (
+    !endpoint.startsWith('/wallet') &&
+    !endpoint.startsWith('/device') &&
+    !endpoint.startsWith('/app-available')
+  ) {
+    const token = API_CONFIG.deviceAuth;
+    const walletAddress = getConnectedWalletAddress(targetChain || endpoint);
+    if (token && walletAddress && !isWalletLinkedToDevice(walletAddress, token)) {
+      await ensureWalletLinkedToDevice(walletAddress, token);
+    }
+  }
+
   const res = await fetchWithRetry(
     `${API_CONFIG.serverUrl}${endpoint}`,
-    { method, headers: makeHeaders(), body: body ? JSON.stringify(body) : undefined },
+    {
+      method,
+      headers: makeHeaders(undefined, targetChain || endpoint, body),
+      body: body ? JSON.stringify(body) : undefined,
+    },
     retries
   );
   if (!res.ok) throw new Error(`API error: ${await parseError(res)}`);
   return { data: await parseBody<T>(res) };
+}
+
+export async function fetchAppAvailability(): Promise<
+  import('../types/availability').AppAvailabilityResponse
+> {
+  const url = `${API_CONFIG.serverUrl}/app-available`;
+  const res = await fetchWithRetry(
+    url,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+    2
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch app availability: ${res.statusText}`);
+  }
+  return parseBody<import('../types/availability').AppAvailabilityResponse>(res);
+}
+
+export async function activateWallet(
+  walletAddress?: string,
+  deviceToken?: string
+): Promise<ActivateWalletResponse> {
+  const token = deviceToken || getValidDeviceToken() || API_CONFIG.deviceAuth;
+  const address =
+    walletAddress || getConnectedWalletAddress('stellar') || getConnectedWalletAddress();
+
+  if (!address) {
+    throw new Error('Wallet address is required to activate wallet');
+  }
+
+  const url = `${API_CONFIG.serverUrl}/wallet/${encodeURIComponent(address)}/activate-wallet`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['x-auth-device-token'] = token;
+    headers['x-auth-wallet-token'] = token;
+  }
+
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers,
+  });
+
+  if (!res.ok) {
+    const errorText = await parseError(res);
+    throw new Error(errorText || `Wallet activation failed with status ${res.status}`);
+  }
+
+  return parseBody<ActivateWalletResponse>(res);
 }
 
 // Wallet Gas Info

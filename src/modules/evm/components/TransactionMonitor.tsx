@@ -7,38 +7,9 @@ import {
   updateLocalTransactionStatus,
 } from '../service/localTransactionService';
 import { CHAINS } from '../utils/assetmanagement/chains';
+import { checkTxStatus } from '../utils/checkTxStatus';
 import { getEVMNetworkConfig } from '../utils/evmUtils';
 import { rpcManager } from '../utils/rpcProvider';
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const PUBLIC_TX_CHEKER: Record<string, string> = {
-  ETH: `https://eth.blockscout.com/api/v2/transactions/`,
-  BSC: `https://bsc.blockscout.com/api/v2/transactions/`,
-  BNB: `https://bsc.blockscout.com/api/v2/transactions/`,
-  POL: `https://polygon.blockscout.com/api/v2/transactions/`,
-  ARB: `https://arbitrum.blockscout.com/api/v2/transactions/`,
-  OPT: `https://optimism.blockscout.com/api/v2/transactions/`,
-  AVAX: `https://avalanche.blockscout.com/api/v2/transactions/`,
-  BASE: `https://base.blockscout.com/api/v2/transactions/`,
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const checkTxStatus = async (txHash: string, chain: string) => {
-  const baseUrl = PUBLIC_TX_CHEKER[chain];
-  if (!baseUrl) return null;
-  try {
-    const res = await fetch(`${baseUrl}${txHash}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.status === 'ok' || data.result === 'success') {
-      return { status: true, message: data.result, chain, reqStatus: data.status };
-    } else {
-      return { status: false, message: data.result, chain, reqStatus: data.status };
-    }
-  } catch {
-    return null;
-  }
-};
 
 export const TransactionMonitor: React.FC = () => {
   const { showToast } = useNotificationStore();
@@ -91,7 +62,7 @@ export const TransactionMonitor: React.FC = () => {
 
         if (chainSymbol) {
           const apiResult = await checkTxStatus(tx.hash, chainSymbol);
-          if (apiResult) {
+          if (apiResult && apiResult.isConfirmed) {
             isConfirmed = true;
             isSuccess = apiResult.status;
           }
@@ -99,20 +70,11 @@ export const TransactionMonitor: React.FC = () => {
 
         if (!isConfirmed) {
           const config = getEVMNetworkConfig(tx.chainId);
-          const receipt = await rpcManager.fetchWithFallback(
-            tx.chainId,
-            config.rpcUrls,
-            async provider => {
-              let attempts = 0;
-              while (attempts < 60) {
-                const r = await provider.getTransactionReceipt(tx.hash);
-                if (r) return r;
-                await new Promise(res => setTimeout(res, 5000));
-                attempts++;
-              }
-              return null;
-            }
-          );
+          const receipt = await rpcManager
+            .fetchWithFallback(tx.chainId, config.rpcUrls, async provider => {
+              return await provider.getTransactionReceipt(tx.hash);
+            })
+            .catch(() => null);
 
           if (receipt) {
             isConfirmed = true;

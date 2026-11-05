@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
 import { getBrackets } from '../adapters/aster/api/funding';
 import { AsterClient } from '../adapters/aster/client';
 import { HyperliquidClient } from '../adapters/hyperliquid';
@@ -7,19 +8,43 @@ import { useExchangeManager } from '../core/ExchangeManager';
 import type { PerpExchange } from '../core/interfaces/exchange';
 import { useLeverageStore } from '../core/stores/leverageStore';
 import { marketStore, useMarketStore } from '../core/stores/marketStore';
+import { resetPerpStores } from '../core/stores/resetPerpStores';
 
 export function useDynamicExchange() {
   const currentExchange = useExchangeManager(state => state.currentExchange);
+  const currentNetwork = useExchangeManager(state => state.currentNetwork);
+  const setNetwork = useExchangeManager(state => state.setNetwork);
+  const globalAppNetwork = useWalletStore(state => state.network);
   const clientRef = useRef<PerpExchange | null>(null);
+  const isFirstRender = useRef(true);
   const [activeClient, setActiveClient] = useState<PerpExchange | null>(null);
 
-  // Re-initialize the exchange client whenever the selected exchange changes
+  // Enforce perps network to strictly mirror global application network
+  useEffect(() => {
+    if (globalAppNetwork && currentNetwork !== globalAppNetwork) {
+      setNetwork(globalAppNetwork);
+    }
+  }, [globalAppNetwork, currentNetwork, setNetwork]);
+
+  // Re-initialize the exchange client whenever the selected exchange or network changes
   useEffect(() => {
     // Cancellation flag guards against race conditions when the exchange changes
     // before a pending async getMarkets() call completes.
     let cancelled = false;
 
     const init = async () => {
+      const exchangeLabel = currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3';
+      const networkLabel = currentNetwork === 'testnet' ? 'Testnet' : 'Mainnet';
+
+      if (!isFirstRender.current) {
+        useExchangeManager
+          .getState()
+          .setIsSwitching(true, `Connecting to ${exchangeLabel} (${networkLabel})...`);
+      }
+
+      // 1. Immediately wipe store states to prevent stale cross-exchange data contamination
+      resetPerpStores();
+
       if (clientRef.current) {
         await clientRef.current.disconnect();
         clientRef.current = null;
@@ -27,17 +52,23 @@ export function useDynamicExchange() {
       }
 
       const client: PerpExchange =
-        currentExchange === 'aster' ? new AsterClient() : new HyperliquidClient();
+        currentExchange === 'aster'
+          ? new AsterClient(currentNetwork)
+          : new HyperliquidClient(currentNetwork);
 
       clientRef.current = client;
       await client.connect();
 
       if (cancelled) {
+        useExchangeManager.getState().setIsSwitching(false);
         return;
       }
 
       const markets = await client.getMarkets();
-      if (cancelled) return;
+      if (cancelled) {
+        useExchangeManager.getState().setIsSwitching(false);
+        return;
+      }
 
       marketStore.setMarkets(markets);
 
@@ -59,9 +90,33 @@ export function useDynamicExchange() {
             useLeverageStore.getState().setAllBrackets(bracketsMap);
           })
           .catch(err => console.error('[useDynamicExchange] getBrackets failed:', err));
+      } else {
+        // Hyperliquid risk brackets derived from market metadata
+        const bracketsMap: Record<string, any[]> = {};
+        markets.forEach(m => {
+          const maxLev = m.maxLeverage || 20;
+          const mmr = Number((1 / (maxLev * 2)).toFixed(4));
+          const bracketList = [
+            {
+              bracket: 1,
+              initialLeverage: maxLev,
+              notionalCap: 1000000,
+              notionalFloor: 0,
+              maintMarginRatio: mmr,
+              cum: 0,
+            },
+          ];
+          bracketsMap[m.symbol] = bracketList;
+          bracketsMap[m.symbol.replace('-', '')] = bracketList;
+          bracketsMap[m.baseAsset] = bracketList;
+        });
+        useLeverageStore.getState().setAllBrackets(bracketsMap);
       }
 
-      if (markets.length === 0) return;
+      if (markets.length === 0) {
+        useExchangeManager.getState().setIsSwitching(false);
+        return;
+      }
 
       // Determine best symbol after exchange switch:
       // 1. Keep current if it exists on the new exchange.
@@ -84,20 +139,33 @@ export function useDynamicExchange() {
 
       if (!cancelled) {
         setActiveClient(client);
+        setTimeout(() => {
+          if (!cancelled) {
+            useExchangeManager.getState().setIsSwitching(false);
+          }
+        }, 150);
       }
     };
 
-    init().catch(err => {
-      if (!cancelled) console.error('[useDynamicExchange] init failed:', err);
-    });
+    init()
+      .catch(err => {
+        if (!cancelled) {
+          console.error('[useDynamicExchange] init failed:', err);
+          useExchangeManager.getState().setIsSwitching(false);
+        }
+      })
+      .finally(() => {
+        isFirstRender.current = false;
+      });
 
     return () => {
       cancelled = true;
       clientRef.current?.disconnect();
       clientRef.current = null;
       setActiveClient(null);
+      useExchangeManager.getState().setIsSwitching(false);
     };
-  }, [currentExchange]);
+  }, [currentExchange, currentNetwork]);
 
   // Re-subscribe to data feeds when the selected symbol changes
   useEffect(() => {
@@ -107,6 +175,10 @@ export function useDynamicExchange() {
       const symbol = state.selectedSymbol;
       const client = clientRef.current;
       if (!client || symbol === prevSymbol) return;
+
+      if (prevSymbol) {
+        unsubscribeFromSymbol(client, prevSymbol);
+      }
 
       subscribeToSymbol(client, symbol);
       prevSymbol = symbol;
@@ -121,4 +193,9 @@ export function useDynamicExchange() {
 function subscribeToSymbol(client: PerpExchange, symbol: string): void {
   client.subscribeOrderBook(symbol);
   client.subscribeTicker(symbol);
+}
+
+function unsubscribeFromSymbol(client: PerpExchange, symbol: string): void {
+  client.unsubscribeOrderBook?.(symbol);
+  client.unsubscribeTicker?.(symbol);
 }

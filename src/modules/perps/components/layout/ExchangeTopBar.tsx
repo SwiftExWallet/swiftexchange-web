@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
 
-import { getRealTimeFundingRate } from '../../adapters/aster/api/funding';
-//import { exchangeManager, useExchangeManager, type ExchangeName } from '../../core/ExchangeManager';
+import { getAsterOpenInterest, getRealTimeFundingRate } from '../../adapters/aster/api/funding';
 import { useExchangeManager } from '../../core/ExchangeManager';
+import { useLeverageStore } from '../../core/stores/leverageStore';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useOrderbookStore } from '../../core/stores/orderbookStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { CoinIcon } from '../ui/CoinIcon';
+// import { ExchangeNetworkSelector } from './ExchangeNetworkSelector';
 import { MarketSelectorModal } from './MarketSelectorModal';
 
-function formatLargeNumber(num: number): string {
-  if (!isFinite(num) || isNaN(num)) return '0.00';
-  if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
-  if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
-  if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
-  return num.toFixed(2);
+function formatExactNumber(num: number): string {
+  if (!isFinite(num) || isNaN(num) || num <= 0) return '0.00';
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatPrice(px: number): string {
@@ -28,9 +29,25 @@ export const ExchangeTopBar: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const symbol = useMarketStore(state => state.selectedSymbol);
+  const market = useMarketStore(state => state.markets[symbol]);
+  const bracketsBySymbol = useLeverageStore(state => state.bracketsBySymbol);
+  const maxLeverage = React.useMemo(() => {
+    const brackets = bracketsBySymbol[symbol] || bracketsBySymbol[symbol.replace('-', '')];
+    if (brackets && brackets.length > 0) {
+      return Math.max(...brackets.map((b: any) => b.initialLeverage || 0));
+    }
+    return market?.maxLeverage && market.maxLeverage > 0 ? market.maxLeverage : 100;
+  }, [bracketsBySymbol, symbol, market]);
+
   const assetCtx = useTickerStore(state => state.assetCtxByMarket[symbol]);
   const currentExchange = useExchangeManager(state => state.currentExchange);
   const setExchange = useExchangeManager(state => state.setExchange);
+
+  React.useEffect(() => {
+    if (currentExchange !== 'aster') {
+      setExchange('aster');
+    }
+  }, [currentExchange, setExchange]);
 
   // Mark price from backend ticker; fall back to orderbook mid-price if unavailable
   const markPxFromTicker = parseFloat(assetCtx?.markPx || '0');
@@ -50,20 +67,39 @@ export const ExchangeTopBar: React.FC = () => {
   const [fundingIntervalHours, setFundingIntervalHours] = useState<number>(8);
   const [nextFundingTime, setNextFundingTime] = useState<number | null>(null);
   const [countdown, setCountdown] = useState<string>('--:--:--');
+  const [liveOpenInterest, setLiveOpenInterest] = useState<number>(0);
 
   const fetchFundingInfo = React.useCallback(async () => {
     try {
       if (currentExchange !== 'aster') return;
 
       const asterSymbol = symbol.replace('-', '');
-      const info = await getRealTimeFundingRate(asterSymbol);
-      if (info) {
-        setLiveFundingRate(parseFloat(info.lastFundingRate));
-        setFundingIntervalHours(info.fundingIntervalHours);
-        setNextFundingTime(info.nextFundingTime);
+      const [info, oiResult] = await Promise.allSettled([
+        getRealTimeFundingRate(asterSymbol),
+        getAsterOpenInterest(asterSymbol),
+      ]);
+
+      if (info.status === 'fulfilled' && info.value) {
+        setLiveFundingRate(parseFloat(info.value.lastFundingRate));
+        setFundingIntervalHours(info.value.fundingIntervalHours);
+        setNextFundingTime(info.value.nextFundingTime);
+      }
+
+      if (oiResult.status === 'fulfilled') {
+        const oiVal = parseFloat(oiResult.value);
+        if (!isNaN(oiVal) && oiVal > 0) {
+          setLiveOpenInterest(oiVal);
+          const currentCtx = useTickerStore.getState().getAssetCtx(symbol);
+          if (currentCtx) {
+            useTickerStore.getState().setAssetCtx(symbol, {
+              ...currentCtx,
+              openInterest: String(oiVal),
+            });
+          }
+        }
       }
     } catch (e) {
-      console.error('Failed to fetch funding info', e);
+      console.error('Failed to fetch funding/openInterest info', e);
     }
   }, [symbol, currentExchange]);
 
@@ -108,48 +144,52 @@ export const ExchangeTopBar: React.FC = () => {
 
   const isFundingPositive = liveFundingRate >= 0;
 
+  // Open Interest in quote asset (USDT) value, exactly like Aster's "Open Interest (USDT)"
+  const rawOiBase = liveOpenInterest > 0 ? liveOpenInterest : openInterest;
+  const oiQuoteValue = rawOiBase > 0 && markPrice > 0 ? rawOiBase * markPrice : 0;
+
   return (
     <>
-      <div className="flex items-center px-4 h-[50px] border-b border-color bg-secondary shrink-0 w-full relative overflow-hidden min-w-0 max-w-[760px]">
+      <div className="flex items-center pl-2 pr-1 h-[48px] border-b border-color bg-secondary shrink-0 w-full relative min-w-0">
         <div className="flex items-center shrink-0 z-10 bg-secondary">
           <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-3 hover:bg-hover px-2 py-1.5 rounded-lg transition-colors -ml-2"
+            className="flex items-center gap-2 hover:bg-hover px-1.5 py-1 rounded-lg transition-colors cursor-pointer"
           >
             <div className="relative shrink-0 flex flex-col items-center">
-              <CoinIcon symbol={symbol} size={32} />
-              <span className="absolute -bottom-2.5 text-yellow-950 bg-gradient-to-r from-yellow-400 to-amber-500 text-[9px] leading-tight px-1 py-[1px] rounded-[3px] font-bold uppercase tracking-widest shadow-sm z-10 pointer-events-none border border-yellow-200/50">
+              <CoinIcon symbol={symbol} size={28} />
+              {/* <span className="absolute -bottom-1.5 text-warning bg-warning/15 border border-warning/30 text-[7.5px] leading-tight px-1 py-[0.5px] rounded font-bold uppercase tracking-wider shadow-xs z-10 pointer-events-none">
                 BETA
-              </span>
+              </span> */}
             </div>
 
-            <div className="flex flex-col items-start gap-1.5">
+            <div className="flex flex-col items-start gap-0.5">
               <div className="flex items-center gap-1.5 leading-none">
-                <span className="text-primary font-bold text-[14px]">
+                <span className="text-primary font-bold text-[13px] tracking-tight">
                   {symbol.replace('-', '')}
                 </span>
-                <span className="text-[#a0a5ad] text-[9px] bg-tertiary border border-color px-1 py-0.5 rounded font-medium">
-                  Perp
+                <span className="text-muted text-[9.5px] font-mono-tabular bg-tertiary border border-color px-1.5 py-0.5 rounded font-medium">
+                  {maxLeverage}x
                 </span>
               </div>
-              <div className="flex items-center gap-2 leading-none">
+              <div className="flex items-center gap-1.5 leading-none font-mono-tabular">
                 <span
-                  className={`text-[12px] font-semibold ${isChangePositive ? 'text-success' : 'text-danger'}`}
+                  className={`text-[11px] font-semibold ${isChangePositive ? 'text-success' : 'text-danger'}`}
                 >
                   {formatPrice(markPrice)}
                 </span>
                 <span
-                  className={`text-[10px] font-medium ${isChangePositive ? 'text-success' : 'text-danger'}`}
+                  className={`text-[9.5px] font-medium ${isChangePositive ? 'text-success' : 'text-danger'}`}
                 >
                   {changePctDisplay}
                 </span>
               </div>
             </div>
             <svg
-              className="text-muted ml-1"
+              className="text-muted ml-0.5"
               xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -161,15 +201,14 @@ export const ExchangeTopBar: React.FC = () => {
             </svg>
           </button>
 
-          <div className="h-8 w-px bg-border-color mx-4" />
+          <div className="h-5 w-px bg-border-color mx-2" />
         </div>
 
-        <div className="flex items-center gap-8 overflow-x-auto [&::-webkit-scrollbar]:hidden whitespace-nowrap flex-1 min-w-0 h-full px-2 mask-edges">
-          <div className="flex flex-col gap-1">
-            <span className="text-muted text-[10px] uppercase tracking-wider font-medium">
-              Mark Price
-            </span>
-            <span className="text-primary text-[13px] font-semibold">
+        <div className="flex items-center gap-5 sm:gap-6 md:gap-7 overflow-x-auto [&::-webkit-scrollbar]:hidden whitespace-nowrap flex-1 min-w-0 h-full px-1 mask-edges">
+          {/* Mark Price */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted text-[10px] tracking-tight font-medium">Mark</span>
+            <span className="text-primary text-[12px] font-semibold font-mono-tabular">
               {formatPrice(markPrice)}
               {markPxFromTicker === 0 && midPrice > 0 && (
                 <span className="text-muted text-[9px] ml-1 font-normal">(mid)</span>
@@ -177,71 +216,67 @@ export const ExchangeTopBar: React.FC = () => {
             </span>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <span className="text-muted text-[10px] uppercase tracking-wider font-medium">
-              Index Price
-            </span>
-            <span className="text-secondary text-[13px] font-semibold">
+          {/* Index Price */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted text-[10px] tracking-tight font-medium">Index</span>
+            <span className="text-secondary text-[12px] font-semibold font-mono-tabular">
               {formatPrice(oraclePx > 0 ? oraclePx : markPrice)}
             </span>
           </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-muted text-[10px] uppercase tracking-wider font-medium">
-              24h Change
-            </span>
+
+          {/* 24h Change */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted text-[10px] tracking-tight font-medium">24h Change</span>
             <span
-              className={`text-[13px] font-semibold ${isChangePositive ? 'text-success' : 'text-danger'}`}
+              className={`text-[12px] font-semibold font-mono-tabular ${isChangePositive ? 'text-success' : 'text-danger'}`}
             >
               {changePctDisplay}
             </span>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <span className="text-muted text-[10px] uppercase tracking-wider font-medium">
-              24h Volume (USDT)
-            </span>
-            <span className="text-primary text-[13px] font-semibold">
-              {formatLargeNumber(dayNtlVlm)}
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <span className="text-muted text-[10px] uppercase tracking-wider font-medium">
-              Open Interest
-            </span>
-            <span className="text-primary text-[13px] font-semibold">
-              {formatLargeNumber(openInterest)}
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-1 pr-4">
-            <span className="text-muted text-[10px] uppercase tracking-wider font-medium">
+          {/* Funding(8h) / Countdown */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted text-[10px] tracking-tight font-medium">
               Funding({fundingIntervalHours}h)/Countdown
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 font-mono-tabular">
               <span
-                className={`text-[13px] font-semibold ${isFundingPositive ? 'text-success' : 'text-danger'}`}
+                className={`text-[12px] font-semibold ${isFundingPositive ? 'text-success' : 'text-danger'}`}
               >
                 {!isNaN(liveFundingRate) && isFinite(liveFundingRate)
                   ? (liveFundingRate * 100).toFixed(4) + '%'
                   : '--'}
               </span>
-              <span className="text-muted text-[13px] font-medium">/ {countdown}</span>
+              <span className="text-muted text-[12px] font-medium">/ {countdown}</span>
             </div>
           </div>
-        </div>
-        <div className="flex items-center pl-4 shrink-0 z-10 bg-secondary h-full ml-2">
-          <div className="flex items-center gap-4 pl-4 border-l border-color h-full">
-            <select
-              value={currentExchange}
-              onChange={e => setExchange(e.target.value as 'aster' | 'hyperliquid')}
-              className="bg-tertiary text-primary text-[11px] font-medium border border-color rounded-md px-3 py-1.5 outline-none cursor-pointer hover:border-brand/50 transition-colors"
-            >
-              <option value="aster">Aster V3</option>
-              <option value="hyperliquid">Hyperliquid</option>
-            </select>
+
+          {/* 24h Volume (USDT) */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-muted text-[10px] tracking-tight font-medium">
+              24h Volume (USDT)
+            </span>
+            <span className="text-primary text-[12px] font-semibold font-mono-tabular">
+              {formatExactNumber(dayNtlVlm)}
+            </span>
+          </div>
+
+          {/* Open Interest (USDT) */}
+          <div className="flex flex-col gap-0.5 pr-2">
+            <span className="text-muted text-[10px] tracking-tight font-medium">
+              Open Interest (USDT)
+            </span>
+            <span className="text-primary text-[12px] font-semibold font-mono-tabular">
+              {formatExactNumber(oiQuoteValue > 0 ? oiQuoteValue : rawOiBase)}
+            </span>
           </div>
         </div>
+
+        {/* <div className="flex items-center pl-1.5 shrink-0 z-20 bg-secondary h-full ml-auto">
+          <div className="flex items-center pl-1.5 border-l border-color h-full">
+            <ExchangeNetworkSelector />
+          </div>
+        </div> */}
       </div>
 
       <MarketSelectorModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />

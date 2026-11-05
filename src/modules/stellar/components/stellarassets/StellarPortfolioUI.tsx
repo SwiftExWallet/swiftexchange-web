@@ -10,9 +10,8 @@ import { ExportProgressModal } from '@/pages/profile/components/ExportProgressMo
 import { fetchStellarPnl } from '@/service/apiService';
 import { exportStellarReport } from '@/utils/exportService';
 
-import * as ChainUrlHelpers from '../../../evm/utils/ChainUrlHelpers';
+import { getChainById, getGlobalAssetMetadata } from '../../../evm/utils/Chainregistry';
 import { useIsMobile } from '../../../perps/components/chart/hooks/useIsMobile';
-import { getStellarConfig } from '../../../walletconnect/config/chains';
 import { WalletType } from '../../../walletconnect/constants/Wallet';
 import { useProfilePortfolio } from '../../../walletconnect/hooks/useProfilePortfolio';
 import { useWalletConnect } from '../../../walletconnect/hooks/useWalletConnect';
@@ -21,11 +20,83 @@ import StellarPnlChart from './StellarPnlChart';
 import { StellarSharePnlModal } from './StellarSharePnlModal';
 import UnifiedAssets from './UnifiedAssets';
 
-const getStellarAssetIcon = (assetStr: string) => {
+const KNOWN_STELLAR_ICONS: Record<string, string> = {
+  XLM: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/stellar/info/logo.png',
+  AQUA: '/aqua-logo.png',
+  USDT: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png',
+  USDT0:
+    'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png',
+  USDC: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
+  EURC: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x1aBaEA1f7C250DC88698707C3971a823ac29E309/logo.png',
+  BTC: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/bitcoin/info/logo.png',
+  WBTC: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/bitcoin/info/logo.png',
+  ETH: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png',
+  WETH: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png',
+  XTAR: 'https://dogstarcoin.com/logo.png',
+};
+
+const getStellarAssetIcon = (assetStr?: string, issuer?: string): string | undefined => {
   if (!assetStr) return undefined;
-  if (assetStr === 'XLM') return ChainUrlHelpers.getTokenIcon('XLM', getStellarConfig('mainnet'));
-  const [code, issuer] = assetStr.split('-');
-  return ChainUrlHelpers.getTokenIcon(code, getStellarConfig('mainnet'), issuer);
+  const parts = assetStr.split(/[-:]/);
+  const code = (parts[0] || '').trim().toUpperCase();
+  const effectiveIssuer = issuer || (parts.length > 1 ? parts[1]?.trim() : undefined);
+
+  if (code && KNOWN_STELLAR_ICONS[code]) {
+    return KNOWN_STELLAR_ICONS[code];
+  }
+
+  const pubnet = getChainById('pubnet');
+  const testnet = getChainById('testnet');
+  const match =
+    pubnet?.assets?.find(
+      a =>
+        a.symbol?.toUpperCase() === code &&
+        (!effectiveIssuer || a.address === effectiveIssuer || a.issuer === effectiveIssuer)
+    ) ||
+    testnet?.assets?.find(
+      a =>
+        a.symbol?.toUpperCase() === code &&
+        (!effectiveIssuer || a.address === effectiveIssuer || a.issuer === effectiveIssuer)
+    );
+
+  if (match?.logoURI) return match.logoURI;
+
+  const globalMeta = getGlobalAssetMetadata(code);
+  if (globalMeta?.logoURI) return globalMeta.logoURI;
+
+  return undefined;
+};
+
+const StellarAssetBadge: React.FC<{
+  asset?: string;
+  issuer?: string;
+  className?: string;
+}> = ({ asset, issuer, className = 'w-4 h-4 rounded-full' }) => {
+  const [hasError, setHasError] = useState(false);
+  const iconUrl = useMemo(() => getStellarAssetIcon(asset, issuer), [asset, issuer]);
+  const code = (asset?.split(/[-:]/)[0] || '').trim().toUpperCase();
+  const firstLetter = code[0] || '?';
+
+  if (iconUrl && !hasError) {
+    return (
+      <img
+        src={iconUrl}
+        alt={code}
+        className={`${className} object-cover shrink-0`}
+        onError={() => setHasError(true)}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`${className} bg-gradient-to-br from-brand-primary/20 to-purple-500/20 border border-[var(--color-border)] flex items-center justify-center shrink-0 select-none overflow-hidden`}
+    >
+      <span className="text-[9px] font-bold text-[var(--color-text-primary)] leading-none">
+        {firstLetter}
+      </span>
+    </div>
+  );
 };
 
 const StellarPortfolioUI: React.FC = () => {
@@ -347,9 +418,38 @@ const StellarPortfolioUI: React.FC = () => {
     [stellarAddress, stellarCostBasis]
   );
 
+  const safePnlData = useMemo(() => {
+    return {
+      trades: stellarPnlData?.trades || [],
+      positions: stellarPnlData?.positions || [],
+      disposals: stellarPnlData?.disposals || [],
+      chart: stellarPnlData?.chart || null,
+      totalPnL: stellarPnlData?.totalPnL ?? 0,
+      totalRealized: stellarPnlData?.totalRealized ?? 0,
+      totalUnrealized: stellarPnlData?.totalUnrealized ?? 0,
+      totalPortfolioValue: stellarPnlData?.totalPortfolioValue ?? 0,
+      winRate: stellarPnlData?.winRate ?? 0,
+      tradeCount: stellarPnlData?.tradeCount ?? (stellarPnlData?.trades?.length || 0),
+      disposalCount: stellarPnlData?.disposalCount ?? (stellarPnlData?.disposals?.length || 0),
+      rawCount: stellarPnlData?.rawCount ?? 0,
+      collapsedCount: stellarPnlData?.collapsedCount ?? 0,
+      bestTrade: stellarPnlData?.bestTrade ?? null,
+      worstTrade: stellarPnlData?.worstTrade ?? null,
+      firstTradeDate: stellarPnlData?.firstTradeDate ?? null,
+      lastTradeDate: stellarPnlData?.lastTradeDate ?? null,
+      activeDays: stellarPnlData?.activeDays ?? 0,
+      mostTradedAsset: stellarPnlData?.mostTradedAsset ?? 'None',
+      usdcSpent: stellarPnlData?.usdcSpent ?? 0,
+      netUSDCFlow: stellarPnlData?.netUSDCFlow ?? 0,
+      lowLiquidityAssets: stellarPnlData?.lowLiquidityAssets || [],
+      autoCostBasis: stellarPnlData?.autoCostBasis || {},
+      freshnessTime: stellarPnlData?.freshnessTime || null,
+    };
+  }, [stellarPnlData]);
+
   const reversedTrades = useMemo(() => {
-    return stellarPnlData?.trades ? [...stellarPnlData.trades].reverse() : [];
-  }, [stellarPnlData?.trades]);
+    return safePnlData.trades.length > 0 ? [...safePnlData.trades].reverse() : [];
+  }, [safePnlData.trades]);
 
   if (!stellarAddress) {
     return (
@@ -609,7 +709,7 @@ const StellarPortfolioUI: React.FC = () => {
         <div className="hidden xl:block w-[1px] h-8 bg-[var(--color-border)] mx-1"></div>
 
         {/* Action Buttons */}
-        {stellarPnlData && !stellarPnlError && (
+        {!stellarPnlError && (
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsShareModalOpen(true)}
@@ -675,42 +775,47 @@ const StellarPortfolioUI: React.FC = () => {
   const chartSection = (
     <div className="flex flex-col gap-4 sm:gap-6">
       <StellarPnlChart
-        chart={stellarPnlData?.chart}
-        disposals={[...(stellarPnlData?.disposals || [])].reverse()}
-        totalUnrealized={stellarPnlData?.totalUnrealized ?? 0}
-        totalRealized={stellarPnlData?.totalRealized}
+        chart={safePnlData.chart}
+        disposals={[...safePnlData.disposals].reverse()}
+        totalUnrealized={safePnlData.totalUnrealized}
+        totalRealized={safePnlData.totalRealized}
       />
     </div>
   );
 
   const tablesSection = (
     <>
-      {!loadingStellarPnl && !stellarPnlError && (
+      {!loadingStellarPnl && (
         <div className="flex flex-col gap-4 sm:gap-6">
           {/* Recent Trades Table */}
-          {reversedTrades.length > 0 && (
-            <div className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-3xl p-4 sm:p-6 shadow-sm overflow-hidden flex flex-col h-[400px]">
-              <h3 className="text-sm font-bold text-[var(--color-text-primary)] tracking-tight mb-4 shrink-0">
+          <div className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-3xl p-4 sm:p-6 shadow-sm overflow-hidden flex flex-col min-h-[220px]">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-[var(--color-text-primary)] tracking-tight shrink-0">
                 Recent Trades
               </h3>
-              <div className="flex text-left border-b border-[var(--color-border)] pb-3 px-4 sm:px-0 sm:pr-4 shrink-0 min-w-[500px]">
-                <div className="w-[20%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                  Date
-                </div>
-                <div className="w-[15%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                  Action
-                </div>
-                <div className="w-[20%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                  Amount
-                </div>
-                <div className="w-[20%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                  Value
-                </div>
-                <div className="w-[25%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider text-right">
-                  PnL
-                </div>
+              <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase">
+                {reversedTrades.length} Trades
+              </span>
+            </div>
+            <div className="flex text-left border-b border-[var(--color-border)] pb-3 px-4 sm:px-0 sm:pr-4 shrink-0 min-w-[500px]">
+              <div className="w-[20%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Date
               </div>
-              <div className="flex-1 overflow-x-auto overflow-y-hidden mt-1 -mx-4 sm:mx-0">
+              <div className="w-[15%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Action
+              </div>
+              <div className="w-[20%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Amount
+              </div>
+              <div className="w-[20%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Value
+              </div>
+              <div className="w-[25%] text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider text-right">
+                PnL
+              </div>
+            </div>
+            {reversedTrades.length > 0 ? (
+              <div className="flex-1 overflow-x-auto overflow-y-hidden mt-1 -mx-4 sm:mx-0 min-h-[350px]">
                 <div className="min-w-[500px] h-full">
                   <AutoSizer
                     renderProp={({ height, width }) => (
@@ -768,11 +873,17 @@ const StellarPortfolioUI: React.FC = () => {
                   />
                 </div>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="py-12 flex flex-col items-center justify-center text-center">
+                <span className="text-xs text-[var(--color-text-secondary)] font-medium">
+                  No trades recorded for this timeframe
+                </span>
+              </div>
+            )}
+          </div>
 
           {/* Open Positions Table */}
-          {stellarPnlData?.positions && stellarPnlData.positions.length > 0 && (
+          {safePnlData.positions.length > 0 && (
             <div className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-3xl p-4 sm:p-6 shadow-sm overflow-hidden flex flex-col h-[400px]">
               <h3 className="text-sm font-bold text-[var(--color-text-primary)] tracking-tight mb-4 shrink-0">
                 Open Positions
@@ -801,9 +912,9 @@ const StellarPortfolioUI: React.FC = () => {
                       <List
                         height={height || 0}
                         width={width || 0}
-                        itemCount={stellarPnlData.positions.length}
+                        itemCount={safePnlData.positions.length}
                         itemSize={48}
-                        itemData={stellarPnlData.positions}
+                        itemData={safePnlData.positions}
                       >
                         {({ index, style, data }: any) => {
                           const pos = data[index];
@@ -820,15 +931,11 @@ const StellarPortfolioUI: React.FC = () => {
                               className="flex items-center group hover:bg-[var(--color-bg-tertiary)]/50 transition-colors border-b border-[var(--color-border)] px-4 sm:px-0"
                             >
                               <div className="w-[20%] text-[11px] sm:text-xs font-bold text-[var(--color-text-primary)] whitespace-nowrap truncate pr-2 flex items-center gap-1.5">
-                                {getStellarAssetIcon(pos.asset) ? (
-                                  <img
-                                    src={getStellarAssetIcon(pos.asset) || ''}
-                                    alt={pos.asset}
-                                    className="w-4 h-4 rounded-full"
-                                  />
-                                ) : (
-                                  <div className="w-4 h-4 rounded-full bg-secondary border border-[var(--color-border)]" />
-                                )}
+                                <StellarAssetBadge
+                                  asset={pos.asset}
+                                  issuer={pos.issuer}
+                                  className="w-4 h-4 rounded-full"
+                                />
                                 {pos.asset}
                               </div>
                               <div className="w-[20%] text-[11px] sm:text-xs font-medium text-[var(--color-text-primary)] whitespace-nowrap truncate pr-2">
@@ -863,7 +970,7 @@ const StellarPortfolioUI: React.FC = () => {
           )}
 
           {/* Disposals Table */}
-          {stellarPnlData?.disposals && stellarPnlData.disposals.length > 0 && (
+          {safePnlData.disposals.length > 0 && (
             <div className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-3xl p-4 sm:p-6 shadow-sm overflow-hidden flex flex-col h-[400px]">
               <h3 className="text-sm font-bold text-[var(--color-text-primary)] tracking-tight mb-4 shrink-0">
                 Disposals
@@ -892,9 +999,9 @@ const StellarPortfolioUI: React.FC = () => {
                       <List
                         height={height || 0}
                         width={width || 0}
-                        itemCount={stellarPnlData?.disposals?.length || 0}
+                        itemCount={safePnlData.disposals.length}
                         itemSize={48}
-                        itemData={[...(stellarPnlData?.disposals || [])].reverse()}
+                        itemData={[...safePnlData.disposals].reverse()}
                       >
                         {({ index, style, data }: any) => {
                           const disp = data[index];
@@ -913,7 +1020,11 @@ const StellarPortfolioUI: React.FC = () => {
                               <div className="w-[20%] text-[11px] sm:text-xs text-[var(--color-text-secondary)] whitespace-nowrap truncate pr-2">
                                 {disp.date}
                               </div>
-                              <div className="w-[20%] text-[11px] sm:text-xs font-bold text-[var(--color-text-primary)] whitespace-nowrap truncate pr-2">
+                              <div className="w-[20%] text-[11px] sm:text-xs font-bold text-[var(--color-text-primary)] whitespace-nowrap truncate pr-2 flex items-center gap-1.5">
+                                <StellarAssetBadge
+                                  asset={disp.asset}
+                                  className="w-4 h-4 rounded-full"
+                                />
                                 {disp.asset}
                               </div>
                               <div className="w-[20%] text-[11px] sm:text-xs font-medium text-[var(--color-text-primary)] whitespace-nowrap truncate pr-2">
@@ -953,7 +1064,7 @@ const StellarPortfolioUI: React.FC = () => {
       {/* Subtle dynamic ambient glow */}
       <div
         className={`absolute -top-12 -right-12 w-44 h-44 rounded-full blur-3xl pointer-events-none opacity-25 transition-all ${
-          (stellarPnlData?.totalPnL ?? 0) >= 0 ? 'bg-emerald-500' : 'bg-rose-500'
+          safePnlData.totalPnL >= 0 ? 'bg-emerald-500' : 'bg-rose-500'
         }`}
       />
 
@@ -977,13 +1088,13 @@ const StellarPortfolioUI: React.FC = () => {
           </div>
           <span
             className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-              (stellarPnlData?.totalPnL ?? 0) >= 0
+              safePnlData.totalPnL >= 0
                 ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
                 : 'bg-rose-500/10 text-rose-500 border-rose-500/20'
             }`}
           >
-            {(stellarPnlData?.totalPnL ?? 0) >= 0 ? '+' : ''}$
-            {Math.abs(stellarPnlData?.totalPnL ?? 0).toLocaleString('en-US', {
+            {safePnlData.totalPnL >= 0 ? '+' : ''}$
+            {Math.abs(safePnlData.totalPnL).toLocaleString('en-US', {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}{' '}
@@ -995,12 +1106,11 @@ const StellarPortfolioUI: React.FC = () => {
             <span className="text-3xl sm:text-4xl font-black text-[var(--color-text-primary)] tracking-tighter">
               $
               {(isViewingPublicAddress
-                ? stellarPnlData?.positions?.reduce(
+                ? safePnlData.positions?.reduce(
                     (sum: number, pos: any) => sum + (pos.currentValue || 0),
                     0
-                  ) ||
-                  (stellarPnlData?.totalPortfolioValue ?? 0)
-                : stellarTotal || stellarPnlData?.totalPortfolioValue || 0
+                  ) || safePnlData.totalPortfolioValue
+                : stellarTotal || safePnlData.totalPortfolioValue || 0
               ).toLocaleString('en-US', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
@@ -1011,29 +1121,27 @@ const StellarPortfolioUI: React.FC = () => {
         </div>
 
         {/* Quick Crypto Metric Chips */}
-        {stellarPnlData && (
-          <div className="flex flex-wrap items-center gap-1.5 mt-4 pt-3 border-t border-[var(--color-border)]">
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] text-[10px] font-medium text-[var(--color-text-secondary)]">
-              <span>Realized:</span>
-              <span
-                className={`font-bold ${(stellarPnlData?.totalRealized ?? 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}
-              >
-                {(stellarPnlData?.totalRealized ?? 0) >= 0 ? '+' : ''}$
-                {Math.abs(stellarPnlData?.totalRealized ?? 0).toFixed(2)}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] text-[10px] font-medium text-[var(--color-text-secondary)]">
-              <span>Unrealized:</span>
-              <span className="font-bold text-[var(--color-text-primary)]">
-                ${(stellarPnlData?.totalUnrealized ?? 0).toFixed(2)}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] text-[10px] font-medium text-[var(--color-text-secondary)]">
-              <span>Win Rate:</span>
-              <span className="font-bold text-purple-400">{stellarPnlData?.winRate ?? 0}%</span>
-            </div>
+        <div className="flex flex-wrap items-center gap-1.5 mt-4 pt-3 border-t border-[var(--color-border)]">
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] text-[10px] font-medium text-[var(--color-text-secondary)]">
+            <span>Realized:</span>
+            <span
+              className={`font-bold ${safePnlData.totalRealized >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}
+            >
+              {safePnlData.totalRealized >= 0 ? '+' : ''}$
+              {Math.abs(safePnlData.totalRealized).toFixed(2)}
+            </span>
           </div>
-        )}
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] text-[10px] font-medium text-[var(--color-text-secondary)]">
+            <span>Unrealized:</span>
+            <span className="font-bold text-[var(--color-text-primary)]">
+              ${safePnlData.totalUnrealized.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--color-bg-tertiary)] border border-[var(--color-border)] text-[10px] font-medium text-[var(--color-text-secondary)]">
+            <span>Win Rate:</span>
+            <span className="font-bold text-purple-400">{safePnlData.winRate}%</span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1053,7 +1161,7 @@ const StellarPortfolioUI: React.FC = () => {
             <path
               className="text-purple-500"
               strokeWidth="3"
-              strokeDasharray={`${stellarPnlData?.winRate ?? 0}, 100`}
+              strokeDasharray={`${safePnlData.winRate}, 100`}
               strokeLinecap="round"
               stroke="currentColor"
               fill="none"
@@ -1062,7 +1170,7 @@ const StellarPortfolioUI: React.FC = () => {
           </svg>
           <div className="absolute flex flex-col items-center justify-center">
             <span className="text-xl font-black text-[var(--color-text-primary)]">
-              {stellarPnlData?.winRate ?? 0}%
+              {safePnlData.winRate}%
             </span>
             <span className="text-[8px] font-bold text-[var(--color-text-secondary)] uppercase mt-0.5">
               Win Rate
@@ -1082,20 +1190,12 @@ const StellarPortfolioUI: React.FC = () => {
           </h3>
           <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
             Out of{' '}
-            <strong className="text-[var(--color-text-primary)]">
-              {stellarPnlData?.tradeCount ??
-                stellarPnlData?.collapsedCount ??
-                stellarPnlData?.trades?.length ??
-                0}
-            </strong>{' '}
+            <strong className="text-[var(--color-text-primary)]">{safePnlData.tradeCount}</strong>{' '}
             trades, win rate
+            <strong className="text-[var(--color-text-primary)]"> {safePnlData.winRate}%</strong>.
+            Disposals:{' '}
             <strong className="text-[var(--color-text-primary)]">
-              {' '}
-              {stellarPnlData?.winRate ?? 0}%
-            </strong>
-            . Disposals:{' '}
-            <strong className="text-[var(--color-text-primary)]">
-              {stellarPnlData?.disposalCount ?? stellarPnlData?.disposals?.length ?? 0}
+              {safePnlData.disposalCount}
             </strong>
             .
           </p>
@@ -1105,21 +1205,22 @@ const StellarPortfolioUI: React.FC = () => {
                 Best Trade
               </span>
               <span className="text-xs font-bold text-emerald-500">
-                {stellarPnlData?.bestTrade?.pnl
-                  ? `+${stellarPnlData.bestTrade.pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
-                  : '-'}
+                {safePnlData.bestTrade?.pnl
+                  ? `+${safePnlData.bestTrade.pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+                  : '$0.00'}
               </span>
-              <span className="text-[9px] text-[var(--color-text-secondary)] ml-1 flex items-center gap-1 mt-1">
-                {getStellarAssetIcon(stellarPnlData?.bestTrade?.asset) ? (
-                  <img
-                    src={getStellarAssetIcon(stellarPnlData.bestTrade.asset) || ''}
-                    alt={stellarPnlData.bestTrade.asset}
-                    className="w-3 h-3 rounded-full"
-                  />
+              <span className="text-[9px] text-[var(--color-text-secondary)] ml-1 flex items-center gap-1.5 mt-1">
+                {safePnlData.bestTrade?.asset ? (
+                  <>
+                    <StellarAssetBadge
+                      asset={safePnlData.bestTrade.asset}
+                      className="w-3.5 h-3.5 rounded-full"
+                    />
+                    {safePnlData.bestTrade.asset}
+                  </>
                 ) : (
-                  <div className="w-3 h-3 rounded-full bg-secondary border border-[var(--color-border)]" />
+                  <span>None</span>
                 )}
-                {stellarPnlData?.bestTrade?.asset}
               </span>
             </div>
             <div>
@@ -1127,21 +1228,22 @@ const StellarPortfolioUI: React.FC = () => {
                 Worst Trade
               </span>
               <span className="text-xs font-bold text-rose-500">
-                {stellarPnlData?.worstTrade?.pnl
-                  ? `${stellarPnlData.worstTrade.pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
-                  : '-'}
+                {safePnlData.worstTrade?.pnl
+                  ? `${safePnlData.worstTrade.pnl.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+                  : '$0.00'}
               </span>
-              <span className="text-[9px] text-[var(--color-text-secondary)] ml-1 flex items-center gap-1 mt-1">
-                {getStellarAssetIcon(stellarPnlData?.worstTrade?.asset) ? (
-                  <img
-                    src={getStellarAssetIcon(stellarPnlData.worstTrade.asset) || ''}
-                    alt={stellarPnlData.worstTrade.asset}
-                    className="w-3 h-3 rounded-full"
-                  />
+              <span className="text-[9px] text-[var(--color-text-secondary)] ml-1 flex items-center gap-1.5 mt-1">
+                {safePnlData.worstTrade?.asset ? (
+                  <>
+                    <StellarAssetBadge
+                      asset={safePnlData.worstTrade.asset}
+                      className="w-3.5 h-3.5 rounded-full"
+                    />
+                    {safePnlData.worstTrade.asset}
+                  </>
                 ) : (
-                  <div className="w-3 h-3 rounded-full bg-secondary border border-[var(--color-border)]" />
+                  <span>None</span>
                 )}
-                {stellarPnlData?.worstTrade?.asset}
               </span>
             </div>
           </div>
@@ -1189,13 +1291,13 @@ const StellarPortfolioUI: React.FC = () => {
             First Trade
           </span>
           <span className="text-xs font-bold text-[var(--color-text-primary)]">
-            {stellarPnlData?.firstTradeDate
-              ? new Date(stellarPnlData.firstTradeDate).toLocaleDateString('en-GB', {
+            {safePnlData.firstTradeDate
+              ? new Date(safePnlData.firstTradeDate).toLocaleDateString('en-GB', {
                   day: 'numeric',
                   month: 'short',
                   year: 'numeric',
                 })
-              : 'N/A'}
+              : 'None'}
           </span>
         </div>
         <div className="relative">
@@ -1204,13 +1306,13 @@ const StellarPortfolioUI: React.FC = () => {
             Last Trade
           </span>
           <span className="text-xs font-bold text-[var(--color-text-primary)]">
-            {stellarPnlData?.lastTradeDate
-              ? new Date(stellarPnlData.lastTradeDate).toLocaleDateString('en-GB', {
+            {safePnlData.lastTradeDate
+              ? new Date(safePnlData.lastTradeDate).toLocaleDateString('en-GB', {
                   day: 'numeric',
                   month: 'short',
                   year: 'numeric',
                 })
-              : 'N/A'}
+              : 'None'}
           </span>
         </div>
       </div>
@@ -1218,14 +1320,12 @@ const StellarPortfolioUI: React.FC = () => {
       <div className="flex items-center justify-between pt-3 border-t border-[var(--color-border)]">
         <div className="text-[10px] text-[var(--color-text-secondary)]">
           Active Days:{' '}
-          <strong className="text-[var(--color-text-primary)]">
-            {stellarPnlData?.activeDays || 0}
-          </strong>
+          <strong className="text-[var(--color-text-primary)]">{safePnlData.activeDays}</strong>
         </div>
         <div className="text-[10px] text-[var(--color-text-secondary)]">
           Most Traded:{' '}
           <strong className="text-[var(--color-text-primary)]">
-            {stellarPnlData?.mostTradedAsset || 'N/A'}
+            {safePnlData.mostTradedAsset}
           </strong>
         </div>
       </div>
@@ -1233,12 +1333,12 @@ const StellarPortfolioUI: React.FC = () => {
   );
 
   // Parse positions for PnL Distribution (Top 5 by absolute PnL impact)
-  const topAssets = stellarPnlData?.positions
-    ? [...stellarPnlData.positions]
-        .map(p => ({ ...p, totalAssetPnl: (p.realizedPnL || 0) + (p.unrealized || 0) }))
-        .sort((a: any, b: any) => Math.abs(b.totalAssetPnl) - Math.abs(a.totalAssetPnl))
-    : // .slice(0, 5)
-      [];
+  const topAssets =
+    safePnlData.positions.length > 0
+      ? [...safePnlData.positions]
+          .map(p => ({ ...p, totalAssetPnl: (p.realizedPnL || 0) + (p.unrealized || 0) }))
+          .sort((a: any, b: any) => Math.abs(b.totalAssetPnl) - Math.abs(a.totalAssetPnl))
+      : [];
   const totalAbsPnl =
     topAssets.reduce((sum: number, p: any) => sum + Math.abs(p.totalAssetPnl), 0) || 1;
 
@@ -1275,15 +1375,11 @@ const StellarPortfolioUI: React.FC = () => {
               <div key={asset.asset} className="flex flex-col gap-1.5">
                 <div className="flex justify-between items-center text-xs">
                   <span className="font-bold text-[var(--color-text-primary)] flex items-center gap-1.5">
-                    {getStellarAssetIcon(asset.asset) ? (
-                      <img
-                        src={getStellarAssetIcon(asset.asset) || ''}
-                        alt={asset.asset}
-                        className="w-4 h-4 rounded-full"
-                      />
-                    ) : (
-                      <div className="w-4 h-4 rounded-full bg-secondary border border-[var(--color-border)]" />
-                    )}
+                    <StellarAssetBadge
+                      asset={asset.asset}
+                      issuer={asset.issuer}
+                      className="w-4 h-4 rounded-full"
+                    />
                     {asset.asset}
                   </span>
                   <span
@@ -1308,8 +1404,17 @@ const StellarPortfolioUI: React.FC = () => {
             );
           })
         ) : (
-          <div className="text-xs text-[var(--color-text-secondary)] text-center py-4">
-            No PnL data found
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center text-xs">
+              <span className="font-bold text-[var(--color-text-primary)] flex items-center gap-1.5">
+                <StellarAssetBadge asset="XLM" className="w-4 h-4 rounded-full" />
+                XLM
+              </span>
+              <span className="font-medium text-[var(--color-text-secondary)]">$0.00 (0.0%)</span>
+            </div>
+            <div className="w-full h-2 bg-[var(--color-bg-tertiary)] rounded-full overflow-hidden p-0.5 border border-[var(--color-border)]">
+              <div className="h-full bg-slate-500/20 rounded-full" style={{ width: '0%' }}></div>
+            </div>
           </div>
         )}
       </div>
@@ -1332,15 +1437,15 @@ const StellarPortfolioUI: React.FC = () => {
       </div>
       <div className="grid grid-cols-2 gap-3 sm:gap-4">
         {[
-          { label: 'Total PnL', value: stellarPnlData?.totalPnL ?? 0, isCurrency: true },
+          { label: 'Total PnL', value: safePnlData.totalPnL, isCurrency: true },
           {
             label: 'Unrealized PnL',
-            value: stellarPnlData?.totalUnrealized ?? 0,
+            value: safePnlData.totalUnrealized,
             isCurrency: true,
           },
-          { label: 'Realized PnL', value: stellarPnlData?.totalRealized ?? 0, isCurrency: true },
-          { label: 'USDC Spent', value: stellarPnlData?.usdcSpent ?? 0, isCurrency: true },
-          { label: 'Net USDC Flow', value: stellarPnlData?.netUSDCFlow ?? 0, isCurrency: true },
+          { label: 'Realized PnL', value: safePnlData.totalRealized, isCurrency: true },
+          { label: 'USDC Spent', value: safePnlData.usdcSpent, isCurrency: true },
+          { label: 'Net USDC Flow', value: safePnlData.netUSDCFlow, isCurrency: true },
         ].map((metric, idx) => (
           <div key={idx} className="flex flex-col">
             <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1">
@@ -1385,7 +1490,7 @@ const StellarPortfolioUI: React.FC = () => {
         </h3>
       </div>
 
-      {stellarPnlData?.lowLiquidityAssets && stellarPnlData.lowLiquidityAssets.length > 0 && (
+      {safePnlData.lowLiquidityAssets.length > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
           <div className="flex items-center gap-2 mb-2">
             <svg
@@ -1410,7 +1515,7 @@ const StellarPortfolioUI: React.FC = () => {
             The following assets have very low trading volume. Values may be inaccurate.
           </p>
           <div className="flex flex-wrap gap-2">
-            {stellarPnlData.lowLiquidityAssets.map((asset: any, idx: number) => (
+            {safePnlData.lowLiquidityAssets.map((asset: any, idx: number) => (
               <span
                 key={idx}
                 className="bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] px-2 py-1 rounded-md font-bold"
@@ -1422,7 +1527,7 @@ const StellarPortfolioUI: React.FC = () => {
         </div>
       )}
 
-      {stellarPnlData?.autoCostBasis && Object.keys(stellarPnlData.autoCostBasis).length > 0 && (
+      {Object.keys(safePnlData.autoCostBasis).length > 0 && (
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
           <div className="flex items-center gap-2 mb-2">
             <svg
@@ -1447,10 +1552,30 @@ const StellarPortfolioUI: React.FC = () => {
             Cost basis was auto-estimated for some assets due to missing historical data.
           </p>
           <div className="text-[10px] text-blue-500 font-medium">
-            {Object.keys(stellarPnlData.autoCostBasis).length} assets estimated
+            {Object.keys(safePnlData.autoCostBasis).length} assets estimated
           </div>
         </div>
       )}
+
+      {safePnlData.lowLiquidityAssets.length === 0 &&
+        Object.keys(safePnlData.autoCostBasis).length === 0 && (
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-[11px] text-emerald-500 font-medium">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>All diagnostics healthy (0 anomalies)</span>
+          </div>
+        )}
 
       <div className="grid grid-cols-2 gap-2 mt-2 pt-4 border-t border-[var(--color-border)]">
         <div className="flex flex-col">
@@ -1458,7 +1583,7 @@ const StellarPortfolioUI: React.FC = () => {
             Raw Tx Count
           </span>
           <span className="text-xs font-bold text-[var(--color-text-primary)]">
-            {stellarPnlData?.rawCount || 0}
+            {safePnlData.rawCount}
           </span>
         </div>
         <div className="flex flex-col">
@@ -1466,7 +1591,7 @@ const StellarPortfolioUI: React.FC = () => {
             Collapsed Trades
           </span>
           <span className="text-xs font-bold text-[var(--color-text-primary)]">
-            {stellarPnlData?.collapsedCount || 0}
+            {safePnlData.collapsedCount}
           </span>
         </div>
       </div>
@@ -1534,83 +1659,29 @@ const StellarPortfolioUI: React.FC = () => {
       <div className="relative flex flex-col gap-4 lg:gap-6 w-full max-w-[1600px] mx-auto pb-24 pt-2 sm:pt-4 px-3 sm:px-4 lg:px-6 min-h-screen font-sans">
         {headerControls}
 
-        {stellarPnlError ? (
-          <div className="flex flex-col flex-1 items-center justify-center p-4 mt-8 sm:mt-12">
-            <div className="w-full max-w-2xl flex flex-col items-center justify-center bg-rose-500/5 rounded-[2.5rem] border border-rose-500/20 p-8 sm:p-12 text-center min-h-[300px] shadow-sm">
-              <div className="w-16 h-16 rounded-full bg-rose-500/10 flex items-center justify-center mb-6">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="32"
-                  height="32"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-rose-500"
-                >
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <line x1="12" y1="8" x2="12" y2="12"></line>
-                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                </svg>
-              </div>
-              <h2 className="text-rose-500 font-black mb-3 text-xl sm:text-2xl tracking-tight">
-                Portfolio Analysis Unavailable
-              </h2>
-              <p className="text-rose-500/80 text-sm sm:text-base font-medium max-w-md leading-relaxed">
-                {stellarPnlError}
-              </p>
-            </div>
+        {stellarPnlError && (
+          <div className="flex items-center gap-2.5 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="shrink-0"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <span>{stellarPnlError}</span>
           </div>
-        ) : !stellarPnlData ||
-          ((!stellarPnlData.trades || stellarPnlData.trades.length === 0) &&
-            (!stellarPnlData.positions || stellarPnlData.positions.length === 0) &&
-            (!stellarPnlData.rawCount || stellarPnlData.rawCount === 0)) ? (
-          <div className="flex flex-col gap-6 w-full mt-4">
-            <div className="w-full flex flex-col items-center justify-center bg-[var(--color-bg-secondary)] rounded-3xl border border-[var(--color-border)] p-8 sm:p-12 text-center shadow-sm">
-              <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-4 text-blue-400">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="30"
-                  height="30"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                </svg>
-              </div>
-              <h3 className="text-xl font-bold text-[var(--color-text-primary)] mb-2">
-                No Trading Activity Found
-              </h3>
-              <p className="text-[var(--color-text-secondary)] text-sm max-w-md mb-6 leading-relaxed">
-                We couldn't find any swap or trade history for this Stellar account in the selected
-                timeframe. Try choosing a wider date range or view your wallet assets below.
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                {(['1m', '2m', '3m'] as const).map(tf => (
-                  <button
-                    key={tf}
-                    onClick={() => setStellarTimeframe(tf)}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                      stellarTimeframe === tf
-                        ? 'bg-[var(--color-brand-primary)] text-white'
-                        : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] border border-[var(--color-border)]'
-                    }`}
-                  >
-                    View {tf.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {assetsList}
-          </div>
-        ) : isMobile ? (
+        )}
+
+        {isMobile ? (
           <div className="flex flex-col gap-3.5 w-full">
             {netWorthSection}
             {chartSection}
@@ -1690,6 +1761,12 @@ const StellarPortfolioUI: React.FC = () => {
         totalPnL={stellarPnlData?.totalRealized ?? stellarPnlData?.totalPnL ?? 0}
         winRate={stellarPnlData?.winRate ?? 0}
         bestTrade={stellarPnlData?.bestTrade}
+        tradeCount={
+          stellarPnlData?.tradeCount ??
+          stellarPnlData?.collapsedCount ??
+          stellarPnlData?.trades?.length ??
+          0
+        }
         timeframe={
           stellarTimeframe === 'custom' ? `${fromDate || ''} - ${toDate || ''}` : stellarTimeframe
         }

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import * as StellarSDK from '@stellar/stellar-sdk';
+
 import { useTransactionModalStore } from '../../../../../store/transactionModalStore';
-import { getChainById } from '../../../utils/Chainregistry';
+import { AquariusService } from '../../../../stellar/service/aquariusService';
+import { SoroswapService } from '../../../../stellar/service/soroswapService';
+import { getAssetsForChain } from '../../../utils/Chainregistry';
 import { getSwapQuote } from '../services/evmSwapService';
 import { get1InchFusionQuote } from '../services/fusionOrderService';
 import {
@@ -13,13 +17,13 @@ import {
   matchNearIntentToken,
   safeParseUnits,
 } from '../services/oneClickApi';
+import { useQuoteTimerStore } from '../store/quoteTimerStore';
 import type { UnifiedAsset, UnifiedQuote } from '../types/swap.types';
 import { isStellar } from '../utils/swapAssetUtils';
 import { parseSwapError } from '../utils/swapErrorHandler';
 
 export interface UseSwapQuoteParams {
   sellAmount: string;
-  isChainSwitching: boolean;
   showFusionScreen: boolean;
   actionType: 'SWAP' | 'BRIDGE';
   fromChainId: number | string;
@@ -43,12 +47,12 @@ export interface UseSwapQuoteParams {
   evmAddress?: string;
   stellarAddress?: string;
   isStellarAccountActive?: boolean | null;
+  currentNetwork?: 'mainnet' | 'testnet';
 }
 
 export function useSwapQuote(params: UseSwapQuoteParams) {
   const {
     sellAmount,
-    isChainSwitching,
     showFusionScreen,
     actionType,
     fromChainId,
@@ -59,7 +63,6 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     userSlippageTolerance,
     sellAssetSymbol,
     buyAssetSymbol,
-    fromChainConfig,
     setCrossChainWarning,
     setBridgeErrorMsg,
     resetSwap,
@@ -69,6 +72,7 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     evmAddress,
     stellarAddress,
     isStellarAccountActive,
+    currentNetwork,
   } = params;
 
   const [currentQuote, setCurrentQuote] = useState<UnifiedQuote>({
@@ -77,40 +81,31 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     error: null,
     loading: false,
   });
-  const [timeLeft, setTimeToNextRefresh] = useState(30);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const latestRequestId = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const getUsdValue = useCallback((amount: string, asset: any): number | null => {
-    if (!amount || !asset) return null;
-    const parsed = parseFloat(amount);
-    if (isNaN(parsed) || parsed <= 0) return null;
-    const price = parseFloat(asset.price || asset.priceUSD || '0');
-    if (price > 0) return parsed * price;
-    return null;
-  }, []);
-
-  const isBridgeSupported = useCallback((symbol: string, chainId: number | string): boolean => {
-    const chainConfig = getChainById(chainId);
-    if (!chainConfig?.bridgeSupportTokens?.length) return false;
-    return chainConfig.bridgeSupportTokens.some(
-      (t: any) => t.symbol.toUpperCase() === symbol.toUpperCase()
-    );
-  }, []);
-
   const fetchUnifiedQuote = useCallback(async () => {
     const isModalOpen = useTransactionModalStore.getState().isOpen;
     if ((bridgeTxStatus && bridgeTxStatus !== 'idle') || isModalOpen) {
-      return; // Do NOT fetch quotes or reset the swap while an execution (like trustline setup) is in progress!
+      return;
     }
 
-    if (!sellAmount || parseFloat(sellAmount) <= 0 || isChainSwitching || showFusionScreen) {
+    if (!sellAmount || parseFloat(sellAmount) <= 0 || showFusionScreen) {
       setCurrentQuote({ source: null, data: null, error: null, loading: false });
       return;
     }
 
     let warningError: string | null = null;
+
+    const isBuyClassic =
+      selectedBuyAsset &&
+      !selectedBuyAsset.isNative &&
+      Boolean(
+        (selectedBuyAsset as any).issuer?.startsWith('G') ||
+        ((selectedBuyAsset as any).address?.startsWith('G') &&
+          !(selectedBuyAsset as any).address?.startsWith('C'))
+      );
 
     if (
       isStellar(toChainId) &&
@@ -121,9 +116,8 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     } else if (
       isStellar(toChainId) &&
       isStellarAccountActive !== false &&
-      selectedBuyAsset &&
-      !selectedBuyAsset.isNative &&
-      !selectedBuyAsset.hasTrustline
+      isBuyClassic &&
+      !selectedBuyAsset?.hasTrustline
     ) {
       warningError = 'Trustline required';
     }
@@ -142,25 +136,112 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     setBridgeErrorMsg(null);
     resetSwap();
 
-    if (actionType === 'SWAP') {
-      if (isStellar(fromChainId) && ammService) {
+    const isBothStellar = isStellar(fromChainId) && isStellar(toChainId);
+    if (actionType === 'SWAP' || isBothStellar) {
+      if ((isStellar(fromChainId) || isStellar(toChainId)) && ammService) {
         if (!selectedSellAsset || !selectedBuyAsset) return;
         try {
-          const fromAsset = selectedSellAsset.asset;
-          const toAsset = selectedBuyAsset.asset;
-          if (!fromAsset || !toAsset) return;
+          const fromContract =
+            (selectedSellAsset as any)?.contract ||
+            (selectedSellAsset as any)?.address ||
+            selectedSellAsset.asset;
+          const toContract =
+            (selectedBuyAsset as any)?.contract ||
+            (selectedBuyAsset as any)?.address ||
+            selectedBuyAsset.asset;
+          if (!fromContract || !toContract) return;
 
           setCurrentQuote({ source: 'STELLAR_SWAP', data: null, error: null, loading: true });
-          const sq = await ammService.getSwapQuote(fromAsset, toAsset, sellAmount, {
-            slippageTolerance: userSlippageTolerance,
-          });
+
+          let sq: any = null;
+          let soroQuoteError: string | null = null;
+
+          try {
+            const soroService = new SoroswapService(
+              ammService.horizonUrl,
+              ammService.networkPassphrase
+            );
+            sq = await soroService.getQuote(selectedSellAsset, selectedBuyAsset, sellAmount, {
+              slippageTolerance: userSlippageTolerance,
+              userAddress: stellarAddress,
+            });
+            if (sq) {
+              sq.source = 'SOROSWAP';
+              sq.provider =
+                sq.platform?.toLowerCase() === 'sdex'
+                  ? 'Soroswap Router (SDEX)'
+                  : 'Soroswap Router (AMM)';
+            }
+          } catch (soroErr) {
+            console.warn('[useSwapQuote] Soroswap quote failed, checking Aquarius:', soroErr);
+            soroQuoteError = parseSwapError(soroErr);
+          }
+
+          const toClassicAsset = (a: any) => {
+            if (!a) return null;
+            if (a.asset && typeof a.asset.isNative === 'function') return a.asset;
+            if (a.isNative || a.symbol === 'XLM') return StellarSDK.Asset.native();
+            const issuer = a.issuer || (a.address?.startsWith('G') ? a.address : null);
+            if (issuer && issuer.startsWith('G')) {
+              try {
+                return new StellarSDK.Asset(a.symbol, issuer);
+              } catch {
+                return null;
+              }
+            }
+            return null;
+          };
+
+          const classicFrom = toClassicAsset(selectedSellAsset);
+          const classicTo = toClassicAsset(selectedBuyAsset);
+          const canUseClassicAmm = Boolean(classicFrom && classicTo);
+
+          const aquaFrom = classicFrom || selectedSellAsset;
+          const aquaTo = classicTo || selectedBuyAsset;
+
+          if (!sq && aquaFrom && aquaTo) {
+            try {
+              const aquaService = new AquariusService(
+                ammService.horizonUrl,
+                ammService.networkPassphrase
+              );
+              sq = await aquaService.getQuote(aquaFrom, aquaTo, sellAmount, {
+                slippageTolerance: userSlippageTolerance,
+              });
+              if (sq) {
+                sq.source = 'AQUARIUS';
+                sq.provider = 'Aquarius Router';
+              }
+            } catch (aquaErr) {
+              console.warn(
+                '[useSwapQuote] Aquarius quote failed, falling back to Horizon AMM:',
+                aquaErr
+              );
+            }
+          }
+
+          if (!sq && canUseClassicAmm) {
+            try {
+              sq = await ammService.getSwapQuote(classicFrom, classicTo, sellAmount, {
+                slippageTolerance: userSlippageTolerance,
+              });
+              if (sq) {
+                sq.source = 'STELLAR_AMM';
+                sq.provider = 'Classic Horizon AMM';
+              }
+            } catch (ammErr) {
+              console.warn('[useSwapQuote] Horizon AMM quote failed:', ammErr);
+            }
+          }
 
           if (requestId !== latestRequestId.current) return;
 
           setCurrentQuote({
             source: 'STELLAR_SWAP',
             data: sq,
-            error: warningError,
+            error: sq
+              ? warningError
+              : warningError || soroQuoteError || 'No swap route or liquidity pool found',
             loading: false,
           });
         } catch (err) {
@@ -237,21 +318,57 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     } else {
       if (!selectedSellAsset || !selectedBuyAsset) return;
 
+      if (currentNetwork === 'testnet' && (isStellar(fromChainId) || isStellar(toChainId))) {
+        const unsupportedMsg =
+          'Stellar ↔ EVM swaps via NEAR Intents are only available on Mainnet. Please switch to Mainnet.';
+        setCurrentQuote({
+          source: 'NEAR_INTENT',
+          data: null,
+          error: unsupportedMsg,
+          loading: false,
+        });
+        setCrossChainWarning(unsupportedMsg);
+        return;
+      }
+
       const fetchNearIntentQuote = async () => {
         try {
-          const nearTokens = await fetchNearIntentTokens();
+          const nearTokens = await fetchNearIntentTokens(currentNetwork);
+
+          const resolveMatchingAddress = (asset: any, symbol: string, chainId: any) => {
+            if (
+              asset?.address &&
+              asset.address !== 'native' &&
+              asset.address !== '0x0000000000000000000000000000000000000000' &&
+              asset.address.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            ) {
+              return asset.address;
+            }
+            const chainAssets = getAssetsForChain(chainId);
+            const found = chainAssets.find(
+              (a: any) => a.symbol.toUpperCase() === (symbol || '').toUpperCase()
+            );
+            if (
+              found?.address &&
+              found.address !== 'native' &&
+              found.address !== '0x0000000000000000000000000000000000000000' &&
+              found.address.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            ) {
+              return found.address;
+            }
+            return asset?.address || '';
+          };
+
+          const sellAddr = resolveMatchingAddress(selectedSellAsset, sellAssetSymbol, fromChainId);
+          const buyAddr = resolveMatchingAddress(selectedBuyAsset, buyAssetSymbol, toChainId);
+
           const nearSellAsset = matchNearIntentToken(
             nearTokens,
             sellAssetSymbol,
-            selectedSellAsset.address,
+            sellAddr,
             fromChainId
           );
-          const nearBuyAsset = matchNearIntentToken(
-            nearTokens,
-            buyAssetSymbol,
-            selectedBuyAsset.address,
-            toChainId
-          );
+          const nearBuyAsset = matchNearIntentToken(nearTokens, buyAssetSymbol, buyAddr, toChainId);
 
           if (nearSellAsset && nearBuyAsset) {
             const isStellarOrigin = isStellarBlockchain(nearSellAsset.blockchain);
@@ -333,23 +450,35 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
           });
         }
       } else {
-        // EVM to EVM cross-chain -> Fusion Plus (1inch)
+        // EVM to EVM cross-chain -> Fusion Plus (1inch) with NEAR Intents fallback
         setCurrentQuote({ source: 'FUSION_PLUS', data: null, error: null, loading: true });
         setCrossChainWarning(null);
+
+        const resolveTokenAddr = (asset: any) => {
+          if (!asset) return '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+          const addr = (asset.address || '').toLowerCase();
+          if (
+            asset.isNative ||
+            !addr ||
+            addr === 'native' ||
+            addr === '0x0000000000000000000000000000000000000000'
+          ) {
+            return '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+          }
+          return asset.address;
+        };
+
+        const tokenInAddr = resolveTokenAddr(selectedSellAsset);
+        const tokenOutAddr = resolveTokenAddr(selectedBuyAsset);
 
         try {
           const fusionQuote = await get1InchFusionQuote(
             fromChainId,
             {
-              tokenIn: selectedSellAsset.isNative
-                ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-                : selectedSellAsset.address || '',
-              tokenOut: selectedBuyAsset.isNative
-                ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-                : selectedBuyAsset.address || '',
-              amount: safeParseUnits(sellAmount, selectedSellAsset.decimals),
+              tokenIn: tokenInAddr,
+              tokenOut: tokenOutAddr,
+              amount: safeParseUnits(sellAmount, selectedSellAsset.decimals || 18),
               walletAddress: evmAddress || '0x0000000000000000000000000000000000000000',
-              decimals: selectedSellAsset.decimals,
             },
             toChainId
           );
@@ -373,14 +502,41 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
             err?.message === 'Quote request superseded'
           )
             return;
-          console.error('Fusion Plus quote error:', err);
-          setCrossChainWarning(parseSwapError(err));
-          setCurrentQuote({
-            source: 'FUSION_PLUS',
-            data: null,
-            error: parseSwapError(err),
-            loading: false,
-          });
+          console.warn('Fusion Plus quote failed, attempting fallback to NEAR Intents:', err);
+
+          try {
+            setCurrentQuote(prev => ({ ...prev, source: 'NEAR_INTENT', loading: true }));
+            const inQ = await fetchNearIntentQuote();
+            if (requestId !== latestRequestId.current) return;
+            if (!inQ || (inQ as any).error) {
+              throw new Error((inQ as any)?.error || 'Pair not supported');
+            }
+            setCurrentQuote({
+              source: 'NEAR_INTENT',
+              data: inQ,
+              error: warningError,
+              loading: false,
+            });
+          } catch (nearErr: any) {
+            if (requestId !== latestRequestId.current) return;
+            console.error('Fusion Plus and NEAR Intents both failed:', nearErr);
+            // Arch-B fix: report the NEAR Intents error as the primary (it's the last
+            // attempted provider). Appending the Fusion error gives context without hiding
+            // the real failure. Source is NEAR_INTENT since that was the final attempt.
+            const fusionErrMsg = parseSwapError(err);
+            const nearErrMsg = parseSwapError(nearErr);
+            const combinedMsg =
+              fusionErrMsg !== nearErrMsg
+                ? `${nearErrMsg} (Fusion fallback: ${fusionErrMsg})`
+                : nearErrMsg;
+            setCrossChainWarning(combinedMsg);
+            setCurrentQuote({
+              source: 'NEAR_INTENT',
+              data: null,
+              error: nearErrMsg,
+              loading: false,
+            });
+          }
         }
       }
     }
@@ -391,12 +547,10 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     selectedSellAsset,
     selectedBuyAsset,
     sellAmount,
-    isChainSwitching,
-    fromChainConfig,
+    sellAssetSymbol,
+    buyAssetSymbol,
     userSlippageTolerance,
     showFusionScreen,
-    isBridgeSupported,
-    getUsdValue,
     ammService,
     evmAddress,
     stellarAddress,
@@ -404,46 +558,68 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     setBridgeErrorMsg,
     resetSwap,
     isStellarAccountActive,
+    currentNetwork,
+    bridgeTxStatus,
   ]);
 
   const isQuoteLoading = !!(currentQuote.loading || swapQuoteLoading || isRefreshing);
 
   useEffect(() => {
-    setTimeToNextRefresh(30);
+    useQuoteTimerStore.getState().resetTimer(30);
     resetSwap();
   }, [fromChainId, toChainId, sellAssetSymbol, buyAssetSymbol, resetSwap]);
 
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const fetchUnifiedQuoteRef = useRef(fetchUnifiedQuote);
+  fetchUnifiedQuoteRef.current = fetchUnifiedQuote;
+
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchUnifiedQuote();
-    }, 800);
-    return () => clearTimeout(timeoutId);
-  }, [fetchUnifiedQuote]);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      fetchUnifiedQuoteRef.current();
+    }, 500);
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, [
+    sellAmount,
+    sellAssetSymbol,
+    buyAssetSymbol,
+    fromChainId,
+    toChainId,
+    selectedSellAsset,
+    selectedBuyAsset,
+    actionType,
+    userSlippageTolerance,
+  ]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
 
-    const shouldPauseTimer =
-      isChainSwitching ||
-      showFusionScreen ||
-      isSameAssetSelected ||
-      isQuoteLoading ||
-      (bridgeTxStatus && bridgeTxStatus !== 'idle') ||
-      useTransactionModalStore.getState().isOpen;
-
-    if (sellAmount && parseFloat(sellAmount) > 0 && !shouldPauseTimer) {
+    if (sellAmount && parseFloat(sellAmount) > 0) {
       timer = setInterval(() => {
-        setTimeToNextRefresh(prev => {
-          if (prev <= 1) return 0;
-          return prev - 1;
-        });
+        // Re-evaluate pause conditions on every tick so we react to modal open/close
+        // and loading-state changes that happen *after* the interval was created.
+        const isModalOpen = useTransactionModalStore.getState().isOpen;
+        const shouldPause =
+          showFusionScreen ||
+          isSameAssetSelected ||
+          isQuoteLoading ||
+          (bridgeTxStatus && bridgeTxStatus !== 'idle') ||
+          isModalOpen;
+
+        if (shouldPause) return;
+
+        const { timeLeft, setTimeLeft, resetTimer } = useQuoteTimerStore.getState();
+        if (timeLeft <= 1) {
+          resetTimer(30);
+          fetchUnifiedQuote();
+        } else {
+          setTimeLeft(prev => prev - 1);
+        }
       }, 1000);
     } else {
-      if (isQuoteLoading) {
-        setTimeToNextRefresh(30);
-      } else if (!shouldPauseTimer) {
-        setTimeToNextRefresh(30);
-      }
+      useQuoteTimerStore.getState().resetTimer(30);
     }
 
     return () => {
@@ -451,25 +627,18 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
     };
   }, [
     sellAmount,
-    isChainSwitching,
     showFusionScreen,
     isSameAssetSelected,
-    isQuoteLoading,
+    // isQuoteLoading intentionally omitted: each loading flip was restarting the
+    // interval and resetting the 30-second timer on every quote fetch.
+    // The check is now inside the tick body where it is always fresh.
     bridgeTxStatus,
+    fetchUnifiedQuote,
   ]);
-
-  useEffect(() => {
-    if (timeLeft <= 0) {
-      setTimeToNextRefresh(30);
-      fetchUnifiedQuote();
-    }
-  }, [timeLeft, fetchUnifiedQuote]);
 
   return {
     currentQuote,
     setCurrentQuote,
-    timeLeft,
-    setTimeToNextRefresh,
     isRefreshing,
     setIsRefreshing,
     isQuoteLoading,

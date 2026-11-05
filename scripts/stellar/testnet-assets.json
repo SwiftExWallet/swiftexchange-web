@@ -1,0 +1,130 @@
+{
+  "network": "TESTNET",
+  "horizonUrl": "https://horizon-testnet.stellar.org",
+  "timestamp": "2026-09-01T09:49:48.814Z",
+  "distributionAccount": {
+    "publicKey": "GDPZ3P2DHLNUNQHP32AMZZPZJLVQW35HTUMMKC6MPKLYURKEAUMROMHQ",
+    "secretKey": "SAGOTGCYCUBQ5DWCLWQ5ZMGEEZZNWZY4W2GNBAUSHFZIQ5WUML3GSHF7"
+  },
+  "assets": [
+    {
+      "code": "USDC",
+      "name": "USD Coin (Testnet)",
+      "issuerPublicKey": "GCMLFMEYS7O4UTRJS4L7GKNO3Q7C62T4RGTTL3UZUWART2HCUZOYIMNE",
+      "issuerSecretKey": "SA6QFLIDWPATWHEG2LRQYGL66ZZLSSUFYP6I3YVJB5QJSUFKYB2ZVBOC",
+      "mintAmount": "5000000",
+      "poolId": "6ede2163c40218751bb78efcf9474ce9e1532aa4bfc2aa0649315f5444bad8da",
+      "liquidityPoolPair": "XLM/USDC",
+      "depositXlm": "1000",
+      "depositAsset": "1000000",
+      "txs": {
+        "trustHash": "74b768cdc0609ab528418f27539b6d53b5dea389dda5adff2dd7b81121edab5e",
+        "mintHash": "6d1767daaf253cd06546abc0fbce1f7024b980e959aedd76639021ad5cdf7846",
+        "poolTrustHash": "2cb0b0ece76b4c652c57dccb7c15957d408618f92cb459717030e132b9f61bca",
+        "depositHash": "ee2d9ad2e02805f74fbca5710b69aecad260aa17cd759f4ffe9c0985f061924b"
+      }
+    },
+    {
+      "code": "AQUA",
+      "name": "Aqua Network (Testnet)",
+      "issuerPublicKey": "GAO2UQT2N7NGSHLNNS5AUGEEEOU3BXER6GGIYFJBF5OUNCLVONUYT3PS",
+      "issuerSecretKey": "SCKSP46Q2TAEUOITY24JWRI2Z4Y2DGTSS3SAMCZEC7MSEL2M6ETW3BNE",
+      "mintAmount": "10000000",
+      "poolId": "2fa42653cbc823b4e785a8b7aa8bb99d0a718193171179c8d6d5effe1277b7aa",
+      "liquidityPoolPair": "XLM/AQUA",
+      "depositXlm": "1000",
+      "depositAsset": "2000000",
+      "txs": {
+        "trustHash": "c1ade5a8aa22fce3c9906e70c040377b677972f508d6c70d84d4dd6573f061cb",
+        "mintHash": "b603db73f180257ac4116e739fc1f0e69ebb110ad8906047910cc1c142524e4f",
+        "poolTrustHash": "b114db0ae2477a3b8d13ba8fe260ef1838b7e9d2a3f0c6a30de2ba55036484c7",
+        "depositHash": "2456aea89eea297fec77a6c6d9d0e9ad78a817e16260a297641ef0d159915e56"
+      }
+    },
+    {
+      "code": "SWIFT",
+      "name": "SwiftEx Token (Testnet)",
+      "issuerPublicKey": "GBVAJRR3O24B3TULTXH5HP4HGADXMORIEEOEWZAKUQFUZETT64NRF5LI",
+      "issuerSecretKey": "SD22QKQPXFLYJWZKQOFYP6YDSNWBQTOA4RQ3H3C6X2KOHQ3O6HC7LLPE",
+      "mintAmount": "10000000",
+      "poolId": "bd2b2817e00162820c42d6b7766475088c81407e85ca9587f20a035579a739f4",
+      "liquidityPoolPair": "XLM/SWIFT",
+      "depositXlm": "1500",
+      "depositAsset": "2000000",
+      "txs": {
+        "trustHash": "9aa95a9752c51b6997b23216d56cef137634a4f0d6b71c12d74145e15f8f0880",
+        "mintHash": "597472ed287a0206e5da586dbfc6a07c661fc8647361c71a974fdd4c04023a5d",
+        "poolTrustHash": "f7d6c882acd9513a266395879ebde6547b2950beb93000d231b461af5703f9b9",
+        "depositHash": "e546bea0f71e1c99557478cefaaac491ec4e0aa1c7489bcee16e595ddb47ac07"
+      }
+    },
+    {
+      "code": "WBTC",
+      "name": "Wrapped Bitcoin (Testnet)",
+      "issuerPublicKey": "GAXAMPQXMVMRZPZNZEHIAVXO5PXL5VYXOWRRB3SCERPPDLZKUKHV6ZRZ",
+      "issuerSecretKey": "SARXBNZIG5IBZSH4OCZUQ3FZRV4NF6SKQHMKB2GRH22ULDR7YOREJJXU",
+      "mintAmount": "100",
+      "poolId": "689a1bc2f150e720a0a087d3df42d6c43e7bd03a736dcb4602358f5c1cd0bfff",
+      "liquidityPoolPair": "XLM/WBTC",
+      "depositXlm": "2000",
+      "depositAsset": "10",
+      "txs": {
+        "trustHash": "722012af70c412bf3c4bbbb01316214385e6c1ffcfebde8b87521786c3e33ac4",
+        "mintHash": "c910baf4b05cc5d0024892aefb2819be24a34b57de97dbedd0547f87db18ccc5",
+        "poolTrustHash": "941b82f5b290a832f19f7def30a6f1f6a7488b7993699b05c7bda2abe1943ad6",
+        "depositHash": "2e1ad8be3fbaebaeed88ee514e26e68bd4d26508255eaf9a9e16d2e6d23d69af"
+      }
+    },
+    {
+      "code": "WETH",
+      "name": "Wrapped Ethereum (Testnet)",
+      "issuerPublicKey": "GBWDY7L6YMM4TAX4RSPX4NMDSFMIX7PQLYKYCTXZH76EIVMPSRJ2CKM4",
+      "issuerSecretKey": "SBBJQALDWK6CW2267HVN55FKXGHEP27XJYZB55XY3GU4RNMBRSRSGWYQ",
+      "mintAmount": "1000",
+      "poolId": "0be968e2ecde0f3c7bff70521237401536d3eca74908e094428810e2dbeac9b0",
+      "liquidityPoolPair": "XLM/WETH",
+      "depositXlm": "1500",
+      "depositAsset": "100",
+      "txs": {
+        "trustHash": "36831dd2f4f7dc84ac880e9b27223cefe8b3d9777f9e6eb373017208583cdc1d",
+        "mintHash": "ac34dc0f7d6d6cec5f6537dd87dfd9207c5365c6de9ee9ac92b4aa1cfdfee1a2",
+        "poolTrustHash": "631e32f7a5d0e14cd01a38f8281228869529488ce9543aa6015d29d965cf8d15",
+        "depositHash": "fb2b1742516f0828c7413e8113874f08ce84df0d2a3d8a96cabc11cf7d9402ec"
+      }
+    },
+    {
+      "code": "EURC",
+      "name": "Euro Coin (Testnet)",
+      "issuerPublicKey": "GACD5TONLCRLWT2EOSQLSK5D6CFJMQSWO6PIP5VF6B73UVCKRSYIMXTY",
+      "issuerSecretKey": "SAIKURVUYZ4FEOIW2H7HUSYC4T5UGKMH6LQY7HYOP4AOYYOCUU57JCI3",
+      "mintAmount": "5000000",
+      "poolId": "1d18fc752fe8d97612bd8a15564c0b2b27128e073528460bbde731cd7720db25",
+      "liquidityPoolPair": "XLM/EURC",
+      "depositXlm": "1000",
+      "depositAsset": "1000000",
+      "txs": {
+        "trustHash": "83ad8afc0d548a5ad4cedde35a0971df6483bf0c83cd7189be1b28acee2c95c8",
+        "mintHash": "b8daba9d6c1d4ab325ecd9b5082f7a8e5f51b21ca05d64bd1832611c44377cc1",
+        "poolTrustHash": "65bd2c8fe9fc899a2e9c97235dd7491d49b36dcce6369266c5c87274ad61cb48",
+        "depositHash": "528ec6cbc648b9397ca0ff3002a2a1e8dee116e7e5d0dcbeb3b377aa3423bec2"
+      }
+    },
+    {
+      "code": "ACME",
+      "name": "Acme Corp Asset (Testnet)",
+      "issuerPublicKey": "GB75GYGNXJ566NKBMDUBMKGZQWWNLYAT3FWSMCPX3O3427JGQ3D3CC33",
+      "issuerSecretKey": "SDKCJQTNZIAUVWFJOEEZE22WF5XEMVY2XEVRZ3CKQGPENRM7MQOC22C2",
+      "mintAmount": "1000000",
+      "poolId": "dcf7ed156a672eb86e13395c704ca5b9303116c06249ccefe9fd001ed8587c97",
+      "liquidityPoolPair": "XLM/ACME",
+      "depositXlm": "1000",
+      "depositAsset": "500000",
+      "txs": {
+        "trustHash": "fff1128612069459b84ac0b362ae23ca9a97d65b88d72d621a43b48e307132dd",
+        "mintHash": "9012b43990116a66fe487f88f310fe2c901dfe3c3fa7ea21cbab92679f44916d",
+        "poolTrustHash": "5049845a155df36e09a692c8df915ede5df3c9f2e20654aabf11e4a7457e797d",
+        "depositHash": "24d4d8d7c908682b2b38f955a4b2266f6d327750ee053655ec998992ec80b518"
+      }
+    }
+  ]
+}

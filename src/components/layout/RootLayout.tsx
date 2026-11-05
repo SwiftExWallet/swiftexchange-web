@@ -4,7 +4,7 @@ import { Outlet } from 'react-router-dom';
 import { GlobalNotifications } from '@/components/notifications/GlobalNotifications';
 
 import AssetSelectorModal from '../../modules/commonfeature/components/AssetSelectorModal';
-import { AssetSelectorProvider } from '../../modules/commonfeature/components/useAssetSelectorModal';
+import { AssetSelectorProvider } from '../../modules/commonfeature/components/AssetSelectorProvider';
 
 const RootLayout = () => {
   return (

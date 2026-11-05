@@ -11,11 +11,22 @@ import {
   useWalletStore,
 } from './modules/walletconnect/store/walletConnectStore';
 import router from './routes';
+import { getValidDeviceToken, setDeviceToken } from './service/apiConfig';
+import { ensureWalletLinkedToDevice } from './service/apiService';
 import { registerDevice } from './service/deviceService';
+import { useAppAvailabilityStore } from './store/appAvailabilityStore';
 import { useGeolocationStore } from './store/geolocationStore';
 
+let hasPrintedSecurityWarning = false;
+
 const printSecurityWarning = () => {
-  if (import.meta.env.PROD) {
+  if (hasPrintedSecurityWarning) return;
+
+  const isExplicitlyDisabled = import.meta.env.VITE_ENABLE_SECURITY_WARNING === 'false';
+  const isEnabled = !isExplicitlyDisabled;
+
+  if (isEnabled) {
+    hasPrintedSecurityWarning = true;
     console.log(
       '%cStop!',
       'color: red; font-size: 60px; font-weight: bold; text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000;'
@@ -44,33 +55,36 @@ const isValidDevicePayload = (payload: unknown): boolean => {
   );
 };
 
+const isSwiftExPeer = (peerMeta?: any): boolean => {
+  if (!peerMeta) return false;
+  const name = typeof peerMeta.name === 'string' ? peerMeta.name.toLowerCase() : '';
+  const url = typeof peerMeta.url === 'string' ? peerMeta.url.toLowerCase() : '';
+  return name.includes('swiftex') || url.includes('swiftexchange.io');
+};
+
 const App = () => {
   const session = useWalletStore(state => state.session);
-
-  console.log(session?.peer?.metadata?.userDevice, '---------');
   const devicePayload = session?.peer?.metadata?.userDevice;
 
   useEffect(() => {
+    printSecurityWarning();
     initWalletListener();
     initDynamicTokenLists();
     useGeolocationStore.getState().fetchLocation();
+    useAppAvailabilityStore.getState().fetchAvailability();
   }, []);
 
   useEffect(() => {
-    const storedTimestamp = localStorage.getItem('device_token_timestamp');
-    if (storedTimestamp) {
-      const elapsed = Date.now() - parseInt(storedTimestamp, 10);
-      const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-      if (elapsed > ONE_WEEK_MS) {
-        localStorage.removeItem('device_token');
-        localStorage.removeItem('device_token_timestamp');
-      }
-    }
-
-    const storedToken = localStorage.getItem('device_token');
+    const storedToken = getValidDeviceToken();
     if (storedToken) {
+      ensureWalletLinkedToDevice(undefined, storedToken).catch(() => {});
       return;
     }
+
+    if (!isSwiftExPeer(session?.peer?.metadata)) {
+      return;
+    }
+
     if (!isValidDevicePayload(devicePayload)) {
       return;
     }
@@ -79,12 +93,12 @@ const App = () => {
       .then(res => {
         const token = res.token || res.data?.token || res.deviceToken;
         if (token) {
-          localStorage.setItem('device_token', token);
-          localStorage.setItem('device_token_timestamp', Date.now().toString());
+          setDeviceToken(token);
+          ensureWalletLinkedToDevice(undefined, token).catch(() => {});
         }
       })
       .catch(() => {});
-  }, [devicePayload]);
+  }, [devicePayload, session?.peer?.metadata]);
 
   return (
     <ErrorBoundary>

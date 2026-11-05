@@ -1,14 +1,12 @@
-import { AlertCircle, HelpCircle, KeyRound, Loader2 } from 'lucide-react';
+import { ExternalLink, HelpCircle, Sparkles } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { useNotificationStore } from '../../../../store/notificationStore';
-import { useAsterAgent, useAsterAgentStore } from '../../adapters/aster/hooks/useAsterAgent';
+import { parseAsterError } from '../../adapters/aster/api/errors';
+import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
 import { useAsterDataSync } from '../../adapters/aster/hooks/useAsterDataSync';
 import { useOrders } from '../../adapters/aster/hooks/useOrders';
-import {
-  useHyperliquidAgent,
-  useHyperliquidAgentStore,
-} from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
+import { useHyperliquidAgent } from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
 import { useHyperliquidDataStream } from '../../adapters/hyperliquid/hooks/useHyperliquidDataStream';
 import { useExchangeManager } from '../../core/ExchangeManager';
 import { useAccountStore } from '../../core/stores/accountStore';
@@ -16,6 +14,7 @@ import { useMarketStore } from '../../core/stores/marketStore';
 import { usePositionStore } from '../../core/stores/positionStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
+import { useUnifiedExecution } from '../../services/useUnifiedExecution';
 import { AccountModal } from '../trade/AccountModal';
 import { AssetModeModal } from '../trade/AssetModeModal';
 import { LeverageModal } from '../trade/LeverageModal';
@@ -27,7 +26,12 @@ const useLiveTotalPnl = (positions: Record<string, any>) => {
 
   return Object.values(positions).reduce((acc, p) => {
     const isLong = parseFloat(p.size) > 0;
-    const markPrice = assetCtxByMarket[p.symbol]?.markPx || p.markPrice || '0';
+    const markPrice =
+      assetCtxByMarket[p.symbol]?.markPx ||
+      assetCtxByMarket[p.symbol.replace('-', '')]?.markPx ||
+      assetCtxByMarket[p.symbol.replace('USDT', '-USDT')]?.markPx ||
+      p.markPrice ||
+      '0';
     const entryVal = parseFloat(p.entryPrice);
     const markVal = parseFloat(markPrice);
     const absSize = Math.abs(parseFloat(p.size));
@@ -40,6 +44,9 @@ const useTotalWalletBalance = (balances: Record<string, any>) => {
   const assetCtxByMarket = useTickerStore(state => state.assetCtxByMarket);
 
   return Object.values(balances).reduce((acc, b) => {
+    if (b.usdValue && !isNaN(parseFloat(b.usdValue))) {
+      return acc + parseFloat(b.usdValue);
+    }
     let price = 1;
     if (b.asset !== 'USDT' && b.asset !== 'USDC') {
       const symbol = `${b.asset}USDT`;
@@ -47,6 +54,8 @@ const useTotalWalletBalance = (balances: Record<string, any>) => {
         assetCtxByMarket[symbol]?.markPx || assetCtxByMarket[`${b.asset}-USDT`]?.markPx;
       if (markPrice) {
         price = parseFloat(markPrice);
+      } else if (b.asset === 'ASTER') {
+        price = 0.7483;
       } else {
         price = 0;
       }
@@ -59,45 +68,19 @@ export const ExchangeOrderFormPanel: React.FC = () => {
   const asterAgent = useAsterAgent();
   const hyperliquidAgent = useHyperliquidAgent();
   const currentExchange = useExchangeManager(s => s.currentExchange);
+  const currentNetwork = useExchangeManager(s => s.currentNetwork);
   const activeAgent = currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
-  const { userAddr, isReady, deriveState, error: deriveError, deriveAgentKey } = activeAgent;
-
-  const isDepositError = deriveState === 'error' && deriveError?.message?.includes('Must deposit');
-
-  const handleActionClick = async () => {
-    if (isDepositError) {
-      setAccountModalTab('deposit');
-      setActiveModal('account');
-      return;
-    }
-
-    let timeoutId: any;
-    try {
-      timeoutId = setTimeout(() => {
-        const state =
-          currentExchange === 'hyperliquid'
-            ? useHyperliquidAgentStore.getState()
-            : useAsterAgentStore.getState();
-        if (state.deriveState === 'signing') {
-          state.setDeriveState('error');
-          state.setError(
-            new Error('Signature request timed out after 1 minute. Please try again.')
-          );
-        }
-      }, 60000);
-      await deriveAgentKey();
-    } catch (e) {
-      console.error('Failed to derive agent key:', e);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  };
+  const { userAddr } = activeAgent;
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
 
-  useAsterDataSync(asterAgent.asterSigner, userAddr);
-  useHyperliquidDataStream(userAddr);
+  useAsterDataSync(asterAgent.isReady ? asterAgent.asterSigner : null, asterAgent.userAddr);
+  useHyperliquidDataStream(hyperliquidAgent.userAddr);
 
-  const { place, placeChase, placeBatch } = useOrders(asterAgent.asterSigner, userAddr);
+  const { executeOrder } = useUnifiedExecution();
+  const { placeChase, placeBatch } = useOrders(asterAgent.asterSigner, userAddr);
+  const selectedSymbol = useMarketStore(state => state.selectedSymbol);
+  const assetCtx = useTickerStore(state => state.assetCtxByMarket[selectedSymbol]);
+  const currentMarketPrice = parseFloat(assetCtx?.midPx || assetCtx?.markPx || '0') || 0;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeModal, setActiveModal] = useState<
     'margin' | 'leverage' | 'account' | 'assetMode' | null
@@ -145,7 +128,10 @@ export const ExchangeOrderFormPanel: React.FC = () => {
       if (payload.sizeAsset === 'quote') {
         let conversionPrice = 1;
         if (
-          (payload.type === 'LIMIT' || payload.type === 'STOP' || payload.type === 'TAKE_PROFIT') &&
+          (payload.type === 'LIMIT' ||
+            payload.type === 'POST_ONLY' ||
+            payload.type === 'STOP' ||
+            payload.type === 'TAKE_PROFIT') &&
           payload.price
         ) {
           conversionPrice = parseFloat(payload.price);
@@ -164,15 +150,22 @@ export const ExchangeOrderFormPanel: React.FC = () => {
       const formattedStopPrice = formatPrecision(payload.stopPrice, currentMarket?.tickSize);
       const formattedActivation = formatPrecision(payload.activationPrice, currentMarket?.tickSize);
 
+      let res: any = null;
+
       if (payload.type === 'SCALED') {
-        const pLower = parseFloat(payload.scaledPriceLower || '0');
-        const pUpper = parseFloat(payload.scaledPriceUpper || '0');
+        const rawLower = parseFloat(payload.scaledPriceLower || '0');
+        const rawUpper = parseFloat(payload.scaledPriceUpper || '0');
         const n = parseInt(payload.scaledOrderCount || '5', 10);
         const dist = payload.scaledDistribution || 'FLAT';
         const tSize = parseFloat(finalSize || '0');
 
         if (n < 2 || n > 20) throw new Error('Order count must be between 2 and 20');
-        if (pLower <= 0 || pUpper <= 0 || pLower >= pUpper) throw new Error('Invalid price range');
+        if (rawLower <= 0 || rawUpper <= 0)
+          throw new Error('Please enter valid Lower and Upper prices');
+
+        const pLower = Math.min(rawLower, rawUpper);
+        const pUpper = Math.max(rawLower, rawUpper);
+        if (pLower === pUpper) throw new Error('Lower and Upper prices cannot be identical');
 
         const priceStep = (pUpper - pLower) / (n - 1);
         const sumWeights = (n * (n + 1)) / 2;
@@ -196,7 +189,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
               quantity: fSize,
               price: fPrice,
               timeInForce: 'GTC',
-              reduceOnly: payload.isReduceOnly,
+              reduceOnly: false,
             });
           }
         }
@@ -204,14 +197,28 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         if (scaledOrders.length === 0)
           throw new Error('Calculated sizes are too small for market step size');
 
-        await placeBatch(scaledOrders);
+        const minNotional = currentMarket?.minNotional || 5.0;
+        for (const o of scaledOrders) {
+          const splitNotional = parseFloat(o.price) * parseFloat(o.quantity);
+          if (splitNotional < minNotional) {
+            throw new Error(
+              `Each split order must have at least $${minNotional.toFixed(2)} USDT notional (current split is $${splitNotional.toFixed(2)} USDT). Please increase total size or reduce order count.`
+            );
+          }
+        }
+
+        res = await placeBatch(scaledOrders);
       } else if (payload.type === 'CHASE') {
         const formattedChaseOffset =
           formatPrecision(payload.chaseOffset || '0', currentMarket?.tickSize) || '0';
         const formattedMaxChaseOffset =
-          formatPrecision(payload.maxChaseOffset || '10', currentMarket?.tickSize) || '10';
+          payload.maxChaseDifferenceEnabled &&
+          payload.maxChaseOffset &&
+          parseFloat(payload.maxChaseOffset) > 0
+            ? formatPrecision(payload.maxChaseOffset, currentMarket?.tickSize)
+            : undefined;
 
-        await placeChase({
+        res = await placeChase({
           symbol: payload.symbol.replace('-', ''),
           side: payload.side,
           quantity: formattedQty || payload.size,
@@ -221,60 +228,108 @@ export const ExchangeOrderFormPanel: React.FC = () => {
           maxChaseOffset: formattedMaxChaseOffset,
         });
       } else {
-        await place({
-          symbol: payload.symbol.replace('-', ''),
+        const isMarket = payload.type === 'MARKET';
+        const isTrailingStop = payload.type === 'TRAILING_STOP_MARKET';
+        const isPostOnly = payload.type === 'POST_ONLY';
+
+        res = await executeOrder({
+          symbol: payload.symbol,
           side: payload.side,
           type: payload.type,
-          quantity: formattedQty,
-          price:
-            payload.type === 'LIMIT' || payload.type === 'STOP' || payload.type === 'TAKE_PROFIT'
-              ? formattedPrice
-              : undefined,
-          timeInForce:
-            payload.type === 'LIMIT' || payload.type === 'STOP' || payload.type === 'TAKE_PROFIT'
-              ? tif
-              : undefined,
-          reduceOnly: payload.isReduceOnly,
-          workingType: payload.workingType,
-          stopPrice:
-            payload.type === 'STOP' ||
-            payload.type === 'STOP_MARKET' ||
-            payload.type === 'TAKE_PROFIT' ||
-            payload.type === 'TAKE_PROFIT_MARKET'
-              ? formattedStopPrice
-              : undefined,
-          activationPrice:
-            payload.type === 'TRAILING_STOP_MARKET' && formattedActivation
-              ? formattedActivation
-              : undefined,
-          callbackRate: payload.type === 'TRAILING_STOP_MARKET' ? payload.callbackRate : undefined,
+          price: !isMarket && !isTrailingStop ? formattedPrice || '0' : '0',
+          size: formattedQty || payload.size,
+          reduceOnly: isPostOnly ? false : payload.isReduceOnly,
+          timeInForce: !isMarket && !isTrailingStop ? (isPostOnly ? 'GTX' : tif) : undefined,
+          stopPrice: !isMarket && !isTrailingStop ? formattedStopPrice : undefined,
+          callbackRate: isTrailingStop ? payload.callbackRate || '1.0' : undefined,
+          activationPrice: isTrailingStop ? formattedActivation : undefined,
+          currentPrice: currentMarketPrice,
         });
+
+        // If attached TP was configured, place TAKE_PROFIT_MARKET order
+        if (
+          payload.attachedTpEnabled &&
+          payload.attachedTpPrice &&
+          parseFloat(payload.attachedTpPrice) > 0
+        ) {
+          const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
+          const formattedTp =
+            formatPrecision(payload.attachedTpPrice, currentMarket?.tickSize) ||
+            payload.attachedTpPrice;
+          try {
+            await executeOrder({
+              symbol: payload.symbol,
+              side: oppositeSide,
+              type: 'TAKE_PROFIT_MARKET',
+              price: '0',
+              size: formattedQty || payload.size,
+              reduceOnly: true,
+              stopPrice: formattedTp,
+              currentPrice: currentMarketPrice,
+            });
+          } catch (tpErr: any) {
+            console.warn('Attached Take Profit order notice:', tpErr);
+          }
+        }
+
+        // If attached SL was configured, place STOP_MARKET order
+        if (
+          payload.attachedSlEnabled &&
+          payload.attachedSlPrice &&
+          parseFloat(payload.attachedSlPrice) > 0
+        ) {
+          const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
+          const formattedSl =
+            formatPrecision(payload.attachedSlPrice, currentMarket?.tickSize) ||
+            payload.attachedSlPrice;
+          try {
+            await executeOrder({
+              symbol: payload.symbol,
+              side: oppositeSide,
+              type: 'STOP_MARKET',
+              price: '0',
+              size: formattedQty || payload.size,
+              reduceOnly: true,
+              stopPrice: formattedSl,
+              currentPrice: currentMarketPrice,
+            });
+          } catch (slErr: any) {
+            console.warn('Attached Stop Loss order notice:', slErr);
+          }
+        }
       }
+
+      const txHash =
+        res?.newChainData?.hash || (Array.isArray(res) && res[0]?.newChainData?.hash) || undefined;
+      const explorerBase =
+        currentNetwork === 'testnet'
+          ? 'https://www.asterdex-testnet.com/en/explorer/tx/'
+          : 'https://www.asterdex.com/en/explorer/tx/';
+
+      const typeLabel =
+        payload.type === 'TRAILING_STOP_MARKET'
+          ? 'Trailing Stop'
+          : payload.type === 'POST_ONLY'
+            ? 'Post Only (Maker)'
+            : payload.type === 'CHASE'
+              ? 'Chase'
+              : payload.type === 'SCALED'
+                ? `Scaled (${payload.scaledOrderCount} orders)`
+                : payload.type;
 
       useNotificationStore.getState().showToast({
         type: 'DYDX',
         title: 'Order Placed',
         status: 'success',
-        message: `${payload.side} ${payload.type} ${formattedQty || payload.size} ${
-          payload.symbol.split('-')[0]
-        } placed successfully.`,
+        message: `${payload.side} ${typeLabel} ${formattedQty || payload.size} ${payload.symbol.split('-')[0]} placed successfully.`,
+        txHash: txHash || undefined,
+        explorerUrl: txHash ? `${explorerBase}${txHash}` : undefined,
       });
     } catch (err: any) {
       console.error('Failed to place order:', err);
-      let errorMsg = err?.userMessage || err?.message || 'Failed to place order';
-
-      // Fallback JSON parse just in case
-      try {
-        if (typeof errorMsg === 'string' && errorMsg.includes('{')) {
-          const jsonMatch = errorMsg.match(/\{.*\}/);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            if (parsed.msg) errorMsg = parsed.msg;
-          }
-        }
-      } catch {
-        /* ignore */
-      }
+      const parsedErr = parseAsterError(err);
+      const errorMsg =
+        parsedErr.userMessage || err?.userMessage || err?.message || 'Failed to place order';
 
       useNotificationStore.getState().showToast({
         type: 'DYDX',
@@ -289,69 +344,6 @@ export const ExchangeOrderFormPanel: React.FC = () => {
 
   return (
     <div className="bg-secondary border border-color rounded-lg h-full min-h-0 flex flex-col overflow-hidden relative">
-      {userAddr && !isReady && (
-        <div className="absolute inset-0 z-50 backdrop-blur-xl bg-black/60 flex flex-col items-center justify-center p-6 text-center transition-all duration-300">
-          <div className="relative overflow-hidden bg-tertiary/80 border border-white/10 rounded-2xl p-6 sm:p-8 max-w-[320px] w-full shadow-2xl flex flex-col items-center">
-            {/* Background effects */}
-            <div className="absolute -top-20 -right-20 w-40 h-40 bg-brand/20 blur-[50px] rounded-full pointer-events-none" />
-            <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-brand/10 blur-[50px] rounded-full pointer-events-none" />
-
-            <div className="relative z-10 flex flex-col items-center w-full">
-              <div className="relative mb-5">
-                <div
-                  className={`absolute inset-0 bg-brand/20 blur-xl rounded-full ${deriveState === 'signing' ? 'animate-pulse' : ''}`}
-                />
-                <div className="w-14 h-14 bg-secondary/80 border border-white/10 rounded-full flex items-center justify-center relative shadow-inner">
-                  {deriveState === 'signing' ? (
-                    <Loader2 className="w-6 h-6 text-brand animate-spin" />
-                  ) : deriveState === 'error' ? (
-                    <AlertCircle className="w-6 h-6 text-red-500" />
-                  ) : (
-                    <KeyRound className="w-6 h-6 text-brand" />
-                  )}
-                </div>
-              </div>
-
-              <h3 className="text-base font-black text-white mb-2 tracking-tight">
-                {deriveState === 'signing'
-                  ? 'Approve in Wallet'
-                  : deriveState === 'error'
-                    ? 'Authorization Failed'
-                    : 'Trading Authorization'}
-              </h3>
-
-              <p className="text-xs text-muted mb-6 max-w-[240px] leading-relaxed">
-                {deriveState === 'signing'
-                  ? 'Please check your connected wallet and approve the signature request to enable trading.'
-                  : deriveState === 'error'
-                    ? deriveError?.message ||
-                      'The request was rejected or timed out. Please try again.'
-                    : 'Sign a one-time request to verify your wallet and enable gas-free trading.'}
-              </p>
-
-              <button
-                type="button"
-                onClick={handleActionClick}
-                disabled={deriveState === 'signing'}
-                className="w-full relative overflow-hidden group bg-brand hover:bg-brand-hover text-white rounded-xl py-3 font-bold text-xs transition-all duration-300 shadow-[0_0_20px_rgba(var(--color-brand-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--color-brand-rgb),0.5)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
-              >
-                <span className="relative z-10">
-                  {isDepositError
-                    ? 'Deposit Funds'
-                    : deriveState === 'signing'
-                      ? 'Waiting for Approval...'
-                      : deriveState === 'error'
-                        ? 'Try Again'
-                        : 'Prepare Wallet'}
-                </span>
-                {!deriveState || deriveState !== 'signing' ? (
-                  <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
-                ) : null}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       <OrderForm
         onSubmitOrder={handlePlaceOrder}
         isLoading={isSubmitting}
@@ -379,18 +371,20 @@ export const ExchangeAccountPanel: React.FC = () => {
   const asterAgent = useAsterAgent();
   const hyperliquidAgent = useHyperliquidAgent();
   const currentExchange = useExchangeManager(s => s.currentExchange);
-  const { isReady: isAsterReady } =
-    currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
+  const currentNetwork = useExchangeManager(s => s.currentNetwork);
+  const activeAgent = currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
+  const isAgentReady = activeAgent.isReady;
+  const isLoadingBalance = useAccountStore(state => state.isLoading);
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
 
   const [activeModal, setActiveModal] = useState<
     'margin' | 'leverage' | 'account' | 'assetMode' | null
   >(null);
   const [accountModalTab, setAccountModalTab] = useState<
-    'deposit' | 'withdraw' | 'transfer' | 'history'
+    'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet'
   >('deposit');
 
-  const handleOpenAccount = (tab: 'deposit' | 'withdraw' | 'transfer' | 'history') => {
+  const handleOpenAccount = (tab: 'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet') => {
     setAccountModalTab(tab);
     setActiveModal('account');
   };
@@ -404,68 +398,116 @@ export const ExchangeAccountPanel: React.FC = () => {
   );
 
   const balances = useAccountStore(state => state.balances);
+  const multiAssetsMargin = useAccountStore(state => state.multiAssetsMargin);
+  const storeMarginBalance = useAccountStore(state => state.totalMarginBalance);
   const positions = usePositionStore(state => state.positions);
   const totalPnl = useLiveTotalPnl(positions);
-  const walletBalance = useTotalWalletBalance(balances);
+  const calculatedWalletBalance = useTotalWalletBalance(balances);
 
-  const accountEquity = walletBalance + totalPnl;
+  const isAster = currentExchange === 'aster';
+
+  // Perp Total Value is the total USD valuation of all assets in the perpetual account
+  const perpTotalValue = calculatedWalletBalance;
+  const perpCurrency = isAster ? 'USD' : 'USDC';
+
+  // Margin Equity:
+  // In Multi-Asset Mode on Aster: storeMarginBalance (multi-asset collateral equity in USD)
+  // In Single-Asset Mode on Aster: settlement asset balance (USDT) + totalPnl in USDT
+  // On Hyperliquid: (USDC balance + totalPnl) in USDC
+  const marginEquity = isAster
+    ? multiAssetsMargin && storeMarginBalance && parseFloat(storeMarginBalance) > 0
+      ? parseFloat(storeMarginBalance)
+      : parseFloat(balances['USDT']?.total || balances['USDT']?.marginBalance || '0') + totalPnl
+    : parseFloat(balances['USDC']?.total || balances['USD']?.total || '0') + totalPnl;
+
+  const marginCurrency = isAster ? (multiAssetsMargin ? 'USD' : 'USDT') : 'USDC';
 
   return (
     <div className="bg-secondary border border-color rounded-lg p-3 space-y-2.5 h-full min-h-0 overflow-y-auto scrollbar-thin flex flex-col justify-between">
       <div className="space-y-2.5">
-        {/* 3 Action Buttons */}
+        {/* Action Buttons: Aster Style Segmented Action Row */}
         <div className="flex gap-1.5">
           <button
             type="button"
             onClick={() => handleOpenAccount('deposit')}
-            className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+            className="flex-1 bg-brand hover:bg-brand-hover text-white py-1.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer text-center shadow-xs"
           >
             Deposit
           </button>
           <button
             type="button"
             onClick={() => handleOpenAccount('withdraw')}
-            className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+            className="flex-1 bg-tertiary hover:bg-hover border border-color text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
           >
             Withdraw
           </button>
           <button
             type="button"
             onClick={() => handleOpenAccount('transfer')}
-            className="flex-1 bg-tertiary hover:bg-hover text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
+            className="flex-1 bg-tertiary hover:bg-hover border border-color text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
           >
             Transfer
           </button>
         </div>
+
+        {/* Testnet Faucet Quick Link if on Testnet */}
+        {currentNetwork === 'testnet' && isAster && (
+          <a
+            href="https://www.asterdex-testnet.com/en/faucet"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-warning/10 hover:bg-warning/20 text-warning border border-warning/30 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <Sparkles size={12} className="text-warning" />
+            <span>Claim Aster Testnet Faucet</span>
+            <ExternalLink size={10} className="opacity-70" />
+          </a>
+        )}
 
         {/* Account Equity Section */}
         <div className="space-y-1">
           <h4 className="text-[11px] font-medium text-primary mb-0.5">Account Equity</h4>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Spot Total Value</span>
-            <span className="text-primary font-medium">{isAsterReady ? '0.00 USD' : '--'}</span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span className="text-primary font-medium">
+                {isAgentReady ? `0.00 ${perpCurrency}` : '--'}
+              </span>
+            )}
           </div>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Perp Total Value</span>
-            <span className="text-primary font-medium">
-              {isAsterReady ? `${walletBalance.toFixed(2)} USD` : '--'}
-            </span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span className="text-primary font-medium">
+                {isAgentReady ? `${perpTotalValue.toFixed(2)} ${perpCurrency}` : '--'}
+              </span>
+            )}
           </div>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Perpetuals Unrealized Pnl</span>
-            <span
-              className={`font-medium ${
-                !isAsterReady
-                  ? 'text-primary'
-                  : totalPnl > 0
-                    ? 'text-success'
-                    : totalPnl < 0
-                      ? 'text-danger'
-                      : 'text-primary'
-              }`}
-            >
-              {!isAsterReady ? '--' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)} USD`}
-            </span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span
+                className={`font-medium ${
+                  !isAgentReady
+                    ? 'text-primary'
+                    : totalPnl > 0
+                      ? 'text-success'
+                      : totalPnl < 0
+                        ? 'text-danger'
+                        : 'text-primary'
+                }`}
+              >
+                {!isAgentReady
+                  ? '--'
+                  : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)} ${perpCurrency}`}
+              </span>
+            )}
           </div>
         </div>
 
@@ -475,7 +517,7 @@ export const ExchangeAccountPanel: React.FC = () => {
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Account Margin Ratio</span>
             <div className="flex items-center gap-1">
-              {isAsterReady && (
+              {isAgentReady && !isLoadingBalance && (
                 <div
                   className={`w-2 h-2 rounded-full ${
                     crossMarginRatio > 80
@@ -486,46 +528,92 @@ export const ExchangeAccountPanel: React.FC = () => {
                   }`}
                 />
               )}
-              <span
-                className={`font-medium ${
-                  !isAsterReady
-                    ? 'text-primary'
-                    : crossMarginRatio > 80
-                      ? 'text-danger'
-                      : crossMarginRatio > 50
-                        ? 'text-warning'
-                        : 'text-success'
-                }`}
-              >
-                {isAsterReady ? `${crossMarginRatio.toFixed(2)}%` : '--'}
-              </span>
+              {isLoadingBalance ? (
+                <div className="h-3 w-10 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+              ) : (
+                <span
+                  className={`font-medium ${
+                    !isAgentReady
+                      ? 'text-primary'
+                      : crossMarginRatio > 80
+                        ? 'text-danger'
+                        : crossMarginRatio > 50
+                          ? 'text-warning'
+                          : 'text-success'
+                  }`}
+                >
+                  {isAgentReady ? `${crossMarginRatio.toFixed(2)}%` : '--'}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span>Account Maintenance Margin</span>
-            <span className="text-primary font-medium">
-              {isAsterReady ? `${totalMaintenanceMargin.toFixed(2)} USD` : '--'}
-            </span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span className="text-primary font-medium">
+                {isAgentReady ? `${totalMaintenanceMargin.toFixed(2)} ${marginCurrency}` : '--'}
+              </span>
+            )}
           </div>
           <div className="flex justify-between items-center text-[11px] text-secondary">
             <span className="flex items-center gap-1">
               Account Equity <HelpCircle size={10} className="text-secondary" />
             </span>
-            <span className="text-primary font-medium">
-              {isAsterReady ? `${accountEquity.toFixed(2)} USD` : '--'}
-            </span>
+            {isLoadingBalance ? (
+              <div className="h-3 w-16 bg-gradient-to-r from-tertiary via-hover to-tertiary bg-[length:200%_100%] animate-pulse rounded" />
+            ) : (
+              <span className="text-primary font-medium">
+                {isAgentReady ? `${marginEquity.toFixed(2)} ${marginCurrency}` : '--'}
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Multi-Asset Mode button */}
-      <button
-        type="button"
-        onClick={() => setActiveModal('assetMode')}
-        className="w-full py-1.5 text-[11px] text-secondary bg-tertiary rounded hover:text-primary hover:bg-hover transition-colors cursor-pointer mt-1"
-      >
-        Multi-Asset Mode
-      </button>
+      {isAster && (
+        <button
+          type="button"
+          onClick={() => setActiveModal('assetMode')}
+          className="w-full py-2 px-3 text-[11px] flex items-center justify-between text-secondary bg-tertiary rounded-md hover:text-primary hover:bg-hover transition-colors cursor-pointer mt-1 border border-color shadow-2xs"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-primary">
+              {multiAssetsMargin ? 'Multi-Asset Mode' : 'Single-Asset Mode'}
+            </span>
+          </div>
+          <span className="text-[10px] text-muted hover:text-primary transition-colors">
+            Switch Mode
+          </span>
+        </button>
+      )}
+
+      {isAster && isAgentReady && (
+        <div className="w-full py-1.5 px-3 text-[11px] flex items-center justify-between text-secondary bg-tertiary/70 rounded-md mt-1 border border-color">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span className="text-primary font-medium text-[10px]">Session Active</span>
+            <span className="text-[10px] text-muted font-mono">
+              ({asterAgent.timeRemaining || '30d'})
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={asterAgent.isRevoking}
+            onClick={async () => {
+              try {
+                await asterAgent.revokeSession();
+              } catch (e) {
+                console.error('Revocation failed:', e);
+              }
+            }}
+            className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {asterAgent.isRevoking ? 'Revoking...' : 'Revoke'}
+          </button>
+        </div>
+      )}
 
       <AssetModeModal isOpen={activeModal === 'assetMode'} onClose={() => setActiveModal(null)} />
       <AccountModal

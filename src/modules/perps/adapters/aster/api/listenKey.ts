@@ -3,8 +3,8 @@ import type { Signer } from 'ethers';
 import { ASTER_ENDPOINTS } from '../constants';
 import { signedRequest } from './auth';
 
-// 55 minutes keepalive well before the 60-minute expiry window.
-export const LISTEN_KEY_KEEPALIVE_MS = 55 * 60 * 1000;
+// 30 minutes keepalive well before the 60-minute expiry window (WS-02)
+export const LISTEN_KEY_KEEPALIVE_MS = 30 * 60 * 1000;
 
 // Create a new listenKey (or return the active one if one already exists).
 export async function createListenKey(signer: Signer, userAddr: string): Promise<string> {

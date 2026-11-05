@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import * as StellarSDK from '@stellar/stellar-sdk';
+import BigNumber from 'bignumber.js';
 
 import { getStellarConfig } from '../../walletconnect/config/chains';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
+import { StellarBaseService } from '../service/StellarBaseService';
 import { AmmSwapService } from '../service/ammSwapService';
+import { AquariusService } from '../service/aquariusService';
+import { SoroswapService } from '../service/soroswapService';
 import { useAmmSwapStore } from '../store/ammSwapStore';
 import type { SwapQuote, TokenInfo } from '../types/ammSwap.types';
 
@@ -16,6 +20,8 @@ interface UseAmmSwapProps {
 
 export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
   const [service, setService] = useState<AmmSwapService | null>(null);
+  const [soroswapService, setSoroswapService] = useState<SoroswapService | null>(null);
+  const [aquariusService, setAquariusService] = useState<AquariusService | null>(null);
   const hasSetDefaultPairRef = useRef(false);
   const [fromToken, setFromToken] = useState<TokenInfo | null>(null);
   const [toToken, setToToken] = useState<TokenInfo | null>(null);
@@ -43,8 +49,14 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
         config.chainId
       );
       setService(ammService);
+
+      const soroService = new SoroswapService(config.horizonUrl, config.networkPassphrase);
+      setSoroswapService(soroService);
+
+      const aquaService = new AquariusService(config.horizonUrl, config.networkPassphrase);
+      setAquariusService(aquaService);
     } catch (err) {
-      console.error('Failed to initialize AMM service:', err);
+      console.error('Failed to initialize AMM/Soroswap/Aquarius services:', err);
       setError('Failed to connect to Stellar network');
     }
   }, [currentStellarConfig]);
@@ -203,7 +215,15 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
   }, [fromToken?.code, fromToken?.issuer, toToken?.code, toToken?.issuer, currentStellarConfig]);
 
   useEffect(() => {
-    if (!service || !fromToken || !toToken || !fromAmount || parseFloat(fromAmount) <= 0) {
+    const fromAmountBN = new BigNumber(fromAmount || '0');
+    if (
+      !service ||
+      !fromToken ||
+      !toToken ||
+      !fromAmount ||
+      !fromAmountBN.isFinite() ||
+      fromAmountBN.lte(0)
+    ) {
       setQuote(null);
       setToAmount('');
       return;
@@ -223,30 +243,67 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
       return;
     }
 
-    // Validate sufficient balance
-    const availableBalance = parseFloat(fromToken.balance || '0');
-    const requestedAmount = parseFloat(fromAmount);
-
-    // Instead of hardcoding 2 XLM, we use the actual calculated reserve.
-    // The native balance from Stellar SDK is total balance. Spendable = total - reserve.
-    const reserve = fromToken.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
-
-    if (requestedAmount > availableBalance - reserve) {
-      setError(
-        `Insufficient ${fromToken.code} balance. Available: ${Math.max(0, availableBalance - reserve).toFixed(7)}`
-      );
-      setQuote(null);
-      setToAmount('');
-      return;
-    }
-
     const getQuote = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        const swapQuote = await service.getSwapQuote(fromToken.asset, toToken.asset, fromAmount, {
-          slippageTolerance,
-        });
+        let swapQuote: SwapQuote | null = null;
+        let lastError: string | null = null;
+
+        // Tier 1: Soroswap
+        if (soroswapService) {
+          try {
+            swapQuote = await soroswapService.getQuote(
+              (fromToken as any)?.contract || fromToken.asset,
+              (toToken as any)?.contract || toToken.asset,
+              fromAmount,
+              {
+                slippageTolerance,
+              }
+            );
+            if (swapQuote) swapQuote.source = 'SOROSWAP';
+          } catch (err: any) {
+            console.warn(
+              '[useAmmSwap] Tier 1 Soroswap quote unavailable, checking Aquarius:',
+              err?.message || err
+            );
+            lastError = err instanceof Error ? err.message : 'Soroswap quote failed';
+          }
+        }
+
+        // Tier 2: Aquarius AMM
+        if (!swapQuote && aquariusService) {
+          try {
+            swapQuote = await aquariusService.getQuote(fromToken, toToken, fromAmount, {
+              slippageTolerance,
+            });
+            if (swapQuote) swapQuote.source = 'AQUARIUS';
+          } catch (err: any) {
+            console.warn(
+              '[useAmmSwap] Tier 2 Aquarius quote unavailable, falling back to Horizon AMM:',
+              err?.message || err
+            );
+            lastError = err instanceof Error ? err.message : 'Aquarius quote failed';
+          }
+        }
+
+        // Tier 3: Classic Horizon AMM
+        if (!swapQuote && service) {
+          try {
+            swapQuote = await service.getSwapQuote(fromToken.asset, toToken.asset, fromAmount, {
+              slippageTolerance,
+            });
+            if (swapQuote) swapQuote.source = 'STELLAR_AMM';
+          } catch (err: any) {
+            console.warn('[useAmmSwap] Tier 3 Horizon AMM quote failed:', err?.message || err);
+            lastError = err instanceof Error ? err.message : 'Horizon AMM quote failed';
+          }
+        }
+
+        if (!swapQuote) {
+          throw new Error(lastError || 'Failed to get quote across all providers');
+        }
+
         setQuote(swapQuote);
         setToAmount(swapQuote.estimatedOutput);
       } catch (err) {
@@ -262,7 +319,15 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
 
     const debounceTimer = setTimeout(getQuote, 500);
     return () => clearTimeout(debounceTimer);
-  }, [service, fromToken, toToken, fromAmount, slippageTolerance]);
+  }, [
+    service,
+    soroswapService,
+    aquariusService,
+    fromToken,
+    toToken,
+    fromAmount,
+    slippageTolerance,
+  ]);
 
   const swapTokens = useCallback(() => {
     const temp = fromToken;
@@ -271,23 +336,77 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
     setFromAmount(toAmount);
   }, [fromToken, toToken, toAmount]);
 
-  const refreshQuote = useCallback(() => {
-    if (!service || !fromToken || !toToken || !fromAmount) return;
+  const refreshQuote = useCallback(async () => {
+    if (!fromToken || !toToken || !fromAmount) return;
 
     setIsLoading(true);
-    service
-      .getSwapQuote(fromToken.asset, toToken.asset, fromAmount, { slippageTolerance })
-      .then(swapQuote => {
+    try {
+      let swapQuote: SwapQuote | null = null;
+
+      // Tier 1: Soroswap
+      if (soroswapService) {
+        try {
+          swapQuote = await soroswapService.getQuote(
+            (fromToken as any)?.contract || fromToken.asset,
+            (toToken as any)?.contract || toToken.asset,
+            fromAmount,
+            {
+              slippageTolerance,
+            }
+          );
+          if (swapQuote) swapQuote.source = 'SOROSWAP';
+        } catch (soroErr) {
+          console.warn('[useAmmSwap] Soroswap refresh failed, checking Aquarius:', soroErr);
+        }
+      }
+
+      // Tier 2: Aquarius AMM
+      if (!swapQuote && aquariusService) {
+        try {
+          swapQuote = await aquariusService.getQuote(fromToken, toToken, fromAmount, {
+            slippageTolerance,
+          });
+          if (swapQuote) swapQuote.source = 'AQUARIUS';
+        } catch (aquaErr) {
+          console.warn(
+            '[useAmmSwap] Aquarius refresh failed, falling back to Horizon AMM:',
+            aquaErr
+          );
+        }
+      }
+
+      // Tier 3: Horizon AMM
+      if (!swapQuote && service) {
+        try {
+          swapQuote = await service.getSwapQuote(fromToken.asset, toToken.asset, fromAmount, {
+            slippageTolerance,
+          });
+          if (swapQuote) swapQuote.source = 'STELLAR_AMM';
+        } catch (ammErr) {
+          console.warn('[useAmmSwap] Horizon AMM refresh failed:', ammErr);
+        }
+      }
+
+      if (swapQuote) {
         setQuote(swapQuote);
         setToAmount(swapQuote.estimatedOutput);
         setError(null);
-      })
-      .catch(err => {
-        console.error('Failed to refresh quote:', err);
-        setError(err instanceof Error ? err.message : 'Failed to refresh quote');
-      })
-      .finally(() => setIsLoading(false));
-  }, [service, fromToken, toToken, fromAmount, slippageTolerance]);
+      }
+    } catch (err) {
+      console.error('Failed to refresh quote:', err);
+      setError(err instanceof Error ? err.message : 'Failed to refresh quote');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [
+    service,
+    soroswapService,
+    aquariusService,
+    fromToken,
+    toToken,
+    fromAmount,
+    slippageTolerance,
+  ]);
 
   useEffect(() => {
     setTimeLeft(30);
@@ -302,7 +421,10 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    const canCountdown = fromAmount && parseFloat(fromAmount) > 0 && quote && !isLoading;
+    const fromAmountBN = new BigNumber(fromAmount || '0');
+    const canCountdown = Boolean(
+      fromAmount && fromAmountBN.isFinite() && fromAmountBN.gt(0) && quote && !isLoading
+    );
 
     if (canCountdown) {
       timer = setInterval(() => {
@@ -330,11 +452,53 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
   }, [timeLeft, refreshQuote]);
 
   const buildTransaction = useCallback(async () => {
-    if (!service || !quote || !userAddress) {
+    if (!quote || !userAddress) {
       throw new Error('Missing required parameters for transaction');
     }
 
     try {
+      if (quote.source === 'SOROSWAP' && soroswapService && fromToken && toToken) {
+        const isToNative = toToken?.asset ? toToken.asset.isNative() : toToken?.code === 'XLM';
+        if (toToken && !isToNative && toToken.hasTrustline === false) {
+          throw new Error(
+            `Trustline required for ${toToken.code}. Please establish a trustline in your wallet before swapping.`
+          );
+        }
+        const assetIn = soroswapService.getContractId(
+          (fromToken as any)?.contract || fromToken.asset
+        );
+        const assetOut = soroswapService.getContractId((toToken as any)?.contract || toToken.asset);
+        const prepared = await soroswapService.prepareSwap({
+          assetIn,
+          assetOut,
+          amount: fromAmount,
+          slippageBps: Math.round(slippageTolerance * 100),
+          from: userAddress,
+        });
+        return {
+          xdr: prepared.xdr,
+          transaction: prepared.transaction,
+          isSoroswap: true,
+        };
+      }
+
+      if (quote.source === 'AQUARIUS' && aquariusService) {
+        const isToNative = toToken?.asset ? toToken.asset.isNative() : toToken?.code === 'XLM';
+        if (toToken && !isToNative && toToken.hasTrustline === false) {
+          throw new Error(
+            `Trustline required for ${toToken.code}. Please establish a trustline in your wallet before swapping.`
+          );
+        }
+        const tx = await aquariusService.buildSwapTransaction(userAddress, quote, {
+          slippageTolerance,
+        });
+        return tx;
+      }
+
+      if (!service) {
+        throw new Error('AMM service not initialized');
+      }
+
       const tx = await service.buildSwapTransaction(userAddress, quote, {
         slippageTolerance,
       });
@@ -343,31 +507,69 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
       console.error('Failed to build transaction:', err);
       throw err;
     }
-  }, [service, quote, userAddress, slippageTolerance]);
+  }, [
+    service,
+    soroswapService,
+    aquariusService,
+    quote,
+    userAddress,
+    slippageTolerance,
+    fromToken,
+    toToken,
+    fromAmount,
+  ]);
+
+  const latestParamsRef = useRef({ fromAmount, toAmount, fetchTokens });
+  useEffect(() => {
+    latestParamsRef.current = { fromAmount, toAmount, fetchTokens };
+  }, [fromAmount, toAmount, fetchTokens]);
 
   const executeSwapWithWalletConnect = useCallback(
     async (transaction: any, walletProvider: any) => {
-      console.log('Waletprovider [useAmmswap ------]', walletProvider);
-      if (!service) {
-        throw new Error('AMM service not initialized');
-      }
+      const {
+        fromAmount: curFromAmount,
+        toAmount: curToAmount,
+        fetchTokens: curFetchTokens,
+      } = latestParamsRef.current;
 
       try {
-        const txHash = await service.executeSwapWithWalletConnect(transaction, walletProvider);
+        let txHash: string;
+        if ((transaction?.isSoroswap || quote?.source === 'SOROSWAP') && soroswapService) {
+          txHash = await soroswapService.executeSoroswap(
+            transaction.xdr,
+            walletProvider,
+            userAddress
+          );
+        } else if ((transaction?.isAquarius || quote?.source === 'AQUARIUS') && aquariusService) {
+          txHash = await aquariusService.executeSwap(
+            transaction.xdr || transaction,
+            walletProvider,
+            userAddress
+          );
+        } else {
+          if (!service) {
+            throw new Error('AMM service not initialized');
+          }
+          txHash = await service.executeSwapWithWalletConnect(transaction, walletProvider);
+        }
 
         setFromToken(prev => {
           if (!prev) return prev;
-          const newBalance = Math.max(0, parseFloat(prev.balance || '0') - parseFloat(fromAmount));
-          return { ...prev, balance: newBalance.toFixed(7) };
+          const prevBal = new BigNumber(prev.balance || '0');
+          const sendAmt = new BigNumber(curFromAmount || '0');
+          const newBalance = BigNumber.max(0, prevBal.minus(sendAmt));
+          return { ...prev, balance: newBalance.toFixed(7, BigNumber.ROUND_DOWN) };
         });
 
         setToToken(prev => {
           if (!prev) return prev;
-          const newBalance = parseFloat(prev.balance || '0') + parseFloat(toAmount);
-          return { ...prev, balance: newBalance.toFixed(7) };
+          const prevBal = new BigNumber(prev.balance || '0');
+          const recAmt = new BigNumber(curToAmount || '0');
+          const newBalance = prevBal.plus(recAmt);
+          return { ...prev, balance: newBalance.toFixed(7, BigNumber.ROUND_DOWN) };
         });
 
-        setTimeout(() => fetchTokens(true), 8000);
+        setTimeout(() => curFetchTokens(true), 8000);
 
         return txHash;
       } catch (err) {
@@ -375,7 +577,26 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
         throw err;
       }
     },
-    [service]
+    [service, soroswapService, aquariusService, quote, userAddress]
+  );
+
+  const isFromNative = fromToken?.code === 'XLM' || fromToken?.asset?.isNative() || false;
+  const spendableBalance = fromToken
+    ? StellarBaseService.calculateSpendableBalance(
+        fromToken.balance || '0',
+        subentryCount,
+        isFromNative
+      )
+    : '0';
+
+  const requestedAmountBN = new BigNumber(fromAmount || '0');
+  const spendableBalanceBN = new BigNumber(spendableBalance || '0');
+  const isInsufficientBalance = Boolean(
+    fromToken &&
+    fromAmount &&
+    requestedAmountBN.isFinite() &&
+    requestedAmountBN.gt(0) &&
+    requestedAmountBN.gt(spendableBalanceBN)
   );
 
   const reset = useCallback(() => {
@@ -393,6 +614,8 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
     quote,
     isLoading,
     error,
+    isInsufficientBalance,
+    spendableBalance,
     slippageTolerance,
     availableTokens,
     subentryCount,
@@ -408,5 +631,6 @@ export const useAmmSwap = ({ userAddress }: UseAmmSwapProps) => {
     timeLeft,
     fetchTokens,
     isRefreshingTokens,
+    quoteSource: quote?.source || 'STELLAR_AMM',
   };
 };

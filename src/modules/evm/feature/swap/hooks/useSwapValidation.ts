@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 import type { UnifiedAsset, UnifiedQuote } from '../types/swap.types';
-import { isSameAsset as checkSameAsset } from '../utils/swapAssetUtils';
+import { isSameAsset as checkSameAsset, isStellar } from '../utils/swapAssetUtils';
 import {
   getMinimumReceived as checkMinimumReceived,
   getButtonLabel,
@@ -39,6 +39,7 @@ export interface UseSwapValidationParams {
   showFusionScreen: boolean;
   missingWallets?: string[];
   isStellarAccountActive?: boolean | null;
+  currentNetwork?: 'mainnet' | 'testnet';
 }
 
 export function useSwapValidation(params: UseSwapValidationParams) {
@@ -65,13 +66,18 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     showFusionScreen,
     missingWallets,
     isStellarAccountActive,
+    currentNetwork,
   } = params;
 
   const isWalletMissing = !!(missingWallets && missingWallets.length > 0);
 
   const isInsufficientBalance = useMemo(() => {
     if (isWalletMissing) return false;
-    return checkInsufficientBalance(sellAmount, selectedSellAsset?.balance);
+    return checkInsufficientBalance(
+      sellAmount,
+      selectedSellAsset?.balance,
+      selectedSellAsset?.decimals ?? 18
+    );
   }, [sellAmount, selectedSellAsset, isWalletMissing]);
 
   const isSameAssetSelected = useMemo(() => {
@@ -156,11 +162,22 @@ export function useSwapValidation(params: UseSwapValidationParams) {
   ]);
 
   const nativeSymbol = useMemo(() => {
+    if (isStellar(fromChainId)) return 'XLM';
     const nativeAsset = swapAssets.find(a => a.isNative);
     return nativeAsset?.symbol || 'ETH';
-  }, [swapAssets]);
+  }, [fromChainId, swapAssets]);
 
   const errorMessage = useMemo(() => {
+    if (
+      currentNetwork === 'testnet' &&
+      actionType === 'BRIDGE' &&
+      (isStellar(fromChainId) || isStellar(toChainId))
+    ) {
+      return (
+        crossChainWarning ||
+        'Stellar ↔ EVM swaps via NEAR Intents are only available on Mainnet. Please switch to Mainnet.'
+      );
+    }
     return getErrorMessage({
       bridgeTxStatus,
       bridgeErrorMsg,
@@ -180,6 +197,10 @@ export function useSwapValidation(params: UseSwapValidationParams) {
       toChainId,
     });
   }, [
+    currentNetwork,
+    actionType,
+    fromChainId,
+    toChainId,
     bridgeTxStatus,
     bridgeErrorMsg,
     swapError,
@@ -189,13 +210,11 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     hasInsufficientStellarGas,
     hasInsufficientEvmGas,
     isSameAssetSelected,
-    actionType,
     crossChainWarning,
     currentQuote.data,
     feePayType,
     nativeSymbol,
     isStellarAccountActive,
-    toChainId,
   ]);
 
   const buttonLabel = useMemo(() => {
@@ -238,6 +257,13 @@ export function useSwapValidation(params: UseSwapValidationParams) {
 
   const isErrorState = useMemo(() => {
     if (
+      currentNetwork === 'testnet' &&
+      actionType === 'BRIDGE' &&
+      (isStellar(fromChainId) || isStellar(toChainId))
+    ) {
+      return true;
+    }
+    if (
       isWalletMissing ||
       !sellAmount ||
       parseFloat(sellAmount) <= 0 ||
@@ -260,6 +286,10 @@ export function useSwapValidation(params: UseSwapValidationParams) {
       (actionType === 'BRIDGE' && crossChainWarning)
     );
   }, [
+    currentNetwork,
+    actionType,
+    fromChainId,
+    toChainId,
     isWalletMissing,
     sellAmount,
     isQuoteLoading,
@@ -273,9 +303,9 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     bridgeTxStatus,
     bridgeErrorMsg,
     isSameAssetSelected,
-    actionType,
     crossChainWarning,
     currentQuote.error,
+    errorMessage,
   ]);
 
   const isLoadingExecution = useMemo(() => {
@@ -332,6 +362,14 @@ export function useSwapValidation(params: UseSwapValidationParams) {
 
   const isSwapDisabled = useMemo(() => {
     if (
+      currentNetwork === 'testnet' &&
+      actionType === 'BRIDGE' &&
+      (isStellar(fromChainId) || isStellar(toChainId))
+    ) {
+      return true;
+    }
+
+    if (
       buttonLabel === 'ACTIVATE ACCOUNT' ||
       buttonLabel === 'ADD TRUSTLINE' ||
       buttonLabel === 'ADD TRUSTLINE & SWAP'
@@ -360,6 +398,10 @@ export function useSwapValidation(params: UseSwapValidationParams) {
       !!errorMessage
     );
   }, [
+    currentNetwork,
+    actionType,
+    fromChainId,
+    toChainId,
     buttonLabel,
     isWalletMissing,
     sellAmount,

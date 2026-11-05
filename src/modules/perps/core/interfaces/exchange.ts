@@ -6,7 +6,9 @@ export interface PerpExchange {
   getMarkets(): Promise<Market[]>;
   getOrderBook(symbol: string): Promise<OrderBook>;
   subscribeOrderBook(symbol: string, callback?: (ob: OrderBook) => void): Promise<void>;
+  unsubscribeOrderBook?(symbol: string): Promise<void> | void;
   subscribeTicker(symbol: string, callback?: (ticker: Ticker) => void): Promise<void>;
+  unsubscribeTicker?(symbol: string): Promise<void> | void;
 
   // Optional — implemented per-adapter based on exchange capability
   subscribeCandles?(coin: string, interval: string): void;

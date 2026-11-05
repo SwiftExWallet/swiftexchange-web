@@ -1,4 +1,10 @@
-import { ChevronDown, Maximize2, Minimize2, Settings as SettingsIcon } from 'lucide-react';
+import {
+  BarChart3,
+  ChevronDown,
+  Maximize2,
+  Minimize2,
+  Settings as SettingsIcon,
+} from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -658,12 +664,26 @@ export default function StellarTradingChart({
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center bg-secondary/80 backdrop-blur-sm z-20">
               <div className="text-center">
-                <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                <p className="text-secondary text-sm">Loading chart data...</p>
+                <div className="w-10 h-10 border-3 border-brand border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-secondary text-xs font-semibold">Loading chart data...</p>
                 {timeRangeKey === 'ALL' || timeRangeKey === '1Y' ? (
-                  <p className="text-xs text-muted mt-1">Large time range may take longer...</p>
+                  <p className="text-[10px] text-muted mt-1">Large time range may take longer...</p>
                 ) : null}
               </div>
+            </div>
+          )}
+
+          {!isLoading && chartData.length === 0 && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary/90 z-10 p-6 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-center mb-3 text-muted/60">
+                <BarChart3 size={22} className="text-muted/70" />
+              </div>
+              <p className="text-xs font-bold text-primary mb-1">No Historical Candlesticks</p>
+              <p className="text-[11px] text-muted max-w-sm leading-relaxed">
+                {currentNetwork !== 'mainnet'
+                  ? `No trade aggregation recorded on Stellar Testnet for ${currentAssetPair?.base}/${currentAssetPair?.counter}.`
+                  : `No trade history found on Stellar DEX for ${currentAssetPair?.base}/${currentAssetPair?.counter}.`}
+              </p>
             </div>
           )}
         </div>

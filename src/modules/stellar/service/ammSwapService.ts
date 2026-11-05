@@ -1,15 +1,36 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
+import BigNumber from 'bignumber.js';
 
 import type { LiquidityPool, SwapOptions, SwapPath, SwapQuote } from '../types/ammSwap.types';
 import { StellarSequenceTracker } from '../utils/StellarSequenceTracker';
 import { signAndSubmitTransaction } from '../utils/transactionService';
 import { StellarBaseService } from './StellarBaseService';
 
+const poolCache = new Map<string, { pools: LiquidityPool[]; timestamp: number }>();
+const POOL_CACHE_TTL = 10_000; // 10s TTL prevents sequential Horizon hammering
+
 export class AmmSwapService extends StellarBaseService {
+  static clearPoolCache() {
+    poolCache.clear();
+  }
+
   async findLiquidityPools(
     assetA: StellarSDK.Asset,
     assetB?: StellarSDK.Asset
   ): Promise<LiquidityPool[]> {
+    const keyA = assetA.isNative() ? 'native' : `${assetA.getCode()}:${assetA.getIssuer()}`;
+    const keyB = assetB
+      ? assetB.isNative()
+        ? 'native'
+        : `${assetB.getCode()}:${assetB.getIssuer()}`
+      : '';
+    const cacheKey = `${this.networkPassphrase}-${[keyA, keyB].sort().join('_')}`;
+
+    const cached = poolCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < POOL_CACHE_TTL) {
+      return cached.pools;
+    }
+
     try {
       const pools: LiquidityPool[] = [];
       let poolsCall = this.server.liquidityPools();
@@ -37,6 +58,7 @@ export class AmmSwapService extends StellarBaseService {
         });
       }
 
+      poolCache.set(cacheKey, { pools, timestamp: Date.now() });
       return pools;
     } catch (error) {
       console.error('Failed to fetch liquidity pools:', error);
@@ -50,25 +72,32 @@ export class AmmSwapService extends StellarBaseService {
     outputReserve: string,
     feeRate: number = 0.0003
   ): { outputAmount: string; priceImpact: number } {
-    const input = parseFloat(inputAmount);
-    const reserveIn = parseFloat(inputReserve);
-    const reserveOut = parseFloat(outputReserve);
+    const input = new BigNumber(inputAmount);
+    const reserveIn = new BigNumber(inputReserve);
+    const reserveOut = new BigNumber(outputReserve);
+    const fee = new BigNumber(feeRate);
 
-    if (isNaN(input) || isNaN(reserveIn) || isNaN(reserveOut) || input <= 0) {
+    if (
+      input.isNaN() ||
+      reserveIn.isNaN() ||
+      reserveOut.isNaN() ||
+      input.isLessThanOrEqualTo(0) ||
+      reserveIn.isLessThanOrEqualTo(0) ||
+      reserveOut.isLessThanOrEqualTo(0)
+    ) {
       throw new Error('Invalid input parameters for swap calculation');
     }
 
-    const inputWithFee = input * (1 - feeRate);
+    const inputWithFee = input.times(new BigNumber(1).minus(fee));
+    const outputAmount = inputWithFee.times(reserveOut).dividedBy(reserveIn.plus(inputWithFee));
 
-    const outputAmount = (inputWithFee * reserveOut) / (reserveIn + inputWithFee);
-
-    const spotPrice = reserveOut / reserveIn;
-    const effectivePrice = outputAmount / input;
-    const priceImpact = ((spotPrice - effectivePrice) / spotPrice) * 100;
+    const spotPrice = reserveOut.dividedBy(reserveIn);
+    const effectivePrice = outputAmount.dividedBy(input);
+    const priceImpact = spotPrice.minus(effectivePrice).dividedBy(spotPrice).times(100).abs();
 
     return {
-      outputAmount: outputAmount.toFixed(7),
-      priceImpact: Math.abs(priceImpact),
+      outputAmount: outputAmount.toFixed(7, BigNumber.ROUND_DOWN),
+      priceImpact: priceImpact.toNumber(),
     };
   }
 
@@ -144,7 +173,9 @@ export class AmmSwapService extends StellarBaseService {
       }
     }
 
-    return paths.sort((a, b) => parseFloat(b.estimatedOutput) - parseFloat(a.estimatedOutput));
+    return paths.sort((a, b) =>
+      new BigNumber(b.estimatedOutput).minus(a.estimatedOutput).toNumber()
+    );
   }
 
   async getSwapQuote(
@@ -153,7 +184,8 @@ export class AmmSwapService extends StellarBaseService {
     amount: string,
     options: SwapOptions = {}
   ): Promise<SwapQuote> {
-    if (parseFloat(amount) <= 0) {
+    const inputBN = new BigNumber(amount || '0');
+    if (!inputBN.isFinite() || inputBN.lte(0)) {
       throw new Error('Amount must be positive');
     }
 
@@ -173,10 +205,12 @@ export class AmmSwapService extends StellarBaseService {
 
     const bestPath = paths[0];
     const slippageTolerance = options.slippageTolerance || 1;
-    const minOutput = (
-      parseFloat(bestPath.estimatedOutput) *
-      (1 - slippageTolerance / 100)
-    ).toFixed(7);
+    const slippageMultiplier = new BigNumber(1).minus(
+      new BigNumber(slippageTolerance).dividedBy(100)
+    );
+    const minOutput = new BigNumber(bestPath.estimatedOutput)
+      .times(slippageMultiplier)
+      .toFixed(7, BigNumber.ROUND_DOWN);
 
     return {
       fromAsset,

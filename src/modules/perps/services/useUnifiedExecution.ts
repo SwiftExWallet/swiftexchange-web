@@ -1,0 +1,438 @@
+import { useCallback, useState } from 'react';
+
+import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
+import { changeLeverage, changeMarginType } from '../adapters/aster/api/account';
+import {
+  cancelAllOpenOrders as cancelAllAsterOrders,
+  cancelOrder as cancelAsterOrder,
+  placeOrder as placeAsterOrder,
+} from '../adapters/aster/api/orders';
+import { useAsterAgent } from '../adapters/aster/hooks/useAsterAgent';
+import { fetchAsterSnapshot } from '../adapters/aster/hooks/useAsterDataSync';
+import {
+  cancelAllHyperliquidOrders,
+  cancelHyperliquidOrder,
+  placeHyperliquidOrder,
+  updateHyperliquidLeverage,
+} from '../adapters/hyperliquid/api/orders';
+import { useHyperliquidAgentStore } from '../adapters/hyperliquid/hooks/useHyperliquidAgent';
+import { useExchangeManager } from '../core/ExchangeManager';
+import { useMarketStore } from '../core/stores/marketStore';
+import { useOrderStore } from '../core/stores/orderStore';
+import { usePositionStore } from '../core/stores/positionStore';
+import { formatPriceToTick, formatQuantityToStep, generateClientOrderId } from '../utils/precision';
+
+export interface UnifiedOrderParams {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  type:
+    | 'LIMIT'
+    | 'MARKET'
+    | 'STOP'
+    | 'STOP_MARKET'
+    | 'TAKE_PROFIT'
+    | 'TAKE_PROFIT_MARKET'
+    | 'TRAILING_STOP_MARKET'
+    | 'POST_ONLY';
+  price: string | number;
+  size: string | number;
+  reduceOnly?: boolean;
+  timeInForce?: 'GTC' | 'IOC' | 'FOK' | 'GTX' | 'ALO' | 'FrontendMarket';
+  stopPrice?: string | number;
+  callbackRate?: string | number;
+  activationPrice?: string | number;
+  currentPrice?: number;
+}
+
+export function useUnifiedExecution() {
+  const currentExchange = useExchangeManager(s => s.currentExchange);
+  const currentNetwork = useExchangeManager(s => s.currentNetwork);
+  const walletUserAddr = useWalletStore(s => s.connectedWallets.evm?.address);
+
+  const { asterSigner, userAddr: asterUserAddr } = useAsterAgent();
+  const hyperliquidSigner = useHyperliquidAgentStore(s => s.hyperliquidSigner);
+
+  const effectiveUserAddr = asterUserAddr || walletUserAddr || '';
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const isReady =
+    currentExchange === 'aster'
+      ? Boolean(asterSigner && effectiveUserAddr)
+      : Boolean(hyperliquidSigner);
+
+  const executeOrder = useCallback(
+    async (params: UnifiedOrderParams) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        if (currentExchange === 'aster') {
+          if (!asterSigner || !effectiveUserAddr) {
+            throw new Error('Aster session is not ready. Please connect your wallet.');
+          }
+
+          const isMarket = params.type === 'MARKET';
+          const isStopMarket =
+            params.type === 'STOP_MARKET' || params.type === 'TAKE_PROFIT_MARKET';
+          const isTrailingStop = params.type === 'TRAILING_STOP_MARKET';
+          const isPostOnly =
+            params.type === 'POST_ONLY' ||
+            params.timeInForce === 'ALO' ||
+            params.timeInForce === 'GTX';
+          const asterType = params.type === 'POST_ONLY' ? 'LIMIT' : params.type;
+
+          const allMarkets = Object.values(useMarketStore.getState().markets);
+          const market = allMarkets.find(
+            m =>
+              m.symbol === params.symbol ||
+              m.symbol.replace('-', '') === params.symbol.replace('-', '')
+          );
+
+          const stepSize = market?.stepSize || '0.001';
+          const tickSize = market?.tickSize || '0.1';
+
+          const cleanSize = formatQuantityToStep(params.size, stepSize);
+          const cleanPrice =
+            !isMarket && !isStopMarket && !isTrailingStop && params.price
+              ? formatPriceToTick(params.price, tickSize)
+              : undefined;
+
+          const clientOrderId = generateClientOrderId();
+
+          const asterRes = await placeAsterOrder(asterSigner, effectiveUserAddr, {
+            symbol: params.symbol.replace('-', ''),
+            side: params.side,
+            type: asterType as any,
+            quantity: cleanSize,
+            price: cleanPrice,
+            newClientOrderId: clientOrderId,
+            reduceOnly: params.reduceOnly ? true : undefined,
+            timeInForce:
+              !isMarket && !isStopMarket && !isTrailingStop
+                ? isPostOnly
+                  ? 'GTX'
+                  : (params.timeInForce as any) || 'GTC'
+                : undefined,
+            stopPrice:
+              params.stopPrice && !isMarket && !isTrailingStop
+                ? formatPriceToTick(params.stopPrice, tickSize)
+                : undefined,
+            callbackRate: isTrailingStop ? String(params.callbackRate || '1.0') : undefined,
+            activationPrice:
+              isTrailingStop && params.activationPrice
+                ? formatPriceToTick(params.activationPrice, tickSize)
+                : undefined,
+          });
+
+          // Instantly reflect order in UI without waiting for WebSocket
+          if (asterRes && asterRes.orderId) {
+            const normSymbol = params.symbol.includes('-')
+              ? params.symbol
+              : params.symbol.replace('USDT', '-USDT');
+            if (asterRes.status === 'NEW' || asterRes.status === 'PARTIALLY_FILLED') {
+              useOrderStore.getState().updateOrder({
+                id: String(asterRes.orderId),
+                symbol: normSymbol,
+                type: (asterRes.type || asterType || 'LIMIT').toLowerCase() as any,
+                side: (asterRes.side || params.side).toLowerCase() as any,
+                price: asterRes.price || cleanPrice || '0',
+                size: asterRes.origQty || cleanSize,
+                filledSize: asterRes.executedQty || '0',
+                status: asterRes.status === 'PARTIALLY_FILLED' ? 'partially_filled' : 'new',
+                reduceOnly: asterRes.reduceOnly || Boolean(params.reduceOnly),
+                timestamp: asterRes.updateTime || Date.now(),
+              });
+            }
+          }
+
+          // Instantly sync positions and orders via REST so UI doesn't lag behind WebSocket
+          fetchAsterSnapshot(asterSigner, effectiveUserAddr).catch(() => {});
+          setTimeout(() => {
+            fetchAsterSnapshot(asterSigner, effectiveUserAddr).catch(() => {});
+          }, 400);
+
+          return asterRes;
+        } else {
+          // Hyperliquid execution
+          if (params.type === 'TRAILING_STOP_MARKET') {
+            throw new Error('Trailing Stop orders are currently supported on Aster DEX.');
+          }
+
+          if (!hyperliquidSigner) {
+            throw new Error(
+              'Hyperliquid agent wallet is not initialized. Please connect your wallet.'
+            );
+          }
+
+          const isTestnet = currentNetwork === 'testnet';
+          const hlRes = await placeHyperliquidOrder(hyperliquidSigner, params, isTestnet);
+          return hlRes;
+        }
+      } catch (err: any) {
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        setError(errObj);
+        throw errObj;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [currentExchange, currentNetwork, asterSigner, effectiveUserAddr, hyperliquidSigner]
+  );
+
+  const cancelSingleOrder = useCallback(
+    async (symbol: string, orderId: string) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        if (currentExchange === 'aster') {
+          if (!asterSigner || !effectiveUserAddr) {
+            throw new Error('Aster session is not ready.');
+          }
+          await cancelAsterOrder(asterSigner, effectiveUserAddr, {
+            symbol: symbol.replace('-', ''),
+            orderId: parseInt(orderId, 10),
+          });
+        } else {
+          if (!hyperliquidSigner) {
+            throw new Error('Hyperliquid agent wallet is not initialized.');
+          }
+          const isTestnet = currentNetwork === 'testnet';
+          await cancelHyperliquidOrder(hyperliquidSigner, symbol, orderId, isTestnet);
+        }
+
+        useOrderStore.getState().removeOrder(orderId);
+      } catch (err: any) {
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        setError(errObj);
+        throw errObj;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [currentExchange, currentNetwork, asterSigner, effectiveUserAddr, hyperliquidSigner]
+  );
+
+  const cancelAll = useCallback(
+    async (symbol?: string) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        if (currentExchange === 'aster') {
+          if (!asterSigner || !effectiveUserAddr) {
+            throw new Error('Aster session is not ready.');
+          }
+          if (symbol) {
+            await cancelAllAsterOrders(asterSigner, effectiveUserAddr, symbol.replace('-', ''));
+          } else {
+            const openOrders = useOrderStore.getState().getOpenOrders();
+            const openSymbols: string[] = Array.from(
+              new Set(openOrders.map(o => o.symbol.replace('-', '')))
+            );
+            await Promise.all(
+              openSymbols.map(s => cancelAllAsterOrders(asterSigner, effectiveUserAddr, s))
+            );
+          }
+        } else {
+          if (!hyperliquidSigner || !effectiveUserAddr) {
+            throw new Error('Hyperliquid agent wallet is not initialized.');
+          }
+          const isTestnet = currentNetwork === 'testnet';
+          await cancelAllHyperliquidOrders(hyperliquidSigner, effectiveUserAddr, symbol, isTestnet);
+        }
+      } catch (err: any) {
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        setError(errObj);
+        throw errObj;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [currentExchange, currentNetwork, asterSigner, effectiveUserAddr, hyperliquidSigner]
+  );
+
+  const closePosition = useCallback(
+    async (symbol: string, size: string, isLong: boolean, currentPrice?: number) => {
+      const oppositeSide: 'BUY' | 'SELL' = isLong ? 'SELL' : 'BUY';
+      const absSize = Math.abs(parseFloat(size));
+      if (isNaN(absSize) || absSize <= 0) return;
+
+      const res = await executeOrder({
+        symbol,
+        side: oppositeSide,
+        type: 'MARKET',
+        price: currentPrice || 0,
+        size: absSize,
+        reduceOnly: true,
+        currentPrice,
+      });
+
+      // Optimistic instant position clear
+      usePositionStore.getState().removePosition(symbol);
+      usePositionStore.getState().removePosition(symbol.replace('-', ''));
+      usePositionStore.getState().removePosition(symbol.replace('USDT', '-USDT'));
+
+      return res;
+    },
+    [executeOrder]
+  );
+
+  const closeAllPositions = useCallback(
+    async (positionsList: any[]) => {
+      if (!positionsList || positionsList.length === 0) return { closedCount: 0, errors: [] };
+      setLoading(true);
+      setError(null);
+      const errors: string[] = [];
+      let closedCount = 0;
+
+      for (const p of positionsList) {
+        const isLong = parseFloat(p.size) > 0;
+        const absSize = Math.abs(parseFloat(p.size));
+        if (isNaN(absSize) || absSize <= 0) continue;
+        const oppositeSide: 'BUY' | 'SELL' = isLong ? 'SELL' : 'BUY';
+
+        try {
+          await executeOrder({
+            symbol: p.symbol,
+            side: oppositeSide,
+            type: 'MARKET',
+            price: 0,
+            size: absSize,
+            reduceOnly: true,
+            currentPrice: parseFloat(p.markPrice || '0') || undefined,
+          });
+          closedCount++;
+        } catch (err: any) {
+          console.error(`Failed to close position for ${p.symbol}:`, err);
+          errors.push(`${p.symbol}: ${err?.message || 'Failed to close'}`);
+        }
+      }
+
+      setLoading(false);
+      return { closedCount, errors };
+    },
+    [executeOrder]
+  );
+
+  const reversePosition = useCallback(
+    async (symbol: string, size: string, isLong: boolean, currentPrice?: number) => {
+      const oppositeSide: 'BUY' | 'SELL' = isLong ? 'SELL' : 'BUY';
+      const absSize = Math.abs(parseFloat(size));
+      if (isNaN(absSize) || absSize <= 0) return;
+
+      // 1. Close current position
+      await executeOrder({
+        symbol,
+        side: oppositeSide,
+        type: 'MARKET',
+        price: currentPrice || 0,
+        size: absSize,
+        reduceOnly: true,
+        currentPrice,
+      });
+
+      // 2. Open new position in opposite direction
+      await executeOrder({
+        symbol,
+        side: oppositeSide,
+        type: 'MARKET',
+        price: currentPrice || 0,
+        size: absSize,
+        reduceOnly: false,
+        currentPrice,
+      });
+    },
+    [executeOrder]
+  );
+
+  const updateLeverageForSymbol = useCallback(
+    async (symbol: string, leverage: number, isCross: boolean = true) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        if (currentExchange === 'aster') {
+          if (!asterSigner || !effectiveUserAddr) {
+            throw new Error('Aster session is not ready.');
+          }
+          await changeLeverage(asterSigner, effectiveUserAddr, symbol.replace('-', ''), leverage);
+        } else {
+          if (!hyperliquidSigner) {
+            throw new Error(
+              'Hyperliquid trading session is not active. Please enable 1-Click Trading first.'
+            );
+          }
+          const isTestnet = currentNetwork === 'testnet';
+          await updateHyperliquidLeverage(hyperliquidSigner, symbol, leverage, isCross, isTestnet);
+        }
+      } catch (err: any) {
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        setError(errObj);
+        throw errObj;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [currentExchange, currentNetwork, asterSigner, effectiveUserAddr, hyperliquidSigner]
+  );
+
+  const updateMarginModeForSymbol = useCallback(
+    async (symbol: string, marginType: 'cross' | 'isolated', currentLeverage: number = 20) => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        if (currentExchange === 'aster') {
+          if (!asterSigner || !effectiveUserAddr) {
+            throw new Error('Aster session is not ready. Please connect your wallet and sign in.');
+          }
+          await changeMarginType(
+            asterSigner,
+            effectiveUserAddr,
+            symbol.replace('-', ''),
+            marginType === 'cross' ? 'CROSSED' : 'ISOLATED'
+          );
+        } else {
+          if (!hyperliquidSigner) {
+            throw new Error(
+              'Hyperliquid trading session is not active. Please enable 1-Click Trading first.'
+            );
+          }
+          const isTestnet = currentNetwork === 'testnet';
+          const isCross = marginType === 'cross';
+          await updateHyperliquidLeverage(
+            hyperliquidSigner,
+            symbol,
+            currentLeverage,
+            isCross,
+            isTestnet
+          );
+        }
+      } catch (err: any) {
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        setError(errObj);
+        throw errObj;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [currentExchange, currentNetwork, asterSigner, effectiveUserAddr, hyperliquidSigner]
+  );
+
+  return {
+    isReady,
+    loading,
+    error,
+    executeOrder,
+    cancelSingleOrder,
+    cancelAll,
+    closePosition,
+    closeAllPositions,
+    reversePosition,
+    updateLeverageForSymbol,
+    updateMarginModeForSymbol,
+  };
+}
