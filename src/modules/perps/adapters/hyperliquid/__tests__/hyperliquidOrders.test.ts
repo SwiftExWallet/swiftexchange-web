@@ -1,6 +1,47 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { formatHyperliquidPrice, formatHyperliquidSize } from '../api/orders';
+
+vi.mock('@nktkas/hyperliquid/api/info', () => ({
+  meta: vi.fn().mockResolvedValue({
+    universe: [
+      { name: 'BTC', szDecimals: 4 },
+      { name: 'ETH', szDecimals: 3 },
+    ],
+  }),
+  openOrders: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('@nktkas/hyperliquid/api/exchange', () => ({
+  order: vi.fn().mockImplementation(async () => ({
+    status: 'ok',
+    response: {
+      type: 'order',
+      data: {
+        statuses: [{ resting: { oid: 12345 } }],
+      },
+    },
+  })),
+  cancel: vi.fn().mockImplementation(async (...args: any[]) => {
+    const payload = args[1];
+    // If oid is 99999, simulate "already canceled/filled"
+    if (payload?.cancels?.[0]?.o === 99999) {
+      return {
+        status: 'err',
+        response: 'Order was never placed, already canceled, or already filled',
+      };
+    }
+    return {
+      status: 'ok',
+      response: {
+        type: 'cancel',
+        data: { statuses: ['success'] },
+      },
+    };
+  }),
+  updateLeverage: vi.fn().mockResolvedValue({ status: 'ok' }),
+  updateIsolatedMargin: vi.fn().mockResolvedValue({ status: 'ok' }),
+}));
 
 describe('Hyperliquid Order Formatting Utilities (BigNumber)', () => {
   describe('formatHyperliquidPrice', () => {
@@ -73,6 +114,71 @@ describe('Hyperliquid Order Formatting Utilities (BigNumber)', () => {
     it('returns "0" if input size is strictly smaller than step size', () => {
       expect(formatHyperliquidSize(0.00009, 4)).toBe('0');
       expect(formatHyperliquidSize('0.009', 2)).toBe('0');
+    });
+  });
+
+  describe('placeHyperliquidOrder pre-flight checks', () => {
+    it('rejects opening orders with notional value under $10 USD', async () => {
+      const { placeHyperliquidOrder } = await import('../api/orders');
+
+      // 0.0001 BTC * $60,000 = $6 notional (< $10)
+      const subTenDollarOrder = {
+        symbol: 'BTC-USDC',
+        side: 'BUY' as const,
+        type: 'LIMIT' as const,
+        price: '60000',
+        size: '0.0001',
+        reduceOnly: false,
+      };
+
+      await expect(placeHyperliquidOrder({} as any, subTenDollarOrder, true)).rejects.toThrow(
+        /Minimum order value on Hyperliquid is \$10 USD/
+      );
+    });
+
+    it('allows opening orders with notional value >= $10 USD', async () => {
+      const { placeHyperliquidOrder } = await import('../api/orders');
+
+      // 0.0002 BTC * $60,000 = $12 notional (>= $10)
+      const validOrder = {
+        symbol: 'BTC-USDC',
+        side: 'BUY' as const,
+        type: 'LIMIT' as const,
+        price: '60000',
+        size: '0.0002',
+        reduceOnly: false,
+      };
+
+      const res = await placeHyperliquidOrder({} as any, validOrder, true);
+      expect(res.status).toBe('ok');
+    });
+
+    it('allows reduce-only orders even if notional value is under $10 USD (dust position closing)', async () => {
+      const { placeHyperliquidOrder } = await import('../api/orders');
+
+      // 0.00005 BTC * $60,000 = $3 notional (< $10), but reduceOnly = true
+      const reduceOnlyDustOrder = {
+        symbol: 'BTC-USDC',
+        side: 'SELL' as const,
+        type: 'LIMIT' as const,
+        price: '60000',
+        size: '0.00005',
+        reduceOnly: true,
+      };
+
+      const res = await placeHyperliquidOrder({} as any, reduceOnlyDustOrder, true);
+      expect(res.status).toBe('ok');
+    });
+  });
+
+  describe('cancelHyperliquidOrder graceful handling', () => {
+    it('swallows "already filled / canceled" error and returns alreadyDone: true', async () => {
+      const { cancelHyperliquidOrder } = await import('../api/orders');
+
+      // Mock exchange rejecting with benign race condition message
+      const res = await cancelHyperliquidOrder({} as any, 'BTC-USDC', 99999, true);
+      expect(res.status).toBe('ok');
+      expect(res.alreadyDone).toBe(true);
     });
   });
 });

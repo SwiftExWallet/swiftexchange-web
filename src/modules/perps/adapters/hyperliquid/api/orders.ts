@@ -151,6 +151,17 @@ export async function placeHyperliquidOrder(
     orderTypeObj = { limit: { tif } };
   }
 
+  // Pre-flight check: Hyperliquid enforces a minimum order notional value of $10 USD for opening orders.
+  // Reduce-only closes of smaller positions are allowed through exchange rules.
+  if (!reduceOnly) {
+    const notional = new BigNumber(limitPx).times(sizeFormatted);
+    if (notional.isLessThan(10.0)) {
+      throw new Error(
+        `Minimum order value on Hyperliquid is $10 USD (current: $${notional.toFixed(2)})`
+      );
+    }
+  }
+
   const payload = {
     orders: [
       {
@@ -210,13 +221,50 @@ export async function cancelHyperliquidOrder(
     ],
   };
 
-  const res: any = await cancel({ transport, wallet: wallet as any }, payload);
-  if (res?.status === 'err') {
-    throw new Error(
-      typeof res.response === 'string' ? res.response : 'Failed to cancel order on Hyperliquid'
-    );
+  try {
+    const res: any = await cancel({ transport, wallet: wallet as any }, payload);
+    if (res?.status === 'err') {
+      const errStr = typeof res.response === 'string' ? res.response : JSON.stringify(res.response);
+      if (
+        /already (filled|canceled|cancelled)|order (was never placed|not found|does not exist)/i.test(
+          errStr
+        )
+      ) {
+        return { status: 'ok', alreadyDone: true, response: res.response };
+      }
+      throw new Error(errStr || 'Failed to cancel order on Hyperliquid');
+    }
+
+    const statuses = res?.response?.data?.statuses;
+    if (Array.isArray(statuses) && statuses.length > 0) {
+      const firstStatus = statuses[0];
+      if (typeof firstStatus === 'object' && firstStatus !== null && 'error' in firstStatus) {
+        const errStr =
+          typeof firstStatus.error === 'string'
+            ? firstStatus.error
+            : JSON.stringify(firstStatus.error);
+        if (
+          /already (filled|canceled|cancelled)|order (was never placed|not found|does not exist)/i.test(
+            errStr
+          )
+        ) {
+          return { status: 'ok', alreadyDone: true, response: firstStatus };
+        }
+        throw new Error(errStr);
+      }
+    }
+    return res;
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+    if (
+      /already (filled|canceled|cancelled)|order (was never placed|not found|does not exist)/i.test(
+        errMsg
+      )
+    ) {
+      return { status: 'ok', alreadyDone: true };
+    }
+    throw err;
   }
-  return res;
 }
 
 /**
