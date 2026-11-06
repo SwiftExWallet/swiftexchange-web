@@ -1,9 +1,12 @@
 import { BrowserProvider, Contract, parseUnits } from 'ethers';
 
-// Hyperliquid Bridge on Arbitrum (Bridge2)
+import { useExchangeManager } from '../../../core/ExchangeManager';
+import { type PerpNetwork, getHyperliquidConfig } from '../../../core/config/networks';
+
+// Hyperliquid Bridge on Arbitrum One (Bridge2) - preserved for backward compatibility
 export const HYPERLIQUID_BRIDGE_ADDRESS_ARBITRUM = '0x2Df1c51E09aECF9cacB7bc98cB1742757f163dF7';
 
-// Native USDC on Arbitrum
+// Native USDC on Arbitrum One - preserved for backward compatibility
 export const USDC_ADDRESS_ARBITRUM = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
 
 export type DepositProgress = {
@@ -21,29 +24,43 @@ const ERC20_ABI = [
 ];
 
 /**
- * Deposits USDC to the Hyperliquid L1 Bridge on Arbitrum.
+ * Deposits USDC to the Hyperliquid L1 Bridge (Arbitrum One for mainnet, Arbitrum Sepolia for testnet).
  * Hyperliquid validators listen to the `Transfer` event to the Bridge address.
  */
 export async function depositToHyperliquid(
   provider: any,
   amount: string, // in human readable format (e.g., '10.5')
-  onProgress?: (progress: DepositProgress) => void
+  onProgress?: (progress: DepositProgress) => void,
+  networkOverride?: PerpNetwork
 ): Promise<{ txHash: string; amount: string; asset: string; chainId: number }> {
   const browserProvider = new BrowserProvider(provider);
   const signer = await browserProvider.getSigner();
 
+  const network = networkOverride || useExchangeManager.getState().currentNetwork;
+  const config = getHyperliquidConfig(network);
+
+  const providerNetwork = await browserProvider.getNetwork();
+  const currentChainId = Number(providerNetwork.chainId);
+
+  if (currentChainId !== config.l1ChainId) {
+    const targetChainName = config.isTestnet ? 'Arbitrum Sepolia (421614)' : 'Arbitrum One (42161)';
+    throw new Error(
+      `Network mismatch: Wallet is connected to chain ${currentChainId}, but Hyperliquid ${network} requires ${targetChainName}. Please switch your network.`
+    );
+  }
+
   onProgress?.({
     step: 'DEPOSITING',
-    message: 'Initiating USDC transfer to Hyperliquid bridge...',
+    message: `Initiating USDC transfer to Hyperliquid bridge on ${config.isTestnet ? 'Arbitrum Sepolia' : 'Arbitrum'}...`,
   });
 
   // USDC uses 6 decimals
   const parsedAmount = parseUnits(amount, 6);
-  const usdcContract = new Contract(USDC_ADDRESS_ARBITRUM, ERC20_ABI, signer);
+  const usdcContract = new Contract(config.usdcAddress, ERC20_ABI, signer);
 
   // Hyperliquid bridge works by simply transferring USDC to the bridge address.
   // The L1 indexer monitors these ERC20 transfers and credits the sender.
-  const tx = await usdcContract.transfer(HYPERLIQUID_BRIDGE_ADDRESS_ARBITRUM, parsedAmount);
+  const tx = await usdcContract.transfer(config.depositBridge, parsedAmount);
 
   onProgress?.({
     step: 'DEPOSITING',
@@ -57,6 +74,6 @@ export async function depositToHyperliquid(
     txHash: tx.hash,
     amount,
     asset: 'USDC',
-    chainId: 42161, // Arbitrum One
+    chainId: config.l1ChainId,
   };
 }
