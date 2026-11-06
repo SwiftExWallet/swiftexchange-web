@@ -4,6 +4,7 @@ import type { Wallet } from 'ethers';
 import { create } from 'zustand';
 
 import {
+  HyperliquidIsolatedSigner,
   deriveHyperliquidAgentKey,
   encryptAndStoreAgentKey,
   getStoredAgentAddress,
@@ -18,16 +19,21 @@ import { useExchangeManager } from '../../../core/ExchangeManager';
 export type DeriveState = 'idle' | 'signing' | 'ready' | 'error';
 
 interface HyperliquidAgentStoreState {
-  hyperliquidSigner: Wallet | null;
+  hyperliquidSigner: HyperliquidIsolatedSigner | Wallet | null;
   agentAddress: string | null;
   deriveState: DeriveState;
   error: Error | null;
   isRestoring: boolean;
-  setHyperliquidSigner: (signer: Wallet | null, address?: string | null) => void;
+  setHyperliquidSigner: (
+    signer: HyperliquidIsolatedSigner | Wallet | null,
+    address?: string | null
+  ) => void;
   setDeriveState: (state: DeriveState) => void;
   setError: (error: Error | null) => void;
-  deriveAgentKey: (userAddr: string) => Promise<{ agentAddress: string; wallet: Wallet }>;
-  restoreKey: () => Promise<Wallet | null>;
+  deriveAgentKey: (
+    userAddr: string
+  ) => Promise<{ agentAddress: string; wallet: HyperliquidIsolatedSigner | Wallet }>;
+  restoreKey: () => Promise<HyperliquidIsolatedSigner | Wallet | null>;
   purge: () => void;
 }
 
@@ -127,7 +133,7 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
 }));
 
 export interface UseHyperliquidAgentResult {
-  hyperliquidSigner: Wallet | null;
+  hyperliquidSigner: HyperliquidIsolatedSigner | Wallet | null;
   userAddr: string | null;
   agentAddress: string | null;
   deriveState: DeriveState;
@@ -161,7 +167,7 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
         purgeStore();
       }
     }
-  }, [userAddr, network, currentExchange, restoreKey, purgeStore]);
+  }, [userAddr, network, currentExchange, restoreKey, purgeStore, hyperliquidSigner]);
 
   const deriveAgentKey = useCallback(async () => {
     if (!userAddr) throw new Error('EVM wallet not connected');

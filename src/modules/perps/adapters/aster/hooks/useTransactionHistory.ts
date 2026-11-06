@@ -5,6 +5,7 @@ import type { Signer } from 'ethers';
 import { useHistoryStore } from '../../../core/stores/historyStore';
 import { getIncomeHistory } from '../api/account';
 import type { IncomeRecord } from '../types/account';
+import type { IAsterSigner } from '../types/signer';
 
 export type TimeRange = '1d' | '1w' | '1m' | '3m';
 
@@ -42,7 +43,7 @@ const deduplicateIncome = (existing: IncomeRecord[], incoming: IncomeRecord[]) =
 };
 
 export const useTransactionHistory = (
-  signer: Signer | null,
+  signer: Signer | IAsterSigner | null,
   userAddr: string | null,
   symbol?: string | null,
   timeRange: TimeRange = '1m'

@@ -170,6 +170,11 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   const isEvmConnected = useWalletStore(state => !!state.connectedWallets.evm?.address);
   const openWalletModal = useWalletStore(state => state.openModal);
   const isDepositError = deriveState === 'error' && deriveError?.message?.includes('Must deposit');
+  const isSignerOffline =
+    deriveState === 'error' &&
+    (deriveError?.message?.includes('Signer') ||
+      deriveError?.message?.includes('offline') ||
+      deriveError?.message?.includes('Unavailable'));
 
   // Sync store for symbol
   useEffect(() => {
@@ -1442,7 +1447,9 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                           ? currentNetwork === 'testnet'
                             ? 'Claim Faucet to Activate'
                             : 'Deposit to Activate'
-                          : 'Signature Rejected — Try Again'}
+                          : isSignerOffline
+                            ? 'Trading Engine Maintenance — Retry'
+                            : 'Signature Rejected — Try Again'}
                       </span>
                     </>
                   ) : (
@@ -1457,7 +1464,9 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     ? 'Confirm signature request in your wallet'
                     : isDepositError
                       ? `Initial deposit or faucet required to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`
-                      : `One-time signature to activate gas-free trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
+                      : isSignerOffline
+                        ? 'Secure trading engine is undergoing a brief update. Our team is actively working on it.'
+                        : `One-time signature to activate gas-free trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
                 </p>
               </div>
             ) : (

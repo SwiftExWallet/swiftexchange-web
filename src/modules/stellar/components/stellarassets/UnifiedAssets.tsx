@@ -260,7 +260,11 @@ const UnifiedAssets: React.FC<UnifiedAssetsProps> = ({
                           e.currentTarget.style.display = 'none';
                           const parent = e.currentTarget.parentElement;
                           if (parent) {
-                            parent.innerHTML = `<span class="font-bold text-xs text-primary">${asset.code?.[0] || '?'}</span>`;
+                            parent.replaceChildren();
+                            const span = document.createElement('span');
+                            span.className = 'font-bold text-xs text-primary';
+                            span.textContent = asset.code?.[0] || '?';
+                            parent.appendChild(span);
                           }
                         }}
                       />

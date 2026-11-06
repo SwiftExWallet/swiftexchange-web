@@ -124,15 +124,36 @@ const FundingChart: React.FC = () => {
         const isPositive = item.displayValue >= 0;
         const rateColor = isPositive ? '#22c55e' : '#ef4444';
 
-        toolTip.innerHTML = `
-            <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #FFFFFF;">
-              <div style="margin-bottom: 4px; color: #9CA3AF;">${date}</div>
-              <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-                <span style="color: #9CA3AF;">Rate</span>
-                <span style="color: ${rateColor};">${rate}%</span>
-              </div>
-            </div>
-          `;
+        toolTip.replaceChildren();
+        const container = document.createElement('div');
+        container.style.fontFamily = "'JetBrains Mono', monospace";
+        container.style.fontSize = '12px';
+        container.style.color = '#FFFFFF';
+
+        const dateDiv = document.createElement('div');
+        dateDiv.style.marginBottom = '4px';
+        dateDiv.style.color = '#9CA3AF';
+        dateDiv.textContent = date;
+
+        const rowDiv = document.createElement('div');
+        rowDiv.style.display = 'flex';
+        rowDiv.style.alignItems = 'center';
+        rowDiv.style.justifyContent = 'space-between';
+        rowDiv.style.gap = '12px';
+
+        const rateLabel = document.createElement('span');
+        rateLabel.style.color = '#9CA3AF';
+        rateLabel.textContent = 'Rate';
+
+        const rateVal = document.createElement('span');
+        rateVal.style.color = rateColor;
+        rateVal.textContent = `${rate}%`;
+
+        rowDiv.appendChild(rateLabel);
+        rowDiv.appendChild(rateVal);
+        container.appendChild(dateDiv);
+        container.appendChild(rowDiv);
+        toolTip.appendChild(container);
 
         let shiftedCoordinate = param.point.x - 50;
         if (param.point.x - 50 < 0) {

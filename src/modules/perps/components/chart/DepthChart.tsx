@@ -340,7 +340,37 @@ const DepthChart: React.FC<DepthChartProps> = ({ activeChartTab, onChartTabChang
     if (tooltipRef.current && closest) {
       const tt = tooltipRef.current;
       tt.style.display = 'block';
-      tt.innerHTML = `<div class="flex gap-4"><div><span class="text-muted">Price: </span><span style="color:${closest.isBid ? 'var(--color-success)' : 'var(--color-danger)'}">${closest.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div><div><span class="text-muted">Total: </span><span class="text-primary">${closest.total.toFixed(4)} ${base}</span></div></div>`;
+      tt.replaceChildren();
+
+      const container = document.createElement('div');
+      container.className = 'flex gap-4';
+
+      const priceDiv = document.createElement('div');
+      const priceLabel = document.createElement('span');
+      priceLabel.className = 'text-muted';
+      priceLabel.textContent = 'Price: ';
+      const priceVal = document.createElement('span');
+      priceVal.style.color = closest.isBid ? 'var(--color-success)' : 'var(--color-danger)';
+      priceVal.textContent = closest.price.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      priceDiv.appendChild(priceLabel);
+      priceDiv.appendChild(priceVal);
+
+      const totalDiv = document.createElement('div');
+      const totalLabel = document.createElement('span');
+      totalLabel.className = 'text-muted';
+      totalLabel.textContent = 'Total: ';
+      const totalVal = document.createElement('span');
+      totalVal.className = 'text-primary';
+      totalVal.textContent = `${closest.total.toFixed(4)} ${base}`;
+      totalDiv.appendChild(totalLabel);
+      totalDiv.appendChild(totalVal);
+
+      container.appendChild(priceDiv);
+      container.appendChild(totalDiv);
+      tt.appendChild(container);
     }
   };
 

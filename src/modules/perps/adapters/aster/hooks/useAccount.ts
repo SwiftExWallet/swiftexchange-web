@@ -23,6 +23,7 @@ import type {
   MarginType,
   SymbolLeverageBracket,
 } from '../types/account';
+import type { IAsterSigner } from '../types/signer';
 
 interface AsyncState<T> {
   data: T | null;
@@ -53,7 +54,7 @@ function useAsync<T>(): [AsyncState<T>, (p: Promise<T>) => Promise<T | undefined
   return [state, run];
 }
 
-export function useAccount(signer: Signer | null, userAddr: string | null) {
+export function useAccount(signer: Signer | IAsterSigner | null, userAddr: string | null) {
   const [accountState, runAccount] = useAsync<AsterAccountInfo>();
   const [balancesState, runBalances] = useAsync<AsterBalance[]>();
   const [positionsState, runPositions] = useAsync<AsterPositionRisk[]>();

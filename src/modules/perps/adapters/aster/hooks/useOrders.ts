@@ -21,6 +21,7 @@ import type {
   PlaceChaseParams,
   PlaceOrderParams,
 } from '../types/orders';
+import type { IAsterSigner } from '../types/signer';
 
 interface AsyncState<T> {
   data: T | null;
@@ -32,7 +33,7 @@ function initState<T>(): AsyncState<T> {
   return { data: null, loading: false, error: null };
 }
 
-export function useOrders(signer: Signer | null, userAddr: string | null) {
+export function useOrders(signer: Signer | IAsterSigner | null, userAddr: string | null) {
   const [placeState, setPlaceState] = useState<AsyncState<AsterOrderResponse>>(initState());
   const [cancelState, setCancelState] =
     useState<AsyncState<AsterOrderResponse | { code: number; msg: string }>>(initState());

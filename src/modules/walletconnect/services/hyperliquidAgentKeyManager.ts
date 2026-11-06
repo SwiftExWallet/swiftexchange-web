@@ -2,12 +2,31 @@ import { HttpTransport } from '@nktkas/hyperliquid';
 import { approveAgent } from '@nktkas/hyperliquid/api/exchange';
 import { BrowserProvider, Wallet } from 'ethers';
 
+import { useNotificationStore } from '../../../components/Notification/notificationStore';
 import { useWalletStore } from '../store/walletConnectStore';
-import { destroyAESKey, generateAndStoreAESKey, retrieveAESKey } from './keyVaultIndexedDB';
+import { destroyAESKey } from './keyVaultIndexedDB';
+import { signerIframeBridge } from './signerIframeBridge';
 
 const BLOB_KEY_PREFIX = '_sx_hl_agentkey';
 const ADDR_KEY_PREFIX = '_sx_hl_agentaddr';
 const AGENT_NAME = 'SwiftExDesktop';
+
+export class HyperliquidIsolatedSigner {
+  readonly address: string;
+
+  constructor(address: string) {
+    this.address = address;
+  }
+
+  async getAddress(): Promise<string> {
+    return this.address;
+  }
+
+  // Parameter length must be 3 for @nktkas/hyperliquid isEthersV6Signer detection
+  async signTypedData(domain: any, types: any, value: any): Promise<string> {
+    return signerIframeBridge.signTypedData(domain, types, value);
+  }
+}
 
 function getBlobKey(isTestnet: boolean = false) {
   return `${BLOB_KEY_PREFIX}_${isTestnet ? 'testnet' : 'mainnet'}`;
@@ -17,53 +36,15 @@ function getAddrKey(isTestnet: boolean = false) {
   return `${ADDR_KEY_PREFIX}_${isTestnet ? 'testnet' : 'mainnet'}`;
 }
 
-function toBase64(buf: Uint8Array): string {
-  let b = '';
-  for (let i = 0; i < buf.length; i++) b += String.fromCharCode(buf[i]);
-  return btoa(b);
-}
-
-function fromBase64(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-async function encryptBytes(
-  plain: Uint8Array,
-  aesKey: CryptoKey
-): Promise<{ ciphertext: string; iv: string }> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    aesKey,
-    plain as unknown as BufferSource
-  );
-  return { ciphertext: toBase64(new Uint8Array(encrypted)), iv: toBase64(iv) };
-}
-
-async function decryptBytes(
-  ciphertext: string,
-  iv: string,
-  aesKey: CryptoKey
-): Promise<Uint8Array> {
-  const cipherBuf = fromBase64(ciphertext);
-  const ivBuf = fromBase64(iv);
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: ivBuf as unknown as BufferSource },
-    aesKey,
-    cipherBuf as unknown as BufferSource
-  );
-  const result = new Uint8Array(decrypted);
-  cipherBuf.fill(0);
-  ivBuf.fill(0);
-  return result;
-}
-
 export interface HyperliquidAgentKey {
   agentAddress: string;
-  wallet: Wallet;
+  wallet: HyperliquidIsolatedSigner | Wallet;
+}
+
+function cleanupLegacyStorage(isTestnet: boolean): void {
+  localStorage.removeItem(getBlobKey(isTestnet));
+  localStorage.removeItem(BLOB_KEY_PREFIX);
+  destroyAESKey(HL_AES_KEY_ID).catch(() => {});
 }
 
 export async function deriveHyperliquidAgentKey(
@@ -76,11 +57,29 @@ export async function deriveHyperliquidAgentKey(
   const browserProvider = new BrowserProvider(provider);
   const signer = await browserProvider.getSigner(evmAddress);
 
-  const agentWallet = new Wallet(Wallet.createRandom().privateKey);
+  // 1. Ensure isolated signer iframe is connected and healthy
+  const isReady = await signerIframeBridge.initialize();
+  if (!isReady) {
+    try {
+      useNotificationStore.getState().addNotification({
+        type: 'SYSTEM',
+        title: 'Trading Service Notice',
+        message:
+          'Our secure trading engine is momentarily undergoing brief maintenance. Our engineering team is on it. Please try again in a moment.',
+        status: 'warning',
+      });
+    } catch {
+      // Notification store may not be mounted
+    }
+    throw new Error('Signer Service Unavailable. Secure trading engine is currently updating.');
+  }
+
+  // 2. Generate or retrieve agent key inside isolated vault (Private key never touches main window)
+  const agentAddress = await signerIframeBridge.getOrCreateAgentKey(evmAddress);
 
   console.groupCollapsed('[hyperliquid] deriveHyperliquidAgentKey');
   console.log('evmAddress (signer):', evmAddress);
-  console.log('agentWallet.address:', agentWallet.address);
+  console.log('agentAddress (isolated):', agentAddress);
   console.log('isTestnet:', activeTestnet);
 
   const transport = new HttpTransport({ isTestnet: activeTestnet });
@@ -88,7 +87,7 @@ export async function deriveHyperliquidAgentKey(
   try {
     await approveAgent(
       { transport, wallet: signer },
-      { agentAddress: agentWallet.address as `0x${string}`, agentName: AGENT_NAME }
+      { agentAddress: agentAddress as `0x${string}`, agentName: AGENT_NAME }
     );
   } catch (error: any) {
     console.error('[hyperliquid] approveAgent failed:', error);
@@ -104,68 +103,50 @@ export async function deriveHyperliquidAgentKey(
   console.log('[hyperliquid] Agent key successfully approved.');
   console.groupEnd();
 
+  // Store ONLY public agent address
+  localStorage.setItem(getAddrKey(activeTestnet), agentAddress);
+
+  // Purge any legacy unisolated keys
+  cleanupLegacyStorage(activeTestnet);
+
   return {
-    agentAddress: agentWallet.address,
-    wallet: agentWallet,
+    agentAddress,
+    wallet: new HyperliquidIsolatedSigner(agentAddress),
   };
 }
 
 const HL_AES_KEY_ID = '_k_hl';
 
 export async function encryptAndStoreAgentKey(
-  privKeyHex: string,
+  agentAddressOrKey: string,
   isTestnet?: boolean
 ): Promise<string> {
   const activeTestnet =
     isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
-  let aesKey = await retrieveAESKey(HL_AES_KEY_ID);
-  if (!aesKey) aesKey = await generateAndStoreAESKey(HL_AES_KEY_ID);
-
-  const agentWallet = new Wallet(privKeyHex);
-  const encoder = new TextEncoder();
-  const keyBytes = encoder.encode(privKeyHex);
-
-  const blob = await encryptBytes(keyBytes, aesKey);
-  keyBytes.fill(0);
-
-  localStorage.setItem(getBlobKey(activeTestnet), JSON.stringify(blob));
-  localStorage.setItem(getAddrKey(activeTestnet), agentWallet.address);
-
-  return agentWallet.address;
+  localStorage.setItem(getAddrKey(activeTestnet), agentAddressOrKey);
+  cleanupLegacyStorage(activeTestnet);
+  return agentAddressOrKey;
 }
 
-export async function restoreAgentWallet(isTestnet?: boolean): Promise<Wallet | null> {
+export async function restoreAgentWallet(
+  isTestnet?: boolean
+): Promise<HyperliquidIsolatedSigner | Wallet | null> {
   const activeTestnet =
     isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
-  const raw =
-    localStorage.getItem(getBlobKey(activeTestnet)) ||
-    (!activeTestnet ? localStorage.getItem(BLOB_KEY_PREFIX) : null);
-  if (!raw) return null;
 
-  const aesKey = await retrieveAESKey(HL_AES_KEY_ID);
-  if (!aesKey) {
-    return null;
-  }
+  const storedAddr = getStoredAgentAddress(activeTestnet);
+  if (!storedAddr) return null;
 
-  let parsed: { ciphertext: string; iv: string };
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    purgeAgentKey(activeTestnet);
-    return null;
-  }
+  const isReady = await signerIframeBridge.initialize();
+  if (!isReady) return null;
 
-  let keyBytes: Uint8Array | null = null;
-  try {
-    keyBytes = await decryptBytes(parsed.ciphertext, parsed.iv, aesKey);
-    const privKeyHex = new TextDecoder().decode(keyBytes);
-    keyBytes.fill(0);
-    return new Wallet(privKeyHex);
-  } catch (err) {
-    console.warn('[HyperliquidAgentKeyManager] Decryption attempt failed:', err);
-    if (keyBytes) keyBytes.fill(0);
-    return null;
-  }
+  const bridgeAddr = await signerIframeBridge.getAddress().catch(() => null);
+  if (!bridgeAddr) return null;
+
+  // Cleanup legacy localStorage raw key
+  cleanupLegacyStorage(activeTestnet);
+
+  return new HyperliquidIsolatedSigner(bridgeAddr);
 }
 
 export function getStoredAgentAddress(isTestnet?: boolean): string | null {
@@ -181,6 +162,8 @@ export function hasStoredAgentKey(isTestnet?: boolean): boolean {
   const activeTestnet =
     isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
   return !!(
+    localStorage.getItem(getAddrKey(activeTestnet)) ||
+    (!activeTestnet && localStorage.getItem(ADDR_KEY_PREFIX)) ||
     localStorage.getItem(getBlobKey(activeTestnet)) ||
     (!activeTestnet && localStorage.getItem(BLOB_KEY_PREFIX))
   );
@@ -198,6 +181,8 @@ export function purgeAgentKey(isTestnet?: boolean): void {
     localStorage.removeItem(BLOB_KEY_PREFIX);
     localStorage.removeItem(ADDR_KEY_PREFIX);
   }
+  destroyAESKey(HL_AES_KEY_ID).catch(() => {});
+  signerIframeBridge.revokeKey().catch(() => {});
 }
 
 export async function purgeAgentKeyAndAes(isTestnet?: boolean): Promise<void> {

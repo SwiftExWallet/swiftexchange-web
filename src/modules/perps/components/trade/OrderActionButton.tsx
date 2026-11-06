@@ -41,6 +41,11 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
     (deriveError?.message?.includes('Must deposit') ||
       deriveError?.message?.includes('after deposit') ||
       deriveError?.message?.includes('-5050'));
+  const isSignerOffline =
+    deriveState === 'error' &&
+    (deriveError?.message?.includes('Signer') ||
+      deriveError?.message?.includes('offline') ||
+      deriveError?.message?.includes('Unavailable'));
 
   if (!isEvmConnected) {
     return (
@@ -92,7 +97,9 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
                   ? currentNetwork === 'testnet'
                     ? 'Claim Faucet to Activate'
                     : 'Deposit to Activate'
-                  : 'Signature Rejected — Try Again'}
+                  : isSignerOffline
+                    ? 'Trading Engine Maintenance — Retry'
+                    : 'Signature Rejected — Try Again'}
               </span>
             </>
           ) : (
@@ -108,7 +115,9 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
             ? 'Confirm the signature request in your wallet'
             : isDepositError
               ? `Account requires initial deposit or faucet funds to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`
-              : `One-time signature to activate gas-free execution on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
+              : isSignerOffline
+                ? 'Secure trading engine is undergoing a brief update. Our team is actively working on it.'
+                : `One-time signature to activate gas-free execution on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
         </p>
       </div>
     );

@@ -17,6 +17,7 @@ import type {
   MarginType,
   SymbolLeverageBracket,
 } from '../types/account';
+import type { IAsterSigner } from '../types/signer';
 import { signedRequest } from './auth';
 
 export interface DepositAsset {
@@ -92,16 +93,22 @@ export interface DepositWithdrawRecord {
   address?: string;
 }
 
-export async function getAccountInfo(signer: Signer, userAddr: string): Promise<AsterAccountInfo> {
+export async function getAccountInfo(
+  signer: Signer | IAsterSigner,
+  userAddr: string
+): Promise<AsterAccountInfo> {
   return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ACCOUNT);
 }
 
-export async function getBalance(signer: Signer, userAddr: string): Promise<AsterBalance[]> {
+export async function getBalance(
+  signer: Signer | IAsterSigner,
+  userAddr: string
+): Promise<AsterBalance[]> {
   return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.BALANCE);
 }
 
 export async function getPositionRisk(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol?: string
 ): Promise<AsterPositionRisk[]> {
@@ -111,7 +118,7 @@ export async function getPositionRisk(
 }
 
 export async function changeLeverage(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol: string,
   leverage: number
@@ -123,7 +130,7 @@ export async function changeLeverage(
 }
 
 export async function changeMarginType(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol: string,
   marginType: MarginType
@@ -135,7 +142,7 @@ export async function changeMarginType(
 }
 
 export async function changePositionMargin(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol: string,
   amount: string,
@@ -152,7 +159,7 @@ export async function changePositionMargin(
 }
 
 export async function getLeverageBracket(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol?: string
 ): Promise<SymbolLeverageBracket[]> {
@@ -162,7 +169,7 @@ export async function getLeverageBracket(
 }
 
 export async function getIncomeHistory(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: GetIncomeHistoryParams = {},
   signal?: AbortSignal
@@ -177,7 +184,7 @@ export async function getIncomeHistory(
 }
 
 export async function changeMultiAssetsMargin(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   multiAssetsMargin: boolean
 ): Promise<{ code: number; msg: string }> {
@@ -187,21 +194,21 @@ export async function changeMultiAssetsMargin(
 }
 
 export async function getMultiAssetsMargin(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string
 ): Promise<{ multiAssetsMargin: boolean }> {
   return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.MULTI_ASSETS_MARGIN);
 }
 
 export async function getPositionMode(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string
 ): Promise<{ dualSidePosition: boolean }> {
   return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.POSITION_SIDE_DUAL);
 }
 
 export async function changePositionMode(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   dualSidePosition: boolean
 ): Promise<{ code: number; msg: string }> {
@@ -211,7 +218,7 @@ export async function changePositionMode(
 }
 
 export async function getUserTrades(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol?: string,
   opts: { startTime?: number; endTime?: number; limit?: number; fromId?: number } = {},
@@ -362,7 +369,7 @@ export async function getWithdrawAssets(
 }
 
 export async function getUserWithdrawInfo(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   accountType: 'spot' | 'perp' = 'perp'
 ): Promise<UserWithdrawInfo> {
@@ -380,7 +387,7 @@ export async function getUserWithdrawInfo(
 }
 
 export async function getDepositWithdrawHistory(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   opts: {
     type?: 'DEPOSIT' | 'WITHDRAW';
@@ -410,7 +417,7 @@ export async function getDepositWithdrawHistory(
 }
 
 export async function submitWithdraw(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: {
     chainId: number;

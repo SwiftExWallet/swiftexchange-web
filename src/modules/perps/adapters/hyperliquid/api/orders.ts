@@ -8,6 +8,7 @@ import {
 import { meta, openOrders } from '@nktkas/hyperliquid/api/info';
 import type { Wallet } from 'ethers';
 
+import type { HyperliquidIsolatedSigner } from '../../../../walletconnect/services/hyperliquidAgentKeyManager';
 import { useExchangeManager } from '../../../core/ExchangeManager';
 
 export interface HyperliquidOrderRequest {
@@ -85,7 +86,7 @@ export function formatHyperliquidSize(size: number | string, szDecimals: number 
  * Places an authentic order on Hyperliquid AppChain via @nktkas/hyperliquid
  */
 export async function placeHyperliquidOrder(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   req: HyperliquidOrderRequest,
   isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
 ): Promise<any> {
@@ -181,7 +182,7 @@ export async function placeHyperliquidOrder(
  * Cancels a single order on Hyperliquid
  */
 export async function cancelHyperliquidOrder(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   symbol: string,
   orderId: string | number,
   isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
@@ -211,7 +212,7 @@ export async function cancelHyperliquidOrder(
  * Cancels all open orders for a specific symbol or all symbols on Hyperliquid
  */
 export async function cancelAllHyperliquidOrders(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   userAddr: string,
   symbol?: string,
   isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
@@ -244,7 +245,7 @@ export async function cancelAllHyperliquidOrders(
  * Updates leverage and margin mode (cross vs isolated) on Hyperliquid
  */
 export async function updateHyperliquidLeverage(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   symbol: string,
   leverage: number,
   isCross: boolean,
@@ -275,7 +276,7 @@ export async function updateHyperliquidLeverage(
  * Adds or removes isolated margin for a position on Hyperliquid
  */
 export async function updateHyperliquidIsolatedMargin(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   symbol: string,
   marginDeltaUsd: number,
   isBuy: boolean = true,

@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware';
 
 import { useNotificationStore } from '../../../../store/notificationStore';
 import { getAccountInfo, getDepositWithdrawHistory } from '../../adapters/aster/api/account';
+import type { IAsterSigner } from '../../adapters/aster/types/signer';
 import { useAccountStore } from './accountStore';
 
 export type DepositTrackStatus = 'CONFIRMING_ON_CHAIN' | 'INDEXING' | 'CONFIRMED' | 'FAILED';
@@ -252,11 +253,11 @@ export const useDepositTrackerStore = create<DepositTrackerState>()(
  * Starts a targeted poller for both pending deposits and pending withdrawals.
  * Automatically terminates when all transactions are confirmed or resolved.
  */
-export function startDepositPolling(signer: Signer, userAddr: string) {
+export function startDepositPolling(signer: Signer | IAsterSigner, userAddr: string) {
   startTransactionPolling(signer, userAddr);
 }
 
-export function startTransactionPolling(signer: Signer, userAddr: string) {
+export function startTransactionPolling(signer: Signer | IAsterSigner, userAddr: string) {
   if (pollingInterval) return;
 
   const checkPending = async () => {

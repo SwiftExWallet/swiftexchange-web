@@ -1,6 +1,7 @@
 import { type Signer, getAddress } from 'ethers';
 
 import { getAsterChainId, getAsterRestUrl } from '../constants';
+import type { IAsterSigner } from '../types/signer';
 import { AsterRateLimitError, parseAsterError } from './errors';
 
 export function buildSortedQueryString(params: Record<string, string>): string {
@@ -128,7 +129,7 @@ const ALLOWED_ASTER_HOSTNAMES = new Set([
 ]);
 
 export async function signedRequest(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
@@ -155,24 +156,51 @@ export async function signedRequest(
     }
   }
   const chainId = getAsterChainId();
-  const signerAddr = await signer.getAddress();
-  const serverTime = await getSyncedServerTime(effectiveBaseUrl);
-  const nonce = generateMonotonicNonce(serverTime);
+  let signature: string;
+  let finalQs: string;
 
-  const allParams: Record<string, string> = {
-    ...params,
-    user: getAddress(userAddr),
-    signer: getAddress(signerAddr),
-    nonce,
-    timestamp: String(serverTime),
-    recvWindow: '5000',
-  };
+  if ('signAsterRequest' in signer) {
+    const serverTime = await getSyncedServerTime(effectiveBaseUrl);
+    const signResult = await signer.signAsterRequest({
+      userAddress: userAddr,
+      method,
+      path,
+      params,
+      chainId,
+      serverTime,
+    });
+    signature = signResult.signature;
 
-  const sortedQs = buildSortedQueryString(allParams);
-  const typedData = buildTypedData(sortedQs, chainId);
+    const allParams: Record<string, string> = {
+      ...params,
+      user: getAddress(userAddr),
+      signer: getAddress(signResult.signerAddress),
+      nonce: signResult.nonce,
+      timestamp: signResult.timestamp,
+      recvWindow: '5000',
+    };
+    const sortedQs = buildSortedQueryString(allParams);
+    finalQs = `${sortedQs}&signature=${signature}`;
+  } else {
+    const signerAddr = await signer.getAddress();
+    const serverTime = await getSyncedServerTime(effectiveBaseUrl);
+    const nonce = generateMonotonicNonce(serverTime);
 
-  const signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
-  const finalQs = `${sortedQs}&signature=${signature}`;
+    const allParams: Record<string, string> = {
+      ...params,
+      user: getAddress(userAddr),
+      signer: getAddress(signerAddr),
+      nonce,
+      timestamp: String(serverTime),
+      recvWindow: '5000',
+    };
+
+    const sortedQs = buildSortedQueryString(allParams);
+    const typedData = buildTypedData(sortedQs, chainId);
+
+    signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
+    finalQs = `${sortedQs}&signature=${signature}`;
+  }
 
   let url: string;
   let fetchOptions: RequestInit;

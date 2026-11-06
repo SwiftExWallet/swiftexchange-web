@@ -23,9 +23,10 @@ import {
 } from '../api/account';
 import { isAsterDepositRequiredError, isAsterNoAgentError } from '../api/errors';
 import { getOpenOrders } from '../api/orders';
+import type { IAsterSigner } from '../types/signer';
 import { useUserDataStream } from './useUserDataStream';
 
-export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
+export async function fetchAsterSnapshot(signer: Signer | IAsterSigner, userAddr: string) {
   useAccountStore.getState().setIsLoading(true);
   try {
     let accountInfo: any;
@@ -222,7 +223,7 @@ export async function fetchAsterSnapshot(signer: Signer, userAddr: string) {
   }
 }
 
-export function useAsterDataSync(signer: Signer | null, userAddr: string | null) {
+export function useAsterDataSync(signer: Signer | IAsterSigner | null, userAddr: string | null) {
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const [isRestSynced, setIsRestSynced] = useState(false);
   const hasPendingTransactions = useDepositTrackerStore(s => s.hasActiveTransactions());

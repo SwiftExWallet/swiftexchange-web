@@ -10,6 +10,7 @@ import type {
   PlaceOrderParams,
   QueryOrderParams,
 } from '../types/orders';
+import type { IAsterSigner } from '../types/signer';
 import { signedRequest } from './auth';
 
 const BATCH_ORDER_LIMIT = 5;
@@ -20,7 +21,7 @@ const BATCH_ORDER_LIMIT = 5;
  * TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET.
  */
 export async function placeOrder(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: PlaceOrderParams
 ): Promise<AsterOrderResponse> {
@@ -112,7 +113,7 @@ export async function placeOrder(
 }
 
 export async function placeChaseOrder(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: import('../types/orders').PlaceChaseParams
 ): Promise<any> {
@@ -147,7 +148,7 @@ export async function placeChaseOrder(
  * Max 5 orders per batch (BATCH_ORDER_LIMIT). Excess orders are silently dropped; validate
  */
 export async function placeBatchOrders(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   orders: PlaceOrderParams[]
 ): Promise<AsterOrderResponse[]> {
@@ -176,7 +177,7 @@ export async function placeBatchOrders(
 
 // Cancel a single order by orderId or origClientOrderId.
 export async function cancelOrder(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: CancelOrderParams
 ): Promise<AsterOrderResponse> {
@@ -188,7 +189,7 @@ export async function cancelOrder(
 
 // Cancel all open orders for a symbol.
 export async function cancelAllOpenOrders(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol: string
 ): Promise<{ code: number; msg: string }> {
@@ -202,7 +203,7 @@ export async function cancelAllOpenOrders(
 
 //Cancel a batch of orders by ID lists.
 export async function cancelBatchOrders(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: CancelBatchParams
 ): Promise<AsterOrderResponse[]> {
@@ -215,7 +216,7 @@ export async function cancelBatchOrders(
 
 // Query a single order's current status.
 export async function queryOrder(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: QueryOrderParams
 ): Promise<AsterOrderResponse> {
@@ -227,7 +228,7 @@ export async function queryOrder(
 
 // Get all currently open orders, optionally filtered by symbol.
 export async function getOpenOrders(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol?: string
 ): Promise<AsterOrderResponse[]> {
@@ -238,7 +239,7 @@ export async function getOpenOrders(
 
 // Get order history with optional time-range and pagination.
 export async function getAllOrders(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: GetAllOrdersParams,
   signal?: AbortSignal
@@ -268,7 +269,7 @@ export async function getAllOrders(
  * @param countdownTime Countdown time in milliseconds. 10000 = 10s. Set to 0 to cancel/disable.
  */
 export async function countdownCancelAll(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol: string,
   countdownTime: number
@@ -283,7 +284,7 @@ export async function countdownCancelAll(
  * Modify a batch of orders in one request.
  */
 export async function batchModifyOrders(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   batchOrders: any[]
 ): Promise<any[]> {

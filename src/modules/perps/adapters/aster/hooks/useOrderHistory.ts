@@ -8,6 +8,7 @@ import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { getAllOrders } from '../api/orders';
 import type { AsterOrderResponse } from '../types/orders';
+import type { IAsterSigner } from '../types/signer';
 
 export type TimeRange = '1d' | '1w' | '1m' | '3m';
 
@@ -75,7 +76,7 @@ const deduplicateOrders = (existing: AsterOrderResponse[], incoming: AsterOrderR
 };
 
 export const useOrderHistory = (
-  signer: Signer | null,
+  signer: Signer | IAsterSigner | null,
   userAddr: string | null,
   symbol: string | null,
   timeRange: TimeRange = '1m'
