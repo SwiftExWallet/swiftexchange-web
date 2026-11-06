@@ -23,32 +23,51 @@ describe('HyperliquidMapper', () => {
   });
 
   describe('mapMarkets', () => {
-    it('maps universe metadata items into Market models', () => {
+    it('maps universe metadata items into Market models with dynamic tickSize and minNotional', () => {
       const meta: HlMetaResponse = {
         universe: [
           { name: 'BTC', szDecimals: 4, maxLeverage: 50 },
           { name: 'ETH', szDecimals: 3, maxLeverage: 25 },
+          { name: 'SOL', szDecimals: 2, maxLeverage: 20 },
+          { name: 'kPEPE', szDecimals: 0, maxLeverage: 10 },
         ],
       };
 
       const markets = HyperliquidMapper.mapMarkets(meta);
 
-      expect(markets).toHaveLength(2);
+      expect(markets).toHaveLength(4);
+
+      // BTC: szDecimals = 4 -> maxPriceDecimals = 6 - 4 = 2 -> tickSize = 0.01
       expect(markets[0].symbol).toBe('BTC-USDC');
       expect(markets[0].baseAsset).toBe('BTC');
       expect(markets[0].quoteAsset).toBe('USDC');
-      expect(markets[0].tickSize).toBeCloseTo(0.0001, 6);
+      expect(markets[0].tickSize).toBeCloseTo(0.01, 6);
       expect(markets[0].stepSize).toBeCloseTo(0.0001, 6);
       expect(markets[0].minOrderSize).toBeCloseTo(0.0001, 6);
+      expect(markets[0].minNotional).toBe(10);
       expect(markets[0].maxLeverage).toBe(50);
 
+      // ETH: szDecimals = 3 -> maxPriceDecimals = 6 - 3 = 3 -> tickSize = 0.001
       expect(markets[1].symbol).toBe('ETH-USDC');
       expect(markets[1].baseAsset).toBe('ETH');
       expect(markets[1].quoteAsset).toBe('USDC');
-      expect(markets[1].tickSize).toBeCloseTo(0.0001, 6);
+      expect(markets[1].tickSize).toBeCloseTo(0.001, 6);
       expect(markets[1].stepSize).toBeCloseTo(0.001, 6);
       expect(markets[1].minOrderSize).toBeCloseTo(0.001, 6);
+      expect(markets[1].minNotional).toBe(10);
       expect(markets[1].maxLeverage).toBe(25);
+
+      // SOL: szDecimals = 2 -> maxPriceDecimals = 6 - 2 = 4 -> tickSize = 0.0001
+      expect(markets[2].symbol).toBe('SOL-USDC');
+      expect(markets[2].tickSize).toBeCloseTo(0.0001, 6);
+      expect(markets[2].stepSize).toBeCloseTo(0.01, 6);
+      expect(markets[2].minNotional).toBe(10);
+
+      // kPEPE: szDecimals = 0 -> maxPriceDecimals = 6 - 0 = 6 -> tickSize = 0.000001
+      expect(markets[3].symbol).toBe('kPEPE-USDC');
+      expect(markets[3].tickSize).toBeCloseTo(0.000001, 6);
+      expect(markets[3].stepSize).toBe(1);
+      expect(markets[3].minNotional).toBe(10);
     });
   });
 
