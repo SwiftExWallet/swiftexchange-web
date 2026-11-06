@@ -6,6 +6,7 @@ import {
   updateLeverage,
 } from '@nktkas/hyperliquid/api/exchange';
 import { meta, openOrders } from '@nktkas/hyperliquid/api/info';
+import BigNumber from 'bignumber.js';
 import type { Wallet } from 'ethers';
 
 import type { HyperliquidIsolatedSigner } from '../../../../walletconnect/services/hyperliquidAgentKeyManager';
@@ -65,21 +66,31 @@ export async function getHyperliquidAssetId(symbol: string, isTestnet: boolean):
   return index;
 }
 
-export function formatHyperliquidPrice(price: number | string): string {
-  const num = typeof price === 'string' ? parseFloat(price) : price;
-  if (isNaN(num) || num <= 0) return '0';
-  if (num >= 10000) return num.toFixed(1);
-  if (num >= 1000) return num.toFixed(2);
-  if (num >= 100) return num.toFixed(3);
-  if (num >= 1) return num.toFixed(4);
-  if (num >= 0.01) return num.toFixed(5);
-  return num.toFixed(6);
+export function formatHyperliquidPrice(price: number | string, szDecimals: number = 4): string {
+  const bn = new BigNumber(price);
+  if (bn.isNaN() || bn.lte(0)) return '0';
+
+  // 1. Hyperliquid price cannot exceed 5 significant figures
+  const maxDecimals = Math.max(0, 6 - szDecimals);
+  const fiveSigFigs = new BigNumber(bn.toPrecision(5, BigNumber.ROUND_HALF_UP));
+
+  // 2. Hyperliquid price cannot have more decimal places than (6 - szDecimals)
+  const clamped = fiveSigFigs.decimalPlaces(maxDecimals, BigNumber.ROUND_HALF_UP);
+
+  // 3. Format as fixed string and strip unnecessary trailing zeros
+  const str = clamped.toFixed(maxDecimals);
+  return str.includes('.') ? str.replace(/\.?0+$/, '') : str;
 }
 
 export function formatHyperliquidSize(size: number | string, szDecimals: number = 4): string {
-  const num = typeof size === 'string' ? parseFloat(size) : size;
-  if (isNaN(num) || num <= 0) return '0';
-  return num.toFixed(szDecimals);
+  const bn = new BigNumber(size);
+  if (bn.isNaN() || bn.lte(0)) return '0';
+
+  // Always truncate/floor size down to step precision to prevent reduce-only/balance overshoots
+  const decimals = Math.max(0, Math.floor(szDecimals));
+  const floored = bn.decimalPlaces(decimals, BigNumber.ROUND_DOWN);
+  const str = floored.toFixed(decimals);
+  return str.includes('.') ? str.replace(/\.?0+$/, '') : str;
 }
 
 /**
@@ -108,14 +119,14 @@ export async function placeHyperliquidOrder(
       req.currentPrice || (typeof req.price === 'string' ? parseFloat(req.price) : req.price);
     // Apply 5% slippage protection for market execution
     const slipPrice = isBuy ? curPx * 1.05 : curPx * 0.95;
-    limitPx = formatHyperliquidPrice(slipPrice);
+    limitPx = formatHyperliquidPrice(slipPrice, szDecimals);
     orderTypeObj = { limit: { tif: 'FrontendMarket' } };
   } else if (req.type === 'POST_ONLY') {
-    limitPx = formatHyperliquidPrice(req.price);
+    limitPx = formatHyperliquidPrice(req.price, szDecimals);
     orderTypeObj = { limit: { tif: 'Alo' } };
   } else if (req.type === 'STOP_MARKET' || req.type === 'STOP') {
-    const triggerPx = formatHyperliquidPrice(req.stopPrice || req.price);
-    limitPx = formatHyperliquidPrice(req.price || req.stopPrice || 0);
+    const triggerPx = formatHyperliquidPrice(req.stopPrice || req.price, szDecimals);
+    limitPx = formatHyperliquidPrice(req.price || req.stopPrice || 0, szDecimals);
     orderTypeObj = {
       trigger: {
         isMarket: req.type === 'STOP_MARKET',
@@ -124,8 +135,8 @@ export async function placeHyperliquidOrder(
       },
     };
   } else if (req.type === 'TAKE_PROFIT_MARKET' || req.type === 'TAKE_PROFIT') {
-    const triggerPx = formatHyperliquidPrice(req.stopPrice || req.price);
-    limitPx = formatHyperliquidPrice(req.price || req.stopPrice || 0);
+    const triggerPx = formatHyperliquidPrice(req.stopPrice || req.price, szDecimals);
+    limitPx = formatHyperliquidPrice(req.price || req.stopPrice || 0, szDecimals);
     orderTypeObj = {
       trigger: {
         isMarket: req.type === 'TAKE_PROFIT_MARKET',
@@ -135,7 +146,7 @@ export async function placeHyperliquidOrder(
     };
   } else {
     // Standard LIMIT
-    limitPx = formatHyperliquidPrice(req.price);
+    limitPx = formatHyperliquidPrice(req.price, szDecimals);
     const tif = req.timeInForce === 'IOC' ? 'Ioc' : req.timeInForce === 'ALO' ? 'Alo' : 'Gtc';
     orderTypeObj = { limit: { tif } };
   }
