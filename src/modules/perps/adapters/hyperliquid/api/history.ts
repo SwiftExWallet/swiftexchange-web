@@ -1,9 +1,10 @@
 import { HttpTransport } from '@nktkas/hyperliquid';
 import { historicalOrders, openOrders, userFillsByTime } from '@nktkas/hyperliquid/api/info';
+import BigNumber from 'bignumber.js';
 
 import { useExchangeManager } from '../../../core/ExchangeManager';
 import type { AsterUserTrade } from '../../aster/types/account';
-import type { AsterOrderResponse } from '../../aster/types/orders';
+import type { AsterOrderResponse, OrderSide, OrderType } from '../../aster/types/orders';
 
 const getTransport = () => {
   const isTestnet = useExchangeManager.getState().currentNetwork === 'testnet';
@@ -57,7 +58,7 @@ export const getHyperliquidHistoricalOrders = async (
     }
 
     // Convert to AsterOrderResponse
-    let mapped = filtered.map(item => {
+    let mapped: AsterOrderResponse[] = filtered.map(item => {
       const o = item.order;
 
       let mappedStatus = 'NEW';
@@ -77,9 +78,9 @@ export const getHyperliquidHistoricalOrders = async (
         cumQty: '0',
         cumQuote: '0',
         timeInForce: 'GTC' as any,
-        type: o.orderType === 'Limit' ? 'LIMIT' : 'MARKET',
-        origType: o.orderType === 'Limit' ? 'LIMIT' : 'MARKET',
-        side: o.side === 'A' ? 'SELL' : 'BUY',
+        type: (o.orderType === 'Limit' ? 'LIMIT' : 'MARKET') as OrderType,
+        origType: (o.orderType === 'Limit' ? 'LIMIT' : 'MARKET') as OrderType,
+        side: (o.side === 'A' ? 'SELL' : 'BUY') as OrderSide,
         positionSide: 'BOTH',
         stopPrice: o.triggerPx || '0',
         closePosition: o.reduceOnly || false,
@@ -88,7 +89,7 @@ export const getHyperliquidHistoricalOrders = async (
         workingType: 'CONTRACT_PRICE' as any,
         priceProtect: false,
         reduceOnly: o.reduceOnly || false,
-      };
+      } as unknown as AsterOrderResponse;
     });
 
     if (options?.limit) {
@@ -118,24 +119,31 @@ export const getHyperliquidUserFills = async (
       }
     );
 
-    let mapped = data.map(
-      f =>
-        ({
-          id: f.oid, // oid is used as unique ID for fill
-          orderId: f.oid,
-          symbol: f.coin,
-          price: f.px,
-          qty: f.sz,
-          quoteQty: (parseFloat(f.px) * parseFloat(f.sz)).toString(),
-          realizedPnl: f.closedPnl || '0',
-          commission: f.fee || '0',
-          commissionAsset: (f as any).feeToken || 'USDC',
-          time: f.time,
-          buyer: f.side === 'B',
-          maker: (f as any).maker || false,
-          side: f.side === 'B' ? 'BUY' : 'SELL', // Some UI components rely on 'side' existing in trade object
-        }) as unknown as AsterUserTrade
-    ); // Type asserting to handle any missing strict Aster fields
+    let mapped = data.map(f => {
+      const fillId =
+        (f as any).tid !== undefined && (f as any).tid !== null
+          ? String((f as any).tid)
+          : f.hash
+            ? `${f.hash}-${f.oid}`
+            : `${f.oid}-${f.time}`;
+      const quoteQty = new BigNumber(f.px || 0).times(f.sz || 0).toFixed();
+
+      return {
+        id: fillId,
+        orderId: f.oid,
+        symbol: f.coin,
+        price: f.px,
+        qty: f.sz,
+        quoteQty,
+        realizedPnl: f.closedPnl || '0',
+        commission: f.fee || '0',
+        commissionAsset: (f as any).feeToken || 'USDC',
+        time: f.time,
+        buyer: f.side === 'B',
+        maker: (f as any).maker || false,
+        side: f.side === 'B' ? 'BUY' : 'SELL', // Some UI components rely on 'side' existing in trade object
+      } as unknown as AsterUserTrade;
+    });
 
     if (options?.limit) {
       mapped = mapped.slice(0, options.limit);

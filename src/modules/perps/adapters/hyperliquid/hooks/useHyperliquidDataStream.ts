@@ -161,8 +161,15 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
           const trades = fills.map((f: any) => {
             const rawCoin = f.coin || '';
             const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
+            const fillId =
+              f.tid !== undefined && f.tid !== null
+                ? String(f.tid)
+                : f.hash
+                  ? `${f.hash}-${f.oid}`
+                  : `${f.oid}-${f.time}`;
+
             return {
-              id: String(f.oid || f.tid || Date.now()),
+              id: fillId,
               orderId: String(f.oid || ''),
               symbol,
               side: f.side === 'B' ? ('buy' as const) : ('sell' as const),
