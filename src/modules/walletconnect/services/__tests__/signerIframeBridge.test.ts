@@ -22,4 +22,17 @@ describe('SignerIframeBridge & IAsterSigner', () => {
     expect(typeof signerIframeBridge.signAsterRequest).toBe('function');
     expect(typeof signerIframeBridge.revokeKey).toBe('function');
   });
+
+  it('cleans up message listeners and timers on dispose', () => {
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+    // Simulate active timer to verify cancellation
+    (signerIframeBridge as any).handshakeTimer = setTimeout(() => {}, 1000);
+
+    signerIframeBridge.dispose();
+
+    expect(removeSpy).toHaveBeenCalledWith('message', expect.any(Function));
+    expect(clearSpy).toHaveBeenCalled();
+  });
 });

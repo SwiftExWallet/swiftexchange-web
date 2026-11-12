@@ -16,7 +16,7 @@ export function getSignerOrigin(): string {
 
   // If in development mode and local dev server is running
   if (import.meta.env.DEV) {
-    return 'http://localhost:5174';
+    return 'https://signer.swiftexchange.io';
   }
 
   // Default production origin
@@ -36,12 +36,43 @@ class SignerIframeBridge implements IAsterSigner {
   private initPromise: Promise<boolean> | null = null;
   private initResolver: ((ready: boolean) => void) | null = null;
   private cachedAddress: string | null = null;
+  private messageListener: ((event: MessageEvent) => void) | null = null;
+  private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+  private handshakeRetryTimer: ReturnType<typeof setTimeout> | null = null;
   readonly isIsolated = true;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('message', this.handleMessage.bind(this));
+      this.messageListener = this.handleMessage.bind(this);
+      window.addEventListener('message', this.messageListener);
     }
+  }
+
+  private clearHandshakeTimers(): void {
+    if (this.handshakeTimer !== null) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
+    }
+    if (this.handshakeRetryTimer !== null) {
+      clearTimeout(this.handshakeRetryTimer);
+      this.handshakeRetryTimer = null;
+    }
+  }
+
+  public dispose(): void {
+    if (typeof window !== 'undefined' && this.messageListener) {
+      window.removeEventListener('message', this.messageListener);
+      this.messageListener = null;
+    }
+
+    this.clearHandshakeTimers();
+    this.pendingRequests.forEach(pending => clearTimeout(pending.timer));
+    this.pendingRequests.clear();
+    this.initResolver = null;
+    this.initPromise = null;
+    this.isInitialized = false;
+    this.iframe = null;
+    this.cachedAddress = null;
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -62,6 +93,7 @@ class SignerIframeBridge implements IAsterSigner {
 
     if (data.type === 'SX_SIGNER_READY') {
       this.isInitialized = true;
+      this.clearHandshakeTimers();
       if (this.initResolver) {
         this.initResolver(true);
         this.initResolver = null;
@@ -93,12 +125,14 @@ class SignerIframeBridge implements IAsterSigner {
 
     this.initPromise = new Promise<boolean>(resolve => {
       let isSettled = false;
+
       const finish = (result: boolean) => {
         if (isSettled) return;
         isSettled = true;
+        this.clearHandshakeTimers();
         this.initResolver = null;
         if (!result) {
-          this.initPromise = null; // Reset so retry can attempt handshake again
+          this.initPromise = null;
         }
         resolve(result);
       };
@@ -126,15 +160,16 @@ class SignerIframeBridge implements IAsterSigner {
 
         this.iframe = frame;
 
-        // Poll with PING until ready or timeout
         let attempts = 0;
-        const maxAttempts = 25;
+        const maxAttempts = 12;
+        const timeoutMs = 3000;
 
         const checkPing = async () => {
           if (isSettled) return;
-          attempts++;
+          attempts += 1;
+
           try {
-            const pong = await this.sendRpc({ type: 'SX_SIGNER_PING' }, 600);
+            const pong = await this.sendRpc({ type: 'SX_SIGNER_PING' }, 800);
             if (pong && pong.type === 'SX_SIGNER_PONG') {
               this.isInitialized = true;
               if (pong.agentAddress) {
@@ -144,12 +179,15 @@ class SignerIframeBridge implements IAsterSigner {
               return;
             }
           } catch {
-            // Wait for next attempt
+            // Retry until timeout window closes.
           }
 
           if (attempts < maxAttempts && !isSettled) {
-            setTimeout(checkPing, 200);
-          } else if (!isSettled) {
+            this.handshakeRetryTimer = setTimeout(checkPing, 250);
+            return;
+          }
+
+          if (!isSettled) {
             console.warn('[SignerIframeBridge] Isolated signer iframe handshake timed out.');
             finish(false);
           }
@@ -157,14 +195,18 @@ class SignerIframeBridge implements IAsterSigner {
 
         let started = false;
         const startPings = () => {
-          if (started) return;
+          if (started || isSettled) return;
           started = true;
-          setTimeout(checkPing, 100);
+          this.handshakeTimer = setTimeout(checkPing, 150);
         };
 
         frame.onload = startPings;
-        // Also start pings eagerly in case onload already fired
-        setTimeout(startPings, 300);
+        this.handshakeTimer = setTimeout(startPings, 250);
+        setTimeout(() => {
+          if (!isSettled && !this.isInitialized) {
+            finish(false);
+          }
+        }, timeoutMs);
       } catch (e) {
         console.error('[SignerIframeBridge] Initialization error:', e);
         finish(false);

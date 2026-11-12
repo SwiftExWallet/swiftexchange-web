@@ -1,8 +1,8 @@
+import { useNotificationStore } from '@/store/notificationStore';
 import { HttpTransport } from '@nktkas/hyperliquid';
 import { approveAgent } from '@nktkas/hyperliquid/api/exchange';
 import { BrowserProvider, Wallet } from 'ethers';
 
-import { useNotificationStore } from '../../../components/Notification/notificationStore';
 import { useWalletStore } from '../store/walletConnectStore';
 import { destroyAESKey } from './keyVaultIndexedDB';
 import { signerIframeBridge } from './signerIframeBridge';
