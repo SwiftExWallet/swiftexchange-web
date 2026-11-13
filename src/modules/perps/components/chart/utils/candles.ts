@@ -123,5 +123,12 @@ export function buildDatasetId(market: string, timeframe: string, candles: any[]
 
 export function candlesMatchMarket(candles: any[], selectedMarket: string): boolean {
   const ticker = candles[0]?.ticker || '';
-  return !ticker || ticker === selectedMarket || selectedMarket.startsWith(ticker);
+  if (!ticker) return true;
+  const cleanTicker = ticker.replace(/[-_]/g, '').toUpperCase();
+  const cleanMarket = selectedMarket.replace(/[-_]/g, '').toUpperCase();
+  return (
+    cleanTicker === cleanMarket ||
+    cleanMarket.startsWith(cleanTicker) ||
+    cleanTicker.startsWith(cleanMarket)
+  );
 }

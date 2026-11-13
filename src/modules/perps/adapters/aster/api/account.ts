@@ -1,6 +1,7 @@
 import type { Signer } from 'ethers';
 import { getAddress, isAddress } from 'ethers';
 
+import { asterHttpClient } from '../client/asterHttpClient';
 import {
   ASTER_ENDPOINTS,
   getAsterBapiUrl,
@@ -17,7 +18,42 @@ import type {
   MarginType,
   SymbolLeverageBracket,
 } from '../types/account';
-import { signedRequest } from './auth';
+import {
+  EIP712_TYPES,
+  buildSortedQueryString,
+  buildTypedData,
+  generateMonotonicNonce,
+  getSyncedServerTime,
+  signedRequest,
+} from './auth';
+
+export interface MigrateUserResult {
+  batchId: string;
+}
+
+export interface MigrateUserDetail {
+  id: number;
+  asset: string;
+  amount: string;
+  tranId: number | null;
+  status: 'I' | 'S' | 'F';
+  fromStatus: 'S' | 'F' | 'P' | null;
+  fromErrorCode: string | null;
+  fromResponse: string | null;
+  toStatus: 'S' | 'F' | 'P' | null;
+  toErrorCode: string | null;
+  toResponse: string | null;
+}
+
+export interface MigrateUserHistoryResult {
+  batchId: string;
+  totalCount: number;
+  successCount: number;
+  processingCount: number;
+  failCount: number;
+  initCount: number;
+  details: MigrateUserDetail[];
+}
 
 export interface DepositAsset {
   name: string;
@@ -93,11 +129,29 @@ export interface DepositWithdrawRecord {
 }
 
 export async function getAccountInfo(signer: Signer, userAddr: string): Promise<AsterAccountInfo> {
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ACCOUNT);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.ACCOUNT,
+    {},
+    undefined,
+    undefined,
+    5
+  );
 }
 
 export async function getBalance(signer: Signer, userAddr: string): Promise<AsterBalance[]> {
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.BALANCE);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.BALANCE,
+    {},
+    undefined,
+    undefined,
+    5
+  );
 }
 
 export async function getPositionRisk(
@@ -107,7 +161,16 @@ export async function getPositionRisk(
 ): Promise<AsterPositionRisk[]> {
   const p: Record<string, string> = {};
   if (symbol) p.symbol = symbol;
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.POSITION_RISK, p);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.POSITION_RISK,
+    p,
+    undefined,
+    undefined,
+    5
+  );
 }
 
 export async function changeLeverage(
@@ -158,7 +221,16 @@ export async function getLeverageBracket(
 ): Promise<SymbolLeverageBracket[]> {
   const p: Record<string, string> = {};
   if (symbol) p.symbol = symbol;
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.LEVERAGE_BRACKET, p);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.LEVERAGE_BRACKET,
+    p,
+    undefined,
+    undefined,
+    1
+  );
 }
 
 export async function getIncomeHistory(
@@ -173,7 +245,7 @@ export async function getIncomeHistory(
   if (params.startTime !== undefined) p.startTime = String(params.startTime);
   if (params.endTime !== undefined) p.endTime = String(params.endTime);
   if (params.limit !== undefined) p.limit = String(params.limit);
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.INCOME, p, undefined, signal);
+  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.INCOME, p, undefined, signal, 30);
 }
 
 export async function changeMultiAssetsMargin(
@@ -190,14 +262,32 @@ export async function getMultiAssetsMargin(
   signer: Signer,
   userAddr: string
 ): Promise<{ multiAssetsMargin: boolean }> {
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.MULTI_ASSETS_MARGIN);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.MULTI_ASSETS_MARGIN,
+    {},
+    undefined,
+    undefined,
+    30
+  );
 }
 
 export async function getPositionMode(
   signer: Signer,
   userAddr: string
 ): Promise<{ dualSidePosition: boolean }> {
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.POSITION_SIDE_DUAL);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.POSITION_SIDE_DUAL,
+    {},
+    undefined,
+    undefined,
+    30
+  );
 }
 
 export async function changePositionMode(
@@ -223,11 +313,18 @@ export async function getUserTrades(
   if (opts.endTime !== undefined) p.endTime = String(opts.endTime);
   if (opts.limit !== undefined) p.limit = String(opts.limit);
   if (opts.fromId !== undefined) p.fromId = String(opts.fromId);
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.USER_TRADES, p, undefined, signal);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.USER_TRADES,
+    p,
+    undefined,
+    signal,
+    5
+  );
 }
 
-const depositAssetsCache: Record<string, { timestamp: number; data: DepositAsset[] }> = {};
-const withdrawAssetsCache: Record<string, { timestamp: number; data: WithdrawAsset[] }> = {};
 const CACHE_TTL_MS = 180000;
 
 function getFallbackAssetsForChain(chainIds: string | number): DepositAsset[] {
@@ -303,22 +400,19 @@ export async function getDepositAssets(
   accountType: 'spot' | 'perp' = 'perp',
   networks: string = 'EVM'
 ): Promise<DepositAsset[]> {
-  const cacheKey = `dep_${chainIds}_${accountType}_${networks}`;
-  const cached = depositAssetsCache[cacheKey];
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.data;
-  }
-
   try {
     const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
-    const res = await fetch(`${getAsterBapiUrl()}/aster/deposit/assets?${qs}`);
-    const data = await res.json();
+    const data = await asterHttpClient.request<any>(
+      `${getAsterBapiUrl()}/aster/deposit/assets?${qs}`,
+      {
+        method: 'GET',
+        ttlMs: CACHE_TTL_MS,
+      }
+    );
 
     const isSuccess = data.success === true || data.code === '000000';
     if (isSuccess && Array.isArray(data.data) && data.data.length > 0) {
-      const result: DepositAsset[] = data.data;
-      depositAssetsCache[cacheKey] = { timestamp: Date.now(), data: result };
-      return result;
+      return data.data;
     }
   } catch (err) {
     console.warn('[Deposit] Failed to fetch deposit assets from Aster bapi, using fallback:', err);
@@ -333,22 +427,19 @@ export async function getWithdrawAssets(
   accountType: 'spot' | 'perp' = 'perp',
   networks: string = 'EVM'
 ): Promise<WithdrawAsset[]> {
-  const cacheKey = `wd_${chainIds}_${accountType}_${networks}`;
-  const cached = withdrawAssetsCache[cacheKey];
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.data;
-  }
-
   try {
     const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
-    const res = await fetch(`${getAsterBapiUrl()}/aster/withdraw/assets?${qs}`);
-    const data = await res.json();
+    const data = await asterHttpClient.request<any>(
+      `${getAsterBapiUrl()}/aster/withdraw/assets?${qs}`,
+      {
+        method: 'GET',
+        ttlMs: CACHE_TTL_MS,
+      }
+    );
 
     const isSuccess = data.success === true || data.code === '000000';
     if (isSuccess && Array.isArray(data.data) && data.data.length > 0) {
-      const result: WithdrawAsset[] = data.data;
-      withdrawAssetsCache[cacheKey] = { timestamp: Date.now(), data: result };
-      return result;
+      return data.data;
     }
   } catch (err) {
     console.warn(
@@ -445,5 +536,43 @@ export async function submitWithdraw(
       userSignature: params.userSignature,
     },
     baseUrl
+  );
+}
+
+export async function migrateUserAssets(
+  signer: Signer,
+  userAddr: string
+): Promise<MigrateUserResult> {
+  const user = getAddress(userAddr);
+  const serverTime = await getSyncedServerTime();
+  const nonce = generateMonotonicNonce(serverTime);
+  const params: Record<string, string> = { user, nonce };
+  const sortedQs = buildSortedQueryString(params);
+  const typedData = buildTypedData(sortedQs);
+  const signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
+  const body = `${sortedQs}&signature=${signature}`;
+  const url = `${getAsterRestUrl()}${ASTER_ENDPOINTS.MIGRATE_USER}`;
+  return asterHttpClient.request<MigrateUserResult>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+    weight: 50,
+  });
+}
+
+export async function getMigrateUserHistory(
+  signer: Signer,
+  userAddr: string,
+  batchId: string
+): Promise<MigrateUserHistoryResult> {
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.MIGRATE_USER_HISTORY,
+    { batchId },
+    undefined,
+    undefined,
+    50
   );
 }

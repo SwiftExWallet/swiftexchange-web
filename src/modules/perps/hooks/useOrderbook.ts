@@ -5,9 +5,10 @@ export interface OrderbookSnapshot {
   bids: { price: string; size: string }[];
   asks: { price: string; size: string }[];
   isReady: boolean;
+  isSyncing: boolean;
 }
 
-const EMPTY: OrderbookSnapshot = { bids: [], asks: [], isReady: false };
+const EMPTY: OrderbookSnapshot = { bids: [], asks: [], isReady: false, isSyncing: false };
 
 export const useOrderbook = (): OrderbookSnapshot => {
   const symbol = useMarketStore(state => state.selectedSymbol);
@@ -15,7 +16,6 @@ export const useOrderbook = (): OrderbookSnapshot => {
     const books = state.books;
     if (books[symbol]) return books[symbol];
 
-    // Check hyphenated format (e.g. BTC-USDT)
     const withHyphen = symbol.includes('-')
       ? symbol
       : symbol.endsWith('USDT')
@@ -25,12 +25,18 @@ export const useOrderbook = (): OrderbookSnapshot => {
           : symbol;
     if (books[withHyphen]) return books[withHyphen];
 
-    // Check raw unhyphenated format (e.g. BTCUSDT)
     const noHyphen = symbol.replace('-', '');
     if (books[noHyphen]) return books[noHyphen];
 
     return undefined;
   });
 
-  return book ? { bids: book.bids, asks: book.asks, isReady: book.isReady } : EMPTY;
+  return book
+    ? {
+        bids: book.bids,
+        asks: book.asks,
+        isReady: book.isReady,
+        isSyncing: book.isSyncing ?? false,
+      }
+    : EMPTY;
 };

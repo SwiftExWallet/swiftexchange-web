@@ -14,6 +14,7 @@ import { useOrderEntryStore } from '../../core/stores/orderEntryStore';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { useOrderbook } from '../../hooks/useOrderbook';
 import { useTrades } from '../../hooks/useTrades';
+import { safeFormatNumber } from '../../utils/precision';
 
 interface OrderbookRowProps {
   price: number;
@@ -85,24 +86,24 @@ const OrderbookRow = memo(function OrderbookRow({
 });
 
 function formatPrice(val: number): string {
-  return val.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 4 });
+  if (!Number.isFinite(val) || val <= 0) return '--';
+  const dec = val < 1 ? (val < 0.001 ? 6 : 4) : 2;
+  return safeFormatNumber(val, 1, dec, '--');
 }
 
 function formatVal(val: number, isUsdt: boolean): string {
+  if (!Number.isFinite(val) || val < 0) return '0.00';
   if (isUsdt) {
     if (val >= 1000000) return `${(val / 1000000).toFixed(2)}M`;
     if (val >= 10000) return `${(val / 1000).toFixed(2)}K`;
-    if (val >= 1000)
-      return val.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
-    if (val >= 1)
-      return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (val >= 1000) return safeFormatNumber(val, 1, 2, '0.00');
+    if (val >= 1) return safeFormatNumber(val, 2, 2, '0.00');
     return val.toFixed(3);
   }
   if (val >= 10000) return `${(val / 1000).toFixed(2)}K`;
-  if (val >= 1000) return val.toLocaleString('en-US', { maximumFractionDigits: 1 });
-  if (val >= 1)
-    return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
-  return val.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 5 });
+  if (val >= 1000) return safeFormatNumber(val, 0, 1, '0');
+  if (val >= 1) return safeFormatNumber(val, 2, 3, '0.00');
+  return safeFormatNumber(val, 3, 5, '0.000');
 }
 
 /** Aggregate orderbook levels by tick precision */
@@ -571,11 +572,10 @@ export const OrderbookPanel: React.FC = () => {
                       <div className="flex">
                         <span className="font-mono-tabular text-[11px] text-primary opacity-80 w-[75px] text-right">
                           {usdtVal >= 1000
-                            ? usdtVal.toLocaleString('en-US', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })
-                            : usdtVal.toFixed(4)}
+                            ? safeFormatNumber(usdtVal, 2, 2)
+                            : Number.isFinite(usdtVal)
+                              ? usdtVal.toFixed(4)
+                              : '--'}
                         </span>
                         <span className="font-mono-tabular text-[11px] text-secondary w-[65px] text-right">
                           {t}

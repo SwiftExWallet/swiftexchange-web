@@ -197,11 +197,6 @@ export async function submitApproveAgent(params: {
   const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
   const url = `${baseUrl}/fapi/v3/approveAgent?${queryString}`;
 
-  console.groupCollapsed('[aster] submitApproveAgent → request');
-  console.log('url:', url);
-  console.log('network:', params.network, 'isTestnet:', isTestnet, 'asterChain:', asterChain);
-  console.groupEnd();
-
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
@@ -226,11 +221,6 @@ export async function submitApproveAgent(params: {
   }
 
   const data = await res.json().catch(() => null);
-
-  console.groupCollapsed('[aster] submitApproveAgent → response');
-  console.log('status:', res.status, res.statusText);
-  console.log('data:', data);
-  console.groupEnd();
 
   if (!res.ok || !data || (data.code && data.code !== 200 && data.code !== 0) || data.error) {
     const errMsg =
@@ -397,20 +387,7 @@ export async function deriveAsterAgentKey(
     asterChain
   );
 
-  console.groupCollapsed('[aster] deriveAsterAgentKey → signing payload');
-  console.log('evmAddress (signer):', evmAddress);
-  console.log('agentWallet.address:', agentWallet.address);
-  console.log('network:', currentNetwork, 'asterChain:', asterChain, 'chainId:', chainId);
-  console.log('domain:', typedData.domain);
-  console.log('primaryType:', typedData.primaryType);
-  console.log('types.ApproveAgent:', typedData.types.ApproveAgent);
-  console.log('message:', typedData.message);
-  console.log('raw JSON sent to eth_signTypedData_v4:', JSON.stringify(typedData));
-  console.groupEnd();
-
   const signature = await signTypedData(provider, evmAddress, typedData);
-
-  console.log('[aster] signature returned by wallet:', signature, `(length ${signature.length})`);
 
   assertWellFormedSignature(signature);
 
@@ -420,8 +397,6 @@ export async function deriveAsterAgentKey(
     typedData.message,
     signature
   );
-
-  console.log('[aster] locally recovered signer:', recovered, '— expected:', evmAddress);
 
   if (getAddress(recovered) !== getAddress(evmAddress)) {
     throw new Error(

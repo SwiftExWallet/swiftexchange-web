@@ -9,6 +9,7 @@ import { useLeverageStore } from '../../core/stores/leverageStore';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useOrderEntryStore } from '../../core/stores/orderEntryStore';
 import { useUnifiedExecution } from '../../services/useUnifiedExecution';
+import { safeFormatNumber } from '../../utils/precision';
 import { Modal } from '../ui/Modal';
 
 interface LeverageModalProps {
@@ -65,10 +66,7 @@ export const LeverageModal: React.FC<LeverageModalProps> = ({ isOpen, onClose })
 
     if (maxCap === 0) return '...';
 
-    return new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(maxCap);
+    return safeFormatNumber(maxCap, 2, 2, '...');
   }, [leverage, leverageBrackets]);
 
   const handleConfirm = async () => {

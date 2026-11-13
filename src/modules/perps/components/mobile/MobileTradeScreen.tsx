@@ -14,11 +14,12 @@ import {
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import BigNumber from 'bignumber.js';
+
 import { useNotificationStore } from '../../../../store/notificationStore';
 import { useWalletStore } from '../../../walletconnect/store/walletConnectStore';
 import { parseAsterError } from '../../adapters/aster/api/errors';
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
-import { fetchAsterSnapshot } from '../../adapters/aster/hooks/useAsterDataSync';
 import { useOrders } from '../../adapters/aster/hooks/useOrders';
 import { useHyperliquidAgent } from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
 import { useExchangeManager } from '../../core/ExchangeManager';
@@ -33,8 +34,15 @@ import { useTradeCalculations } from '../../hooks/useTradeCalculations';
 import { type UnifiedOrderParams, useUnifiedExecution } from '../../services/useUnifiedExecution';
 import { calculateLiquidationPrice } from '../../utils/liquidationCalculator';
 import { validateOrder } from '../../utils/orderValidation';
+import {
+  formatPriceToTick,
+  formatQuantityToStep,
+  safeDecimals,
+  safeFormatNumber,
+} from '../../utils/precision';
 import { AccountModal } from '../trade/AccountModal';
 import { LeverageModal } from '../trade/LeverageModal';
+import { TpSlSection } from '../trade/TpSlSection';
 import { MobileMiniOrderbook } from './MobileMiniOrderbook';
 
 interface MobileTradeScreenProps {
@@ -124,20 +132,6 @@ const isAdvancedOrder = (type: OrderType): boolean => {
   return type !== 'MARKET' && type !== 'LIMIT';
 };
 
-const formatPrecision = (
-  val: string | number | undefined,
-  step: number | undefined
-): string | undefined => {
-  if (val === undefined || val === null || val === '') return undefined;
-  if (!step) return String(val);
-  const num = typeof val === 'string' ? parseFloat(val) : val;
-  if (isNaN(num)) return String(val);
-  const decimals = Math.max(0, -Math.floor(Math.log10(step)));
-  const factor = Math.pow(10, decimals);
-  const truncated = Math.floor(num * factor) / factor;
-  return truncated.toFixed(decimals);
-};
-
 export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   onBack,
   side,
@@ -179,12 +173,8 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   }, [selectedSymbol]);
 
   // Decimals
-  const baseDecimals = currentMarket?.stepSize
-    ? Math.max(0, -Math.floor(Math.log10(currentMarket.stepSize)))
-    : 3;
-  const priceDecimals = currentMarket?.tickSize
-    ? Math.max(0, -Math.floor(Math.log10(currentMarket.tickSize)))
-    : 2;
+  const baseDecimals = safeDecimals(currentMarket?.stepSize, 3, 8);
+  const priceDecimals = safeDecimals(currentMarket?.tickSize, 2, 8);
 
   // Active Leverage & Margin Mode
   const symbolLeverage =
@@ -203,6 +193,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   const availableBalanceStr = useAccountStore(state => state.availableBalance);
   const totalMarginBalanceStr = useAccountStore(state => state.totalMarginBalance);
   const totalWalletBalanceStr = useAccountStore(state => state.totalWalletBalance);
+  const isAccountLoading = useAccountStore(state => state.isLoading);
 
   // Calculations from desktop hook
   const {
@@ -246,6 +237,13 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
 
   const positions = usePositionStore(state => state.positions);
   const bracketsBySymbol = useLeverageStore(state => state.bracketsBySymbol);
+
+  const hasFunds =
+    availableMargin > 0 ||
+    calcWalletBalance > 0 ||
+    (totalWalletBalanceStr ? parseFloat(totalWalletBalanceStr) > 0 : false) ||
+    (totalMarginBalanceStr ? parseFloat(totalMarginBalanceStr) > 0 : false) ||
+    Object.keys(positions).length > 0;
 
   const estimatedLiquidationPrice = useMemo(() => {
     const numSize = parseFloat(store.size || '0');
@@ -364,7 +362,14 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
       store.sizeAsset,
       store.stopPrice,
       store.callbackRate,
-      maxOrderSize
+      maxOrderSize,
+      store.scaledPriceLower,
+      store.scaledPriceUpper,
+      store.scaledOrderCount,
+      store.attachedTpEnabled,
+      store.attachedTpPrice,
+      store.attachedSlEnabled,
+      store.attachedSlPrice
     );
   }, [
     currentMarket,
@@ -378,6 +383,13 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
     store.stopPrice,
     store.callbackRate,
     maxOrderSize,
+    store.scaledPriceLower,
+    store.scaledPriceUpper,
+    store.scaledOrderCount,
+    store.attachedTpEnabled,
+    store.attachedTpPrice,
+    store.attachedSlEnabled,
+    store.attachedSlPrice,
   ]);
 
   // Local state
@@ -386,6 +398,23 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [sliderVal, setSliderVal] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (submitError) {
+      setSubmitError(null);
+    }
+  }, [
+    store.size,
+    store.price,
+    store.stopPrice,
+    store.callbackRate,
+    store.attachedTpPrice,
+    store.attachedSlPrice,
+    store.orderType,
+    store.side,
+    store.sizeAsset,
+  ]);
 
   // Effective limit price
   const activePrice =
@@ -398,14 +427,24 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
     setSliderVal(percent);
     if (!currentPrice || currentPrice <= 0 || availableMargin <= 0) return;
 
-    const maxUsd = availableMargin * symbolLeverage * 0.98;
-    const targetUsd = (maxUsd * percent) / 100;
+    const maxUsd = new BigNumber(availableMargin).times(symbolLeverage).times(0.98);
+    const targetUsd = maxUsd.times(percent).dividedBy(100);
 
     if (store.sizeAsset === 'quote') {
-      store.setSize(targetUsd > 0 ? targetUsd.toFixed(2) : '');
+      store.setSize(targetUsd.isGreaterThan(0) ? targetUsd.toFixed(2, BigNumber.ROUND_DOWN) : '');
     } else {
-      const targetBase = targetUsd / currentPrice;
-      store.setSize(targetBase > 0 ? targetBase.toFixed(baseDecimals) : '');
+      const targetBase = targetUsd.dividedBy(currentPrice);
+      if (currentMarket?.stepSize) {
+        store.setSize(
+          targetBase.isGreaterThan(0)
+            ? formatQuantityToStep(targetBase.toString(), currentMarket.stepSize)
+            : ''
+        );
+      } else {
+        store.setSize(
+          targetBase.isGreaterThan(0) ? targetBase.toFixed(baseDecimals, BigNumber.ROUND_DOWN) : ''
+        );
+      }
     }
   };
 
@@ -420,12 +459,16 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   // Toggle size currency (Base token vs Quote USD)
   const handleCurrencyToggle = () => {
     const newAsset = store.sizeAsset === 'base' ? 'quote' : 'base';
-    const currentSize = parseFloat(store.size) || 0;
-    if (currentSize > 0 && currentPrice > 0) {
+    const bnSize = new BigNumber(store.size);
+    if (!bnSize.isNaN() && bnSize.isGreaterThan(0) && currentPrice > 0) {
       if (newAsset === 'quote') {
-        store.setSize((currentSize * currentPrice).toFixed(2));
+        store.setSize(bnSize.times(currentPrice).toFixed(2, BigNumber.ROUND_DOWN));
+      } else if (currentMarket?.stepSize) {
+        store.setSize(
+          formatQuantityToStep(bnSize.dividedBy(currentPrice).toString(), currentMarket.stepSize)
+        );
       } else {
-        store.setSize((currentSize / currentPrice).toFixed(baseDecimals));
+        store.setSize(bnSize.dividedBy(currentPrice).toFixed(baseDecimals, BigNumber.ROUND_DOWN));
       }
     }
     store.setSizeAsset(newAsset);
@@ -442,6 +485,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   const handleSubmitOrder = async () => {
     if (isSubmitting || !isReady) return;
     if (!validation.isValid && validation.error) {
+      setSubmitError(validation.error);
       useNotificationStore.getState().showToast({
         type: 'SYSTEM',
         title: 'Validation Error',
@@ -450,6 +494,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
       });
       return;
     }
+    setSubmitError(null);
 
     const numSize = parseFloat(store.size);
     if (!numSize || numSize <= 0) {
@@ -468,14 +513,25 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
       if (store.sizeAsset === 'quote') {
         const conversionPrice = activePrice > 0 ? activePrice : currentPrice;
         if (conversionPrice > 0) {
-          finalSize = String(numSize / conversionPrice);
+          finalSize = new BigNumber(store.size).dividedBy(conversionPrice).toString();
         }
       }
 
-      const formattedQty = formatPrecision(finalSize, currentMarket?.stepSize);
-      const formattedPrice = formatPrecision(store.price, currentMarket?.tickSize);
-      const formattedStopPrice = formatPrecision(store.stopPrice, currentMarket?.tickSize);
-      const formattedActivation = formatPrecision(store.activationPrice, currentMarket?.tickSize);
+      const formattedQty = currentMarket?.stepSize
+        ? formatQuantityToStep(finalSize, currentMarket.stepSize)
+        : finalSize;
+      const formattedPrice =
+        currentMarket?.tickSize && store.price
+          ? formatPriceToTick(store.price, currentMarket.tickSize)
+          : store.price;
+      const formattedStopPrice =
+        currentMarket?.tickSize && store.stopPrice
+          ? formatPriceToTick(store.stopPrice, currentMarket.tickSize)
+          : store.stopPrice;
+      const formattedActivation =
+        currentMarket?.tickSize && store.activationPrice
+          ? formatPriceToTick(store.activationPrice, currentMarket.tickSize)
+          : store.activationPrice;
 
       let res: any = null;
 
@@ -499,8 +555,12 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
           if (dist === 'ASCENDING') size = (tSize * (i + 1)) / sumWeights;
           if (dist === 'DESCENDING') size = (tSize * (n - i)) / sumWeights;
 
-          const fPrice = formatPrecision(price, currentMarket?.tickSize);
-          const fSize = formatPrecision(size, currentMarket?.stepSize);
+          const fPrice = currentMarket?.tickSize
+            ? formatPriceToTick(price, currentMarket.tickSize)
+            : price.toString();
+          const fSize = currentMarket?.stepSize
+            ? formatQuantityToStep(size, currentMarket.stepSize)
+            : size.toString();
 
           if (fPrice && fSize && parseFloat(fSize) > 0) {
             scaledOrders.push({
@@ -532,12 +592,15 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
         res = await placeBatch(scaledOrders);
       } else if (store.orderType === 'CHASE') {
         const formattedChaseOffset =
-          formatPrecision(store.chaseOffset || '0', currentMarket?.tickSize) || '0';
+          currentMarket?.tickSize && store.chaseOffset
+            ? formatPriceToTick(store.chaseOffset, currentMarket.tickSize)
+            : store.chaseOffset || '0';
         const formattedMaxChaseOffset =
           store.maxChaseDifferenceEnabled &&
           store.maxChaseOffset &&
-          parseFloat(store.maxChaseOffset) > 0
-            ? formatPrecision(store.maxChaseOffset, currentMarket?.tickSize)
+          parseFloat(store.maxChaseOffset) > 0 &&
+          currentMarket?.tickSize
+            ? formatPriceToTick(store.maxChaseOffset, currentMarket.tickSize)
             : undefined;
 
         res = await placeChase({
@@ -579,9 +642,9 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
           parseFloat(store.attachedTpPrice) > 0
         ) {
           const oppositeSide: 'BUY' | 'SELL' = side === 'BUY' ? 'SELL' : 'BUY';
-          const formattedTp =
-            formatPrecision(store.attachedTpPrice, currentMarket?.tickSize) ||
-            store.attachedTpPrice;
+          const formattedTp = currentMarket?.tickSize
+            ? formatPriceToTick(store.attachedTpPrice, currentMarket.tickSize)
+            : store.attachedTpPrice;
           try {
             await executeOrder({
               symbol: selectedSymbol,
@@ -591,10 +654,16 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               size: formattedQty || finalSize,
               reduceOnly: true,
               stopPrice: formattedTp,
+              workingType: store.attachedTpTrigger || 'MARK_PRICE',
               currentPrice,
             });
-          } catch (tpErr) {
-            console.warn('Attached Take Profit order notice:', tpErr);
+          } catch (tpErr: any) {
+            useNotificationStore.getState().showToast({
+              type: 'SYSTEM',
+              title: 'Attached TP Failed',
+              status: 'warning',
+              message: tpErr?.message || 'Primary order placed, but attached TP order failed.',
+            });
           }
         }
 
@@ -604,9 +673,9 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
           parseFloat(store.attachedSlPrice) > 0
         ) {
           const oppositeSide: 'BUY' | 'SELL' = side === 'BUY' ? 'SELL' : 'BUY';
-          const formattedSl =
-            formatPrecision(store.attachedSlPrice, currentMarket?.tickSize) ||
-            store.attachedSlPrice;
+          const formattedSl = currentMarket?.tickSize
+            ? formatPriceToTick(store.attachedSlPrice, currentMarket.tickSize)
+            : store.attachedSlPrice;
           try {
             await executeOrder({
               symbol: selectedSymbol,
@@ -616,10 +685,16 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               size: formattedQty || finalSize,
               reduceOnly: true,
               stopPrice: formattedSl,
+              workingType: store.attachedSlTrigger || 'MARK_PRICE',
               currentPrice,
             });
-          } catch (slErr) {
-            console.warn('Attached Stop Loss order notice:', slErr);
+          } catch (slErr: any) {
+            useNotificationStore.getState().showToast({
+              type: 'SYSTEM',
+              title: 'Attached SL Failed',
+              status: 'warning',
+              message: slErr?.message || 'Primary order placed, but attached SL order failed.',
+            });
           }
         }
       }
@@ -639,13 +714,6 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
         txHash,
         explorerUrl: txHash ? `${explorerBase}${txHash}` : undefined,
       });
-
-      // Immediately refresh positions and balances from Aster REST API
-      if (asterAgent.asterSigner && asterAgent.userAddr) {
-        fetchAsterSnapshot(asterAgent.asterSigner, asterAgent.userAddr).catch(err => {
-          console.error('[MobileTradeScreen] Failed to sync snapshot after order submit:', err);
-        });
-      }
 
       store.setSize('');
       setSliderVal(0);
@@ -692,11 +760,11 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
 
   return (
     <div className="flex flex-col h-full w-full bg-secondary text-primary font-sans select-none">
-      <div className="flex items-center justify-between px-3.5 py-2.5 bg-secondary border-b border-color shrink-0">
+      <div className="flex items-center justify-between px-3.5 py-2.5 bg-secondary border-b border-white/[0.06] shrink-0">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="w-9 h-9 rounded-full bg-tertiary flex items-center justify-center text-primary hover:bg-hover transition-colors cursor-pointer border border-color"
+            className="w-9 h-9 rounded-full bg-tertiary flex items-center justify-center text-primary hover:bg-hover transition-colors cursor-pointer border border-white/[0.08]"
           >
             <ArrowLeft size={18} />
           </button>
@@ -717,7 +785,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors cursor-pointer shadow-xs ${
                 isAdvancedOrder(store.orderType)
                   ? 'bg-brand/15 border-brand text-brand font-bold'
-                  : 'bg-tertiary hover:bg-hover border-color text-primary'
+                  : 'bg-tertiary hover:bg-hover border-white/[0.08] text-primary'
               }`}
             >
               <span>{getOrderTypeLabel(store.orderType)}</span>
@@ -737,7 +805,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
             onClick={() => setShowOrderTypeMenu(false)}
           >
             <div
-              className="w-full max-w-sm bg-secondary border border-color rounded-t-3xl sm:rounded-2xl p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl space-y-3 animate-slide-up text-primary max-h-[85vh] overflow-y-auto"
+              className="w-full max-w-sm bg-secondary border border-white/[0.08] rounded-t-3xl sm:rounded-2xl p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl space-y-3 animate-slide-up text-primary max-h-[85vh] overflow-y-auto"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between pb-1">
@@ -767,7 +835,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
                       store.orderType === 'MARKET'
                         ? 'border-brand bg-brand/10 text-brand shadow-xs'
-                        : 'border-color bg-tertiary text-secondary hover:text-primary'
+                        : 'border-white/[0.08] bg-tertiary text-secondary hover:text-primary'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-0.5">
@@ -789,7 +857,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
                       store.orderType === 'LIMIT'
                         ? 'border-brand bg-brand/10 text-brand shadow-xs'
-                        : 'border-color bg-tertiary text-secondary hover:text-primary'
+                        : 'border-white/[0.08] bg-tertiary text-secondary hover:text-primary'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-0.5">
@@ -845,7 +913,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                         className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex items-start justify-between gap-2 ${
                           isSelected
                             ? 'border-brand bg-brand/10 shadow-xs'
-                            : 'border-color bg-tertiary hover:bg-hover'
+                            : 'border-white/[0.08] bg-tertiary hover:bg-hover'
                         }`}
                       >
                         <div className="flex-1 min-w-0">
@@ -904,7 +972,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               </button>
             </div>
 
-            <div className="p-2.5 bg-tertiary/70 border border-color rounded-xl shadow-xs space-y-2">
+            <div className="p-2.5 bg-tertiary/70 border border-white/[0.08] rounded-xl shadow-xs space-y-2">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[10px] text-muted font-medium block">Margin Req.</span>
@@ -933,7 +1001,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-1.5 border-t border-color/40 text-[10px] text-secondary">
+              <div className="flex items-center justify-between pt-1.5 border-t border-white/[0.04] text-[10px] text-secondary">
                 <span className="text-muted">Max:</span>
                 <span className="font-semibold text-primary font-mono-tabular">
                   {maxPossibleSize > 0
@@ -946,7 +1014,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
             <div className="space-y-1.5">
               <div className="relative py-1">
                 <div
-                  className="w-full h-2.5 bg-tertiary rounded-full relative flex items-center cursor-pointer p-0.5 border border-color/40"
+                  className="w-full h-2.5 bg-tertiary rounded-full relative flex items-center cursor-pointer p-0.5 border border-white/[0.04]"
                   onClick={e => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     const clickX = e.clientX - rect.left;
@@ -989,7 +1057,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     className={`py-0.5 rounded-lg text-[10.5px] font-semibold transition-colors cursor-pointer border ${
                       sliderVal === pct
                         ? 'bg-brand text-white border-brand'
-                        : 'bg-tertiary text-secondary border-color hover:text-primary hover:bg-hover'
+                        : 'bg-tertiary text-secondary border-white/[0.08] hover:text-primary hover:bg-hover'
                     }`}
                   >
                     {pct}%
@@ -998,16 +1066,16 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               </div>
             </div>
 
-            {validation.error && (
+            {submitError && (
               <div className="flex items-center gap-1.5 text-[11px] text-danger bg-danger/10 border border-danger/25 rounded-lg px-2.5 py-1.5 leading-snug">
                 <AlertCircle size={13} className="shrink-0 text-danger" />
-                <span>{validation.error}</span>
+                <span>{submitError}</span>
               </div>
             )}
 
             <div className="space-y-2 pt-0.5 text-[12px]">
               {(store.orderType === 'STOP' || store.orderType === 'STOP_MARKET') && (
-                <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
+                <div className="flex items-center justify-between bg-tertiary border border-white/[0.08] rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
                   <span className="text-secondary font-medium shrink-0">Trigger Price</span>
                   <div className="flex items-center gap-1.5 flex-1 justify-end">
                     <input
@@ -1027,7 +1095,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                         if (currentPrice > 0)
                           store.setStopPrice(currentPrice.toFixed(priceDecimals));
                       }}
-                      className="px-2 py-0.5 rounded bg-secondary text-[10px] font-semibold text-secondary hover:text-primary transition-colors border border-color shrink-0 cursor-pointer"
+                      className="px-2 py-0.5 rounded bg-secondary text-[10px] font-semibold text-secondary hover:text-primary transition-colors border border-white/[0.08] shrink-0 cursor-pointer"
                       title="Set to Mark Price"
                     >
                       Mark
@@ -1039,7 +1107,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               {(store.orderType === 'LIMIT' ||
                 store.orderType === 'POST_ONLY' ||
                 store.orderType === 'STOP') && (
-                <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
+                <div className="flex items-center justify-between bg-tertiary border border-white/[0.08] rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
                   <span className="text-secondary font-medium shrink-0">Price</span>
                   <div className="flex items-center gap-1.5 flex-1 justify-end">
                     <input
@@ -1056,7 +1124,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     <button
                       type="button"
                       onClick={handleBboFill}
-                      className="px-2 py-0.5 rounded bg-secondary text-[10px] font-semibold text-secondary hover:text-primary transition-colors border border-color shrink-0 cursor-pointer"
+                      className="px-2 py-0.5 rounded bg-secondary text-[10px] font-semibold text-secondary hover:text-primary transition-colors border border-white/[0.08] shrink-0 cursor-pointer"
                       title="Set to Best Bid/Offer"
                     >
                       BBO
@@ -1076,7 +1144,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
 
               {store.orderType === 'TRAILING_STOP_MARKET' && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
+                  <div className="flex items-center justify-between bg-tertiary border border-white/[0.08] rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
                     <span className="text-secondary font-medium shrink-0">Activation</span>
                     <input
                       type="text"
@@ -1091,7 +1159,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     />
                   </div>
 
-                  <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
+                  <div className="flex items-center justify-between bg-tertiary border border-white/[0.08] rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
                     <span className="text-secondary font-medium shrink-0">Callback %</span>
                     <div className="flex items-center gap-1">
                       <input
@@ -1118,14 +1186,14 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                         className={`flex-1 py-1 text-[10px] font-semibold rounded-lg border transition-colors cursor-pointer ${
                           store.callbackRate === rate
                             ? 'bg-brand/20 border-brand text-brand font-bold'
-                            : 'bg-tertiary border-color text-secondary hover:text-primary'
+                            : 'bg-tertiary border-white/[0.08] text-secondary hover:text-primary'
                         }`}
                       >
                         {rate}%
                       </button>
                     ))}
                   </div>
-                  <div className="text-[10px] text-secondary bg-tertiary/60 border border-color rounded-lg p-2 leading-snug">
+                  <div className="text-[10px] text-secondary bg-tertiary/60 border border-white/[0.08] rounded-lg p-2 leading-snug">
                     Tracks peak price and triggers execution when price reverses by{' '}
                     <strong className="text-primary">{store.callbackRate || '1.0'}%</strong>.
                   </div>
@@ -1133,10 +1201,10 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               )}
 
               {store.orderType === 'CHASE' && (
-                <div className="space-y-2 bg-tertiary/80 border border-color rounded-xl p-2.5">
+                <div className="space-y-2 bg-tertiary/80 border border-white/[0.08] rounded-xl p-2.5">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-secondary font-medium">Chase Mode</span>
-                    <div className="flex gap-1 bg-secondary p-0.5 rounded-lg border border-color">
+                    <div className="flex gap-1 bg-secondary p-0.5 rounded-lg border border-white/[0.08]">
                       <button
                         type="button"
                         onClick={() => {
@@ -1173,7 +1241,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                   </div>
 
                   {store.chasePriceMode === 'GAP' && (
-                    <div className="flex items-center justify-between bg-secondary border border-color rounded-lg px-2.5 py-1.5 focus-within:border-brand">
+                    <div className="flex items-center justify-between bg-secondary border border-white/[0.08] rounded-lg px-2.5 py-1.5 focus-within:border-brand">
                       <span className="text-muted text-[11px]">Gap offset</span>
                       <input
                         type="text"
@@ -1213,7 +1281,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               {store.orderType === 'SCALED' && (
                 <div className="space-y-2">
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-tertiary border border-color rounded-xl px-2.5 py-1.5 focus-within:border-brand">
+                    <div className="bg-tertiary border border-white/[0.08] rounded-xl px-2.5 py-1.5 focus-within:border-brand">
                       <label className="text-[10px] text-muted block">Price Lower</label>
                       <input
                         type="text"
@@ -1227,7 +1295,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                         className="w-full bg-transparent text-primary text-xs font-mono outline-none"
                       />
                     </div>
-                    <div className="bg-tertiary border border-color rounded-xl px-2.5 py-1.5 focus-within:border-brand">
+                    <div className="bg-tertiary border border-white/[0.08] rounded-xl px-2.5 py-1.5 focus-within:border-brand">
                       <label className="text-[10px] text-muted block">Price Upper</label>
                       <input
                         type="text"
@@ -1243,7 +1311,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-1.5 focus-within:border-brand">
+                  <div className="flex items-center justify-between bg-tertiary border border-white/[0.08] rounded-xl px-3 py-1.5 focus-within:border-brand">
                     <span className="text-secondary font-medium text-xs">Order Count</span>
                     <input
                       type="number"
@@ -1256,7 +1324,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     />
                   </div>
 
-                  <div className="flex gap-1 bg-tertiary p-1 rounded-xl border border-color text-xs">
+                  <div className="flex gap-1 bg-tertiary p-1 rounded-xl border border-white/[0.08] text-xs">
                     {['FLAT', 'ASCENDING', 'DESCENDING'].map(dist => (
                       <button
                         key={dist}
@@ -1288,7 +1356,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
               )}
 
-              <div className="flex items-center justify-between bg-tertiary border border-color rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
+              <div className="flex items-center justify-between bg-tertiary border border-white/[0.08] rounded-xl px-3 py-2 focus-within:border-brand transition-colors">
                 <span className="text-secondary font-medium shrink-0">Size</span>
                 <div className="flex items-center gap-1.5 flex-1 justify-end">
                   <input
@@ -1308,7 +1376,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                   <button
                     type="button"
                     onClick={handleCurrencyToggle}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-secondary text-[11px] font-semibold text-primary hover:text-brand transition-colors border border-color shrink-0 cursor-pointer"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-secondary text-[11px] font-semibold text-primary hover:text-brand transition-colors border border-white/[0.08] shrink-0 cursor-pointer"
                     title="Toggle Base / Quote Currency"
                   >
                     <span>{store.sizeAsset === 'base' ? baseAsset : quoteAsset}</span>
@@ -1331,7 +1399,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
               </button>
 
               {store.orderType !== 'SCALED' && store.orderType !== 'CHASE' && (
-                <div className="space-y-1.5 border-t border-color/40 pt-1.5">
+                <div className="space-y-1.5 border-t border-white/[0.04] pt-1.5">
                   <div className="flex items-center justify-between py-0.5 px-1">
                     <span className="text-secondary font-medium">Take Profit / Stop Loss</span>
                     <label className="flex items-center gap-1.5 cursor-pointer">
@@ -1342,45 +1410,37 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                           store.setAttachedTpEnabled(e.target.checked);
                           store.setAttachedSlEnabled(e.target.checked);
                         }}
-                        className="rounded border-color bg-tertiary text-brand w-3.5 h-3.5 cursor-pointer"
+                        className="rounded border-white/[0.08] bg-tertiary text-brand w-3.5 h-3.5 cursor-pointer"
                       />
                       <span className="text-[11px] text-secondary">Enable</span>
                     </label>
                   </div>
 
                   {(store.attachedTpEnabled || store.attachedSlEnabled) && (
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      <div className="bg-tertiary border border-color rounded-xl px-2.5 py-1.5 focus-within:border-brand">
-                        <label className="text-[10px] text-muted block">TP Price</label>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={store.attachedTpPrice}
-                          onChange={e => {
-                            const val = e.target.value;
-                            if (val === '' || /^\d*\.?\d*$/.test(val))
-                              store.setAttachedTpPrice(val);
-                          }}
-                          placeholder="0.00"
-                          className="w-full bg-transparent text-primary text-xs font-mono outline-none"
-                        />
-                      </div>
-                      <div className="bg-tertiary border border-color rounded-xl px-2.5 py-1.5 focus-within:border-brand">
-                        <label className="text-[10px] text-muted block">SL Price</label>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={store.attachedSlPrice}
-                          onChange={e => {
-                            const val = e.target.value;
-                            if (val === '' || /^\d*\.?\d*$/.test(val))
-                              store.setAttachedSlPrice(val);
-                          }}
-                          placeholder="0.00"
-                          className="w-full bg-transparent text-primary text-xs font-mono outline-none"
-                        />
-                      </div>
-                    </div>
+                    <TpSlSection
+                      entryPrice={activePrice}
+                      currentPrice={currentPrice}
+                      markPrice={currentPrice}
+                      size={store.size}
+                      sizeAsset={store.sizeAsset}
+                      leverage={symbolLeverage}
+                      side={side}
+                      onSideChange={onSwitchSide}
+                      quoteAsset={quoteAsset}
+                      baseAsset={baseAsset}
+                      priceDecimals={priceDecimals}
+                      tickSize={currentMarket?.tickSize}
+                      attachedTpEnabled={store.attachedTpEnabled}
+                      attachedTpPrice={store.attachedTpPrice}
+                      attachedTpTrigger={store.attachedTpTrigger}
+                      attachedSlEnabled={store.attachedSlEnabled}
+                      attachedSlPrice={store.attachedSlPrice}
+                      attachedSlTrigger={store.attachedSlTrigger}
+                      onTpPriceChange={store.setAttachedTpPrice}
+                      onSlPriceChange={store.setAttachedSlPrice}
+                      onTpTriggerChange={store.setAttachedTpTrigger}
+                      onSlTriggerChange={store.setAttachedSlTrigger}
+                    />
                   )}
                 </div>
               )}
@@ -1389,10 +1449,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 <span className="text-secondary font-medium">Liquidation price</span>
                 <span className="text-warning font-mono font-bold tracking-tight">
                   {estimatedLiquidationPrice != null && estimatedLiquidationPrice > 0
-                    ? `$${estimatedLiquidationPrice.toLocaleString('en-US', {
-                        minimumFractionDigits: priceDecimals,
-                        maximumFractionDigits: priceDecimals,
-                      })}`
+                    ? `$${safeFormatNumber(estimatedLiquidationPrice, priceDecimals, priceDecimals)}`
                     : '—'}
                 </span>
               </div>
@@ -1460,16 +1517,31 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                       : `One-time signature to activate gas-free trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
                 </p>
               </div>
+            ) : isAccountLoading && !hasFunds ? (
+              <button
+                type="button"
+                disabled
+                className="w-full h-11 rounded-xl font-bold text-sm text-muted bg-tertiary border border-white/[0.08] flex items-center justify-center gap-2 cursor-wait"
+              >
+                <Loader2 size={16} className="animate-spin text-brand" />
+                <span>Loading Balance...</span>
+              </button>
+            ) : !hasFunds ? (
+              <button
+                type="button"
+                onClick={() => setShowDepositModal(true)}
+                className="w-full h-11 bg-brand hover:bg-brand-hover text-white rounded-xl font-bold text-sm transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 active:scale-[0.99]"
+              >
+                <Wallet size={16} />
+                <span>
+                  {currentNetwork === 'testnet' ? 'Claim Faucet / Deposit' : 'Deposit Funds'}
+                </span>
+              </button>
             ) : (
               <button
                 type="button"
                 onClick={handleSubmitOrder}
-                disabled={
-                  isSubmitting ||
-                  isSigning ||
-                  !isReady ||
-                  (!validation.isValid && !!store.size && parseFloat(store.size) > 0)
-                }
+                disabled={isSubmitting || isSigning || !isReady}
                 className={`w-full h-11 rounded-xl font-bold text-sm text-white transition-all shadow-md active:scale-[0.99] cursor-pointer flex items-center justify-center gap-2 ${
                   isLong ? 'bg-success hover:bg-success/90' : 'bg-danger hover:bg-danger/90'
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -1480,7 +1552,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
           </div>
         </div>
 
-        <div className="w-[120px] shrink-0 border-l border-color px-1 py-1 flex flex-col h-full bg-secondary">
+        <div className="w-[120px] shrink-0 border-l border-white/[0.06] px-1 py-1 flex flex-col h-full bg-secondary">
           <MobileMiniOrderbook
             currentPrice={currentPrice}
             tickSize={currentMarket?.tickSize}

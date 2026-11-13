@@ -58,12 +58,13 @@ import {
   isValidDecimalInput,
   pctOf,
 } from '../../utils/inputValidation';
+import { safeFormatNumber } from '../../utils/precision';
 import { Modal } from '../ui/Modal';
 
 interface AccountModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet';
+  initialTab?: 'deposit' | 'withdraw' | 'history' | 'faucet';
 }
 
 const ChainSelector: React.FC<{
@@ -316,11 +317,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   }, [currentNetwork]);
 
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history' | 'faucet'>(
-    initialTab === 'transfer' ? 'deposit' : initialTab || 'deposit'
+    initialTab || 'deposit'
   );
 
   useEffect(() => {
-    setActiveTab(initialTab === 'transfer' ? 'deposit' : initialTab || 'deposit');
+    setActiveTab(initialTab || 'deposit');
   }, [initialTab]);
 
   const accountType: 'perp' | 'spot' = 'perp';
@@ -421,7 +422,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     if (currentActive) {
       setActiveTab(currentActive.type === 'DEPOSIT' ? 'deposit' : 'withdraw');
     } else {
-      setActiveTab(initialTab === 'transfer' ? 'deposit' : initialTab || 'deposit');
+      setActiveTab(initialTab || 'deposit');
     }
     if (userAddr && !destinationAddress) setDestinationAddress(userAddr);
   }, [isOpen, initialTab, userAddr]);
@@ -466,21 +467,30 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       })
       .catch(console.error);
 
-    if (asterSigner && userAddr) {
-      setIsLoadingWithdrawInfo(true);
-      getUserWithdrawInfo(asterSigner, userAddr, accountType)
-        .then(info => {
-          if (alive) setWithdrawInfo(info);
-        })
-        .catch(console.warn)
-        .finally(() => {
-          if (alive) setIsLoadingWithdrawInfo(false);
-        });
+    if (currentNetwork !== 'testnet' && userAddr) {
+      const provider = walletService.getProvider('evm');
+      if (provider) {
+        const ep = new ethers.BrowserProvider(provider as any);
+        ep.getSigner()
+          .then(userSigner => {
+            if (!alive) return;
+            setIsLoadingWithdrawInfo(true);
+            getUserWithdrawInfo(userSigner, userAddr, accountType)
+              .then(info => {
+                if (alive) setWithdrawInfo(info);
+              })
+              .catch(() => {})
+              .finally(() => {
+                if (alive) setIsLoadingWithdrawInfo(false);
+              });
+          })
+          .catch(() => {});
+      }
     }
     return () => {
       alive = false;
     };
-  }, [isOpen, activeTab, selectedChainId, accountType, asterSigner, userAddr]);
+  }, [isOpen, activeTab, selectedChainId, accountType, currentNetwork, userAddr]);
 
   // Chain-specific withdraw details
   const chainWithdrawDetails = useMemo(
@@ -554,13 +564,13 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   }, [balances, selectedWithdrawAsset]);
 
   const maxWithdrawable = useMemo(() => {
-    const fromChain = new BigNumber(chainWithdrawDetails.maxAmount || 0);
     const bal = new BigNumber(currentBalance || 0);
-    if (fromChain.isGreaterThan(0)) {
+    if (withdrawInfo) {
+      const fromChain = new BigNumber(chainWithdrawDetails.maxAmount || 0);
       return BigNumber.min(bal, fromChain).toString();
     }
     return bal.toString();
-  }, [currentBalance, chainWithdrawDetails.maxAmount]);
+  }, [currentBalance, chainWithdrawDetails.maxAmount, withdrawInfo]);
 
   const netReceiveAmount = useMemo(() => {
     const gross = new BigNumber(withdrawAmount || 0);
@@ -759,11 +769,14 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     }
     const num = new BigNumber(withdrawAmount);
     const max = new BigNumber(maxWithdrawable);
-    if (max.isGreaterThan(0) && num.isGreaterThan(max)) {
+    if (num.isGreaterThan(max)) {
       useNotificationStore.getState().showToast({
-        type: 'DYDX',
-        title: 'Exceeds Maximum',
-        message: `Max withdrawable: ${formatDisplayAmount(maxWithdrawable)} ${selectedWithdrawAsset.name}`,
+        type: 'SYSTEM',
+        title: 'Exceeds Chain Balance',
+        status: 'error',
+        message: max.isZero()
+          ? `No ${selectedWithdrawAsset.name} available on this chain. Deposited tokens must be withdrawn on the same chain they were deposited.`
+          : `Max withdrawable on this chain is ${formatDisplayAmount(maxWithdrawable)} ${selectedWithdrawAsset.name}.`,
       });
       return;
     }
@@ -839,7 +852,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         const ep = new ethers.BrowserProvider(provider as any);
         const userWalletSigner = await ep.getSigner();
 
-        if (!asterSigner || !userAddr) return;
+        if (!userWalletSigner || !userAddr) return;
         const nonce = Date.now() * 1000;
         const fee = String(chainWithdrawDetails.fee || '0');
 
@@ -865,7 +878,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           message: 'Aster risk engine validating withdrawal request...',
         });
 
-        await submitWithdraw(asterSigner, userAddr, {
+        await submitWithdraw(userWalletSigner, userAddr, {
           chainId: selectedChainId,
           asset: selectedWithdrawAsset.name,
           amount: withdrawAmount,
@@ -1997,7 +2010,23 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   />
                 </div>
 
+                <div className="flex items-start gap-2 p-2.5 rounded-xl bg-tertiary/70 border border-white/[0.06] text-[11px] text-secondary leading-relaxed">
+                  <Info size={14} className="shrink-0 text-muted mt-0.5" />
+                  <span>
+                    Deposited tokens must be withdrawn on the same chain they were deposited;
+                    profits (USDT) can be withdrawn on any supported chain.
+                  </span>
+                </div>
+
                 <div className="bg-tertiary rounded-xl p-3 border border-color space-y-1.5 text-[11px]">
+                  <div className="flex justify-between text-secondary">
+                    <span>Withdrawable Amount</span>
+                    <span className="text-primary font-mono font-medium">
+                      {isLoadingWithdrawInfo
+                        ? '...'
+                        : `${formatDisplayAmount(maxWithdrawable)} ${selectedWithdrawAsset?.name || ''}`}
+                    </span>
+                  </div>
                   <div className="flex justify-between text-secondary">
                     <span>Network Gas Fee</span>
                     <span className="text-primary font-mono font-medium">
@@ -2010,10 +2039,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     <div className="flex justify-between text-secondary">
                       <span>24h Remaining Limit</span>
                       <span className="text-primary font-mono font-medium">
-                        {Number(withdrawInfo.userRemainingDailyLimit).toLocaleString('en-US', {
-                          maximumFractionDigits: 0,
-                        })}{' '}
-                        USDT
+                        {safeFormatNumber(withdrawInfo.userRemainingDailyLimit, 0, 0, '0')} USDT
                       </span>
                     </div>
                   )}
@@ -2035,16 +2061,45 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </div>
 
                 {isEvmConnected ? (
-                  <button
-                    type="button"
-                    onClick={handleOpenWithdrawConfirm}
-                    disabled={
-                      !isPositiveNumber(withdrawAmount) || !ethers.isAddress(destinationAddress)
-                    }
-                    className="w-full h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors disabled:opacity-50 cursor-pointer shadow-sm flex items-center justify-center"
-                  >
-                    Review Withdrawal
-                  </button>
+                  currentNetwork === 'testnet' ? (
+                    <div className="space-y-2">
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[12px] text-amber-500 space-y-1">
+                        <div className="font-semibold flex items-center gap-1.5">
+                          <Info size={14} />
+                          <span>Withdrawals Disabled on Testnet</span>
+                        </div>
+                        <p className="text-[11px] text-secondary leading-relaxed">
+                          Aster Testnet uses simulated faucet funds for demo trading only. On-chain
+                          withdrawals are only available on Mainnet.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled
+                        className="w-full h-11 bg-tertiary border border-color text-secondary font-semibold text-[13px] rounded-xl opacity-60 cursor-not-allowed flex items-center justify-center"
+                      >
+                        Withdrawals Disabled on Testnet
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleOpenWithdrawConfirm}
+                      disabled={
+                        !isPositiveNumber(withdrawAmount) ||
+                        !ethers.isAddress(destinationAddress) ||
+                        new BigNumber(withdrawAmount).isGreaterThan(maxWithdrawable) ||
+                        new BigNumber(maxWithdrawable).isLessThanOrEqualTo(0)
+                      }
+                      className="w-full h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-sm flex items-center justify-center"
+                    >
+                      {new BigNumber(maxWithdrawable).isLessThanOrEqualTo(0)
+                        ? `No ${selectedWithdrawAsset?.name || 'Asset'} on this Chain`
+                        : new BigNumber(withdrawAmount || '0').isGreaterThan(maxWithdrawable)
+                          ? 'Amount Exceeds Chain Balance'
+                          : 'Withdrawal'}
+                    </button>
+                  )
                 ) : (
                   <button
                     type="button"

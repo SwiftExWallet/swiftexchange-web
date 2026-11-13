@@ -7,6 +7,7 @@ import { useMarketStore } from '../../../core/stores/marketStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
 import { useUnifiedExecution } from '../../../services/useUnifiedExecution';
+import { safeDecimals, safeFormatNumber } from '../../../utils/precision';
 import { TabEmptyState } from './TabEmptyState';
 
 interface Props {
@@ -55,13 +56,7 @@ function formatNum(
   maxDec = 4,
   fallback = '--'
 ): string {
-  if (val === undefined || val === null || val === '') return fallback;
-  const num = typeof val === 'string' ? parseFloat(val) : val;
-  if (isNaN(num)) return fallback;
-  return num.toLocaleString('en-US', {
-    minimumFractionDigits: minDec,
-    maximumFractionDigits: maxDec,
-  });
+  return safeFormatNumber(val, minDec, maxDec, fallback);
 }
 
 function formatOrderType(o: Order): string {
@@ -88,13 +83,13 @@ function formatOrderPrice(o: Order, tickSize?: number): string {
   }
   const p = parseFloat(o.price);
   if (isNaN(p) || p <= 0) return 'Market';
-  const dec = tickSize ? Math.max(0, -Math.floor(Math.log10(tickSize))) : 2;
+  const dec = safeDecimals(tickSize, 2, 8);
   return formatNum(p, dec, dec);
 }
 
 function formatTriggerPrice(o: Order, tickSize?: number): { label: string; value: string } | null {
   const raw = (o.rawType || o.origType || o.type || '').toUpperCase();
-  const dec = tickSize ? Math.max(0, -Math.floor(Math.log10(tickSize))) : 1;
+  const dec = safeDecimals(tickSize, 1, 8);
   const isBuy = o.side === 'buy';
 
   if (raw === 'TRAILING_STOP_MARKET') {
@@ -183,175 +178,294 @@ export const OpenOrdersTab: React.FC<Props> = ({ hideOtherSymbols, currentSymbol
   }
 
   return (
-    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none">
-      <table className="w-full text-[11px] text-left whitespace-nowrap">
-        <thead className="text-secondary border-b border-color sticky top-0 bg-secondary z-10">
-          <tr>
-            <th className="px-3 py-2 font-medium">Time</th>
-            <th className="px-3 py-2 font-medium">Type</th>
-            <th className="px-3 py-2 font-medium">Symbol</th>
-            <th className="px-3 py-2 font-medium">Side</th>
-            <th className="px-3 py-2 font-medium">Order price</th>
-            <th className="px-3 py-2 font-medium">Filled amount</th>
-            <th className="px-3 py-2 font-medium">Total amount</th>
-            <th className="px-3 py-2 font-medium">Order value</th>
-            <th className="px-3 py-2 font-medium">Trigger price</th>
-            <th className="px-3 py-2 font-medium">Reduce only</th>
-            <th className="px-3 py-2 font-medium">TP/SL</th>
-            <th className="px-3 py-2 font-medium">Explorer</th>
-            <th className="px-3 py-2 font-medium text-right">
-              {displayOrders.length > 0 ? (
-                <button
-                  onClick={handleCancelAll}
-                  disabled={cancelingAll || !isReady}
-                  className="text-secondary hover:text-danger text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40"
-                  title="Cancel all open orders"
-                >
-                  {cancelingAll ? 'Canceling...' : 'Cancel all'}
-                </button>
-              ) : (
-                <span>Action</span>
-              )}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {displayOrders.map(o => {
-            const { date, time } = formatSplitDate(o.timestamp);
-            const symInfo = parseSymbol(o.symbol);
-            const market = markets[o.symbol] || markets[o.symbol.replace('-', '')];
-            const tickSize = market?.tickSize || 0.1;
-            const stepSize = market?.stepSize || 0.001;
-            const baseDec = Math.max(0, -Math.floor(Math.log10(stepSize)));
+    <div className="w-full h-full overflow-x-auto overflow-y-auto">
+      <div className="md:hidden space-y-2 p-2">
+        {displayOrders.length > 0 && (
+          <div className="flex items-center justify-between pb-1 px-1">
+            <span className="text-secondary text-[10px]">Open Orders ({displayOrders.length})</span>
+            <button
+              onClick={handleCancelAll}
+              disabled={cancelingAll || !isReady}
+              className="text-danger hover:text-danger/80 text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-40"
+            >
+              {cancelingAll ? 'Canceling...' : 'Cancel all'}
+            </button>
+          </div>
+        )}
+        {displayOrders.map(o => {
+          const { date, time } = formatSplitDate(o.timestamp);
+          const symInfo = parseSymbol(o.symbol);
+          const market = markets[o.symbol] || markets[o.symbol.replace('-', '')];
+          const tickSize = market?.tickSize || 0.1;
+          const stepSize = market?.stepSize || 0.001;
+          const baseDec = Math.max(0, -Math.floor(Math.log10(stepSize)));
+          const isBuy = o.side === 'buy';
+          const orderTypeLabel = formatOrderType(o);
+          const priceDisplay = formatOrderPrice(o, tickSize);
+          const triggerInfo = formatTriggerPrice(o, tickSize);
 
-            const isBuy = o.side === 'buy';
-            const orderTypeLabel = formatOrderType(o);
-            const priceDisplay = formatOrderPrice(o, tickSize);
-            const triggerInfo = formatTriggerPrice(o, tickSize);
+          const cleanSym = o.symbol.replace('-', '');
+          const markPriceStr =
+            assetCtxByMarket[cleanSym]?.markPx ||
+            assetCtxByMarket[`${cleanSym}USDT`]?.markPx ||
+            assetCtxByMarket[o.symbol]?.markPx ||
+            '0';
+          const markPx = parseFloat(markPriceStr) || 0;
+          const rawPrice = parseFloat(o.price);
+          const effectivePx = rawPrice > 0 ? rawPrice : markPx;
+          const sizeNum = parseFloat(o.size) || 0;
+          const orderValue =
+            effectivePx > 0 && sizeNum > 0
+              ? `$${safeFormatNumber(effectivePx * sizeNum, 2, 2)}`
+              : '--';
 
-            // Calculate order value
-            const cleanSym = o.symbol.replace('-', '');
-            const markPriceStr =
-              assetCtxByMarket[cleanSym]?.markPx ||
-              assetCtxByMarket[`${cleanSym}USDT`]?.markPx ||
-              assetCtxByMarket[o.symbol]?.markPx ||
-              '0';
-            const markPx = parseFloat(markPriceStr) || 0;
-            const rawPrice = parseFloat(o.price);
-            const effectivePx = rawPrice > 0 ? rawPrice : markPx;
-            const sizeNum = parseFloat(o.size) || 0;
-            const orderValue =
-              effectivePx > 0 && sizeNum > 0
-                ? `$${(effectivePx * sizeNum).toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}`
-                : '--';
+          const leverage = o.leverage || 20;
+          const marginType = (o.marginType || 'cross').toLowerCase();
+          const marginTypeDisplay = marginType.charAt(0).toUpperCase() + marginType.slice(1);
 
-            const leverage = o.leverage || 20;
-            const marginType = (o.marginType || 'cross').toLowerCase();
-            const marginTypeDisplay = marginType.charAt(0).toUpperCase() + marginType.slice(1);
-
-            return (
-              <tr key={o.id} className="border-b border-color hover:bg-hover transition-colors">
-                {/* 1. Time (2 rows: Date top, Time bottom) */}
-                <td className="px-3 py-2 text-secondary">
-                  <div className="flex flex-col leading-tight gap-0.5">
-                    <span className="text-secondary">{date}</span>
-                    <span className="text-muted text-[10px]">{time}</span>
-                  </div>
-                </td>
-
-                {/* 2. Type */}
-                <td className="px-3 py-2 text-primary font-medium">{orderTypeLabel}</td>
-
-                {/* 3. Symbol (2 rows: Symbol top, Leverage / Margin bottom) */}
-                <td className="px-3 py-2 text-primary">
-                  <div className="flex flex-col leading-tight gap-0.5">
-                    <span className="font-medium text-primary">{symInfo.display}</span>
-                    <div className="flex items-center gap-1.5 text-[10px] text-muted">
-                      <span>{leverage}x</span>
-                      <span>{marginTypeDisplay}</span>
-                    </div>
-                  </div>
-                </td>
-
-                {/* 4. Side */}
-                <td className="px-3 py-2 font-medium">
-                  <span className={isBuy ? 'text-success font-medium' : 'text-danger font-medium'}>
+          return (
+            <div
+              key={o.id}
+              className="bg-card/40 border border-white/[0.04] rounded-lg p-3 space-y-2 text-[11px]"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-primary">{symInfo.display}</span>
+                  <span
+                    className={`font-semibold px-1.5 py-0.5 rounded text-[10px] ${
+                      isBuy ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'
+                    }`}
+                  >
                     {isBuy ? 'Buy' : 'Sell'}
                   </span>
-                </td>
+                  <span className="text-secondary text-[10px]">
+                    {leverage}x {marginTypeDisplay}
+                  </span>
+                </div>
+                <span className="text-muted text-[10px]">
+                  {date} {time}
+                </span>
+              </div>
 
-                {/* 5. Order price */}
-                <td className="px-3 py-2 text-primary font-mono-tabular">{priceDisplay}</td>
+              <div className="grid grid-cols-2 gap-2 py-1.5 border-y border-white/[0.04] text-[10px]">
+                <div>
+                  <span className="text-secondary block">Type</span>
+                  <span className="text-primary font-medium">{orderTypeLabel}</span>
+                </div>
+                <div>
+                  <span className="text-secondary block">Order Price</span>
+                  <span className="text-primary font-mono-tabular">{priceDisplay}</span>
+                </div>
+                <div>
+                  <span className="text-secondary block">Filled / Total</span>
+                  <span className="text-primary font-mono-tabular">
+                    {formatNum(o.filledSize || '0', baseDec, baseDec)} /{' '}
+                    {formatNum(o.size, baseDec, baseDec)} {symInfo.base}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-secondary block">Value</span>
+                  <span className="text-primary font-mono-tabular">{orderValue}</span>
+                </div>
+                {triggerInfo && (
+                  <div>
+                    <span className="text-secondary block">{triggerInfo.label}</span>
+                    <span className="text-primary font-mono-tabular">{triggerInfo.value}</span>
+                  </div>
+                )}
+                {o.reduceOnly && (
+                  <div>
+                    <span className="text-secondary block">Reduce Only</span>
+                    <span className="text-primary font-medium">Yes</span>
+                  </div>
+                )}
+              </div>
 
-                {/* 6. Filled amount */}
-                <td className="px-3 py-2 text-primary font-mono-tabular">
-                  {formatNum(o.filledSize || '0', baseDec, baseDec)} {symInfo.base}
-                </td>
-
-                {/* 7. Total amount */}
-                <td className="px-3 py-2 text-primary font-mono-tabular">
-                  {formatNum(o.size, baseDec, baseDec)} {symInfo.base}
-                </td>
-
-                {/* 8. Order value */}
-                <td className="px-3 py-2 text-primary font-mono-tabular">{orderValue}</td>
-
-                {/* 9. Trigger price (2 rows: Label top, Condition bottom) */}
-                <td className="px-3 py-2 text-secondary">
-                  {triggerInfo ? (
-                    <div className="flex flex-col leading-tight gap-0.5">
-                      <span className="text-muted text-[10px]">{triggerInfo.label}</span>
-                      <span className="text-primary font-mono-tabular font-medium">
-                        {triggerInfo.value}
-                      </span>
-                    </div>
-                  ) : (
-                    <span>--</span>
-                  )}
-                </td>
-
-                {/* 10. Reduce only */}
-                <td className="px-3 py-2 text-secondary">{o.reduceOnly ? 'Yes' : 'No'}</td>
-
-                {/* 11. TP/SL */}
-                <td className="px-3 py-2 text-secondary">--</td>
-
-                {/* 12. Explorer */}
-                <td className="px-3 py-2 text-secondary">
-                  {o.hash ? (
+              <div className="flex items-center justify-between pt-0.5">
+                <div>
+                  {o.hash && (
                     <a
                       href={`${explorerBase}${o.hash}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-brand hover:underline inline-flex items-center gap-1 font-mono text-[11px]"
+                      className="text-brand hover:underline inline-flex items-center gap-1 text-[10px]"
                     >
-                      <span>View</span>
+                      <span>Explorer</span>
                       <ExternalLink size={10} />
                     </a>
-                  ) : (
-                    <span>--</span>
                   )}
-                </td>
+                </div>
+                <button
+                  onClick={() => handleCancel(o.symbol.replace('-', ''), o.id)}
+                  disabled={cancelingId === o.id || !isReady}
+                  className="px-2.5 py-1 rounded bg-danger/10 hover:bg-danger/20 text-danger text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-40"
+                >
+                  {cancelingId === o.id ? 'Canceling...' : 'Cancel'}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
-                {/* 13. Action */}
-                <td className="px-3 py-2 text-right">
+      <div className="hidden md:block">
+        <table className="w-full text-[11px] text-left whitespace-nowrap">
+          <thead className="text-secondary border-b border-white/[0.04] sticky top-0 bg-secondary z-10">
+            <tr>
+              <th className="px-3 py-2 font-medium">Time</th>
+              <th className="px-3 py-2 font-medium">Type</th>
+              <th className="px-3 py-2 font-medium">Symbol</th>
+              <th className="px-3 py-2 font-medium">Side</th>
+              <th className="px-3 py-2 font-medium">Order price</th>
+              <th className="px-3 py-2 font-medium">Filled amount</th>
+              <th className="px-3 py-2 font-medium">Total amount</th>
+              <th className="px-3 py-2 font-medium">Order value</th>
+              <th className="px-3 py-2 font-medium">Trigger price</th>
+              <th className="px-3 py-2 font-medium">Reduce only</th>
+              <th className="px-3 py-2 font-medium">TP/SL</th>
+              <th className="px-3 py-2 font-medium">Explorer</th>
+              <th className="px-3 py-2 font-medium text-right">
+                {displayOrders.length > 0 ? (
                   <button
-                    onClick={() => handleCancel(o.symbol.replace('-', ''), o.id)}
-                    disabled={cancelingId === o.id || !isReady}
-                    className="text-[10px] bg-tertiary hover:bg-hover px-2.5 py-1 rounded text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                    title={!isReady ? 'Trading session not active' : 'Cancel Order'}
+                    onClick={handleCancelAll}
+                    disabled={cancelingAll || !isReady}
+                    className="text-secondary hover:text-danger text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40"
+                    title="Cancel all open orders"
                   >
-                    {cancelingId === o.id ? '...' : 'Cancel'}
+                    {cancelingAll ? 'Canceling...' : 'Cancel all'}
                   </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                ) : (
+                  <span>Action</span>
+                )}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayOrders.map(o => {
+              const { date, time } = formatSplitDate(o.timestamp);
+              const symInfo = parseSymbol(o.symbol);
+              const market = markets[o.symbol] || markets[o.symbol.replace('-', '')];
+              const tickSize = market?.tickSize || 0.1;
+              const stepSize = market?.stepSize || 0.001;
+              const baseDec = Math.max(0, -Math.floor(Math.log10(stepSize)));
+
+              const isBuy = o.side === 'buy';
+              const orderTypeLabel = formatOrderType(o);
+              const priceDisplay = formatOrderPrice(o, tickSize);
+              const triggerInfo = formatTriggerPrice(o, tickSize);
+
+              const cleanSym = o.symbol.replace('-', '');
+              const markPriceStr =
+                assetCtxByMarket[cleanSym]?.markPx ||
+                assetCtxByMarket[`${cleanSym}USDT`]?.markPx ||
+                assetCtxByMarket[o.symbol]?.markPx ||
+                '0';
+              const markPx = parseFloat(markPriceStr) || 0;
+              const rawPrice = parseFloat(o.price);
+              const effectivePx = rawPrice > 0 ? rawPrice : markPx;
+              const sizeNum = parseFloat(o.size) || 0;
+              const orderValue =
+                effectivePx > 0 && sizeNum > 0
+                  ? `$${safeFormatNumber(effectivePx * sizeNum, 2, 2)}`
+                  : '--';
+
+              const leverage = o.leverage || 20;
+              const marginType = (o.marginType || 'cross').toLowerCase();
+              const marginTypeDisplay = marginType.charAt(0).toUpperCase() + marginType.slice(1);
+
+              return (
+                <tr
+                  key={o.id}
+                  className="border-b border-white/[0.03] hover:bg-hover/60 transition-colors"
+                >
+                  <td className="px-3 py-2 text-secondary">
+                    <div className="flex flex-col leading-tight gap-0.5">
+                      <span className="text-secondary">{date}</span>
+                      <span className="text-muted text-[10px]">{time}</span>
+                    </div>
+                  </td>
+
+                  <td className="px-3 py-2 text-primary font-medium">{orderTypeLabel}</td>
+
+                  <td className="px-3 py-2 text-primary">
+                    <div className="flex flex-col leading-tight gap-0.5">
+                      <span className="font-medium text-primary">{symInfo.display}</span>
+                      <div className="flex items-center gap-1.5 text-[10px] text-muted">
+                        <span>{leverage}x</span>
+                        <span>{marginTypeDisplay}</span>
+                      </div>
+                    </div>
+                  </td>
+
+                  <td className="px-3 py-2 font-medium">
+                    <span
+                      className={isBuy ? 'text-success font-medium' : 'text-danger font-medium'}
+                    >
+                      {isBuy ? 'Buy' : 'Sell'}
+                    </span>
+                  </td>
+
+                  <td className="px-3 py-2 text-primary font-mono-tabular">{priceDisplay}</td>
+
+                  <td className="px-3 py-2 text-primary font-mono-tabular">
+                    {formatNum(o.filledSize || '0', baseDec, baseDec)} {symInfo.base}
+                  </td>
+
+                  <td className="px-3 py-2 text-primary font-mono-tabular">
+                    {formatNum(o.size, baseDec, baseDec)} {symInfo.base}
+                  </td>
+
+                  <td className="px-3 py-2 text-primary font-mono-tabular">{orderValue}</td>
+
+                  <td className="px-3 py-2 text-secondary">
+                    {triggerInfo ? (
+                      <div className="flex flex-col leading-tight gap-0.5">
+                        <span className="text-muted text-[10px]">{triggerInfo.label}</span>
+                        <span className="text-primary font-mono-tabular font-medium">
+                          {triggerInfo.value}
+                        </span>
+                      </div>
+                    ) : (
+                      <span>--</span>
+                    )}
+                  </td>
+
+                  <td className="px-3 py-2 text-secondary">{o.reduceOnly ? 'Yes' : 'No'}</td>
+
+                  <td className="px-3 py-2 text-secondary">--</td>
+
+                  <td className="px-3 py-2 text-secondary">
+                    {o.hash ? (
+                      <a
+                        href={`${explorerBase}${o.hash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-brand hover:underline inline-flex items-center gap-1 font-mono text-[11px]"
+                      >
+                        <span>View</span>
+                        <ExternalLink size={10} />
+                      </a>
+                    ) : (
+                      <span>--</span>
+                    )}
+                  </td>
+
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => handleCancel(o.symbol.replace('-', ''), o.id)}
+                      disabled={cancelingId === o.id || !isReady}
+                      className="text-[10px] bg-tertiary hover:bg-hover px-2.5 py-1 rounded text-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      title={!isReady ? 'Trading session not active' : 'Cancel Order'}
+                    >
+                      {cancelingId === o.id ? '...' : 'Cancel'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };

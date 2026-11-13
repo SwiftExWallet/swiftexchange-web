@@ -4,6 +4,7 @@ import BigNumber from 'bignumber.js';
 
 import { useAccountStore } from '../core/stores/accountStore';
 import { useLeverageStore } from '../core/stores/leverageStore';
+import { useOrderStore } from '../core/stores/orderStore';
 import { usePositionStore } from '../core/stores/positionStore';
 import { useTickerStore } from '../core/stores/tickerStore';
 import { calculateLiquidationPrice } from '../utils/liquidationCalculator';
@@ -17,49 +18,105 @@ export function useTradeCalculations(
 ) {
   const balances = useAccountStore(state => state.balances);
   const positions = usePositionStore(state => state.positions);
+  const orders = useOrderStore(state => state.orders);
   const bracketsBySymbol = useLeverageStore(state => state.bracketsBySymbol);
   const assetCtxByMarket = useTickerStore(state => state.assetCtxByMarket);
 
   const multiAssetsMargin = useAccountStore(state => state.multiAssetsMargin);
-  const availableBalance = useAccountStore(state => state.availableBalance);
 
   const parsedSize = new BigNumber(inputSize || '0');
   const currentPrice = new BigNumber(assetCtxByMarket[symbol]?.markPx || '0');
 
-  // Wallet Balance
   const walletBalance = useMemo(() => {
-    if (multiAssetsMargin && availableBalance && parseFloat(availableBalance) > 0) {
-      return new BigNumber(availableBalance).toNumber();
-    }
+    const quoteAsset = symbol.includes('-')
+      ? symbol.split('-')[1]
+      : symbol.endsWith('USDC')
+        ? 'USDC'
+        : 'USDT';
 
-    if (!multiAssetsMargin) {
-      // In Single-Asset Mode, buying power is the settlement currency (USDC or USDT or USD)
-      const quoteAsset = symbol.includes('-')
-        ? symbol.split('-')[1]
-        : symbol.endsWith('USDC')
-          ? 'USDC'
-          : 'USDT';
+    let totalRawWallet = 0;
+    if (multiAssetsMargin) {
+      totalRawWallet = Object.values(balances).reduce((acc, b) => {
+        if (b.usdValue && !isNaN(parseFloat(b.usdValue))) {
+          return acc + parseFloat(b.usdValue);
+        }
+        let price = new BigNumber(1);
+        if (b.asset !== 'USDT' && b.asset !== 'USDC') {
+          const markPrice =
+            assetCtxByMarket[`${b.asset}-USDT`]?.markPx ||
+            assetCtxByMarket[`${b.asset}USDT`]?.markPx;
+          if (markPrice) price = new BigNumber(markPrice);
+          else if (b.asset === 'ASTER') price = new BigNumber('0.783681');
+          else price = new BigNumber(0);
+        }
+        return acc + new BigNumber(b.total || '0').times(price).toNumber();
+      }, 0);
+    } else {
       const quoteBal =
-        balances[quoteAsset] || balances['USDC'] || balances['USD'] || balances['USDT'];
-      return quoteBal ? new BigNumber(quoteBal.available || quoteBal.total || '0').toNumber() : 0;
+        balances[quoteAsset] || balances['USDT'] || balances['USDC'] || balances['USD'];
+      totalRawWallet = quoteBal
+        ? new BigNumber(quoteBal.total || quoteBal.available || '0').toNumber()
+        : 0;
+      if (totalRawWallet === 0) {
+        const storeTotal = parseFloat(useAccountStore.getState().totalWalletBalance || '0') || 0;
+        if (storeTotal > 0) {
+          totalRawWallet = storeTotal;
+        } else {
+          const storeAvail = parseFloat(useAccountStore.getState().availableBalance || '0') || 0;
+          if (storeAvail > 0) {
+            totalRawWallet = storeAvail;
+          }
+        }
+      }
     }
 
-    // In Multi-Asset Mode fallback, calculate total equity across all supported assets
-    return Object.values(balances).reduce((acc, b) => {
-      if (b.usdValue && !isNaN(parseFloat(b.usdValue))) {
-        return acc + parseFloat(b.usdValue);
+    const activePositions = Object.values(positions).filter(
+      p => p.size && !new BigNumber(p.size).isZero()
+    );
+
+    const posInitialMargin = activePositions.reduce((acc, p) => {
+      if (p.marginType === 'isolated') {
+        return acc + (parseFloat(p.isolatedMargin || '0') || 0);
       }
-      let price = new BigNumber(1);
-      if (b.asset !== 'USDT' && b.asset !== 'USDC') {
-        const markPrice =
-          assetCtxByMarket[`${b.asset}-USDT`]?.markPx || assetCtxByMarket[`${b.asset}USDT`]?.markPx;
-        if (markPrice) price = new BigNumber(markPrice);
-        else if (b.asset === 'ASTER') price = new BigNumber('0.783681');
-        else price = new BigNumber(0);
-      }
-      return acc + new BigNumber(b.total).times(price).toNumber();
+      const sz = new BigNumber(p.size).abs();
+      const px = new BigNumber(
+        parseFloat(p.entryPrice) > 0
+          ? p.entryPrice
+          : p.markPrice || assetCtxByMarket[p.symbol]?.markPx || '0'
+      );
+      const notional = sz.times(px);
+      const lev = Math.max(1, p.leverage || 1);
+      return acc + notional.div(lev).toNumber();
     }, 0);
-  }, [balances, assetCtxByMarket, multiAssetsMargin, availableBalance, symbol]);
+
+    const activeOrders = Object.values(orders).filter(
+      o => !o.reduceOnly && (o.status === 'new' || o.status === 'partially_filled')
+    );
+
+    const orderInitialMargin = activeOrders.reduce((acc, o) => {
+      const remSize = new BigNumber(o.size || '0').minus(new BigNumber(o.filledSize || '0'));
+      if (remSize.lte(0)) return acc;
+      const px = new BigNumber(
+        parseFloat(o.price || '0') > 0 ? o.price : assetCtxByMarket[o.symbol]?.markPx || '0'
+      );
+      const lev = Math.max(1, o.leverage || 1);
+      return acc + remSize.times(px).div(lev).toNumber();
+    }, 0);
+
+    const crossUnrealizedLoss = activePositions
+      .filter(p => p.marginType === 'cross')
+      .reduce((acc, p) => {
+        const upnl = parseFloat(p.unrealizedPnl || '0');
+        return upnl < 0 ? acc + upnl : acc;
+      }, 0);
+
+    const computedAvailable = Math.max(
+      0,
+      totalRawWallet + crossUnrealizedLoss - posInitialMargin - orderInitialMargin
+    );
+
+    return computedAvailable;
+  }, [balances, positions, orders, assetCtxByMarket, multiAssetsMargin, symbol]);
 
   // Max Position Size Calculation (0% to 100% slider bounds)
   const maxPossibleSize = useMemo(() => {

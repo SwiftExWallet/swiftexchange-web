@@ -9,8 +9,6 @@ import { useExchangeManager } from '../../core/ExchangeManager';
 interface OrderActionButtonProps {
   onSubmit: (side: 'BUY' | 'SELL') => void;
   isLoading?: boolean;
-  isValid?: boolean;
-  validationError?: string;
   onOpenDepositModal: () => void;
   walletBalance: number;
   actionSubtext?: string;
@@ -19,8 +17,6 @@ interface OrderActionButtonProps {
 export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
   onSubmit,
   isLoading,
-  isValid = true,
-  validationError,
   onOpenDepositModal,
   walletBalance,
   actionSubtext,
@@ -114,16 +110,12 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
     );
   }
 
-  const isInvalid = isValid === false || !!validationError || !hasFunds;
-
   const handleAction = (side: 'BUY' | 'SELL') => {
     if (!hasFunds) {
       onOpenDepositModal();
       return;
     }
-    if (!isInvalid) {
-      onSubmit(side);
-    }
+    onSubmit(side);
   };
 
   return (
@@ -132,7 +124,7 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
         <button
           type="button"
           onClick={() => handleAction('BUY')}
-          disabled={isLoading || (!hasFunds ? false : isInvalid)}
+          disabled={isLoading}
           className="flex-1 h-10 flex flex-col items-center justify-center rounded-lg font-semibold text-[13px] bg-success text-white hover:bg-success/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm cursor-pointer active:scale-[0.99]"
         >
           <span>{isLoading ? 'Placing...' : !hasFunds ? 'Deposit / Buy' : 'Buy / Long'}</span>
@@ -143,7 +135,7 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
         <button
           type="button"
           onClick={() => handleAction('SELL')}
-          disabled={isLoading || (!hasFunds ? false : isInvalid)}
+          disabled={isLoading}
           className="flex-1 h-10 flex flex-col items-center justify-center rounded-lg font-semibold text-[13px] bg-danger text-white hover:bg-danger/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm cursor-pointer active:scale-[0.99]"
         >
           <span>{isLoading ? 'Placing...' : !hasFunds ? 'Deposit / Sell' : 'Sell / Short'}</span>

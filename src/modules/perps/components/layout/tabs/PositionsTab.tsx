@@ -1,10 +1,9 @@
 import { Layers, Plus } from 'lucide-react';
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 
 import BigNumber from 'bignumber.js';
 
 import { ConfirmationModal } from '../../../../../components/common/ConfirmationModal';
-import { fetchAsterSnapshot } from '../../../adapters/aster/hooks/useAsterDataSync';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
@@ -17,6 +16,7 @@ import {
   calculateLiquidationPrice,
   formatPricePrecision,
 } from '../../../utils/liquidationCalculator';
+import { safeFormatNumber } from '../../../utils/precision';
 import { PositionTpSlModal } from '../../trade/PositionTpSlModal';
 import { TabEmptyState } from './TabEmptyState';
 
@@ -205,11 +205,7 @@ const PositionRow = memo(
         >
           <div className="flex flex-col">
             <span className="font-medium">
-              {bnNotional.toNumber().toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}{' '}
-              USDT
+              {safeFormatNumber(bnNotional.toNumber(), 2, 2)} USDT
             </span>
             <span className="text-[10px] text-secondary">
               {absSize} {baseSymbol}
@@ -224,13 +220,7 @@ const PositionRow = memo(
         </td>
         <td className="px-2.5 py-1.5 text-primary font-mono-tabular">
           <div className="flex flex-col">
-            <span>
-              {marginCalc.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}{' '}
-              USDT
-            </span>
+            <span>{safeFormatNumber(marginCalc, 2, 2)} USDT</span>
             <span className="text-[10px] text-secondary">
               ({position.marginType === 'isolated' ? 'Isolated' : 'Cross'})
             </span>
@@ -248,11 +238,7 @@ const PositionRow = memo(
           <div className="flex flex-col">
             <span className="font-medium">
               {pnlVal > 0 ? '+' : ''}
-              {pnlVal.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}{' '}
-              USDT
+              {safeFormatNumber(pnlVal, 2, 2)} USDT
             </span>
             <span className="text-[10px]">
               {roe > 0 ? '+' : ''}
@@ -364,10 +350,7 @@ const PositionRow = memo(
                 <div className="flex justify-between text-secondary">
                   <span>Entry Price</span>
                   <span className="text-primary font-mono font-medium">
-                    $
-                    {parseFloat(position.entryPrice || '0').toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                    })}
+                    ${safeFormatNumber(position.entryPrice, 2, 4, '0.00')}
                   </span>
                 </div>
                 <div className="flex justify-between text-secondary border-t border-color pt-2 font-semibold">
@@ -482,12 +465,6 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
   const isClosingAll = isClosingAllLocal || isExecutionLoading;
 
   const positionList = useMemo(() => Object.values(positions), [positions]);
-
-  useEffect(() => {
-    if (signer && userAddr) {
-      fetchAsterSnapshot(signer, userAddr).catch(() => {});
-    }
-  }, [signer, userAddr]);
 
   const handleConfirmCloseAll = async () => {
     if (!isReady || isClosingAll) return;

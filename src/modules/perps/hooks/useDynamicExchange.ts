@@ -10,6 +10,9 @@ import { useLeverageStore } from '../core/stores/leverageStore';
 import { marketStore, useMarketStore } from '../core/stores/marketStore';
 import { resetPerpStores } from '../core/stores/resetPerpStores';
 
+let activeExchangeClient: PerpExchange | null = null;
+let activeExchangeKey = '';
+
 export function useDynamicExchange() {
   const currentExchange = useExchangeManager(state => state.currentExchange);
   const currentNetwork = useExchangeManager(state => state.currentNetwork);
@@ -17,22 +20,25 @@ export function useDynamicExchange() {
   const globalAppNetwork = useWalletStore(state => state.network);
   const clientRef = useRef<PerpExchange | null>(null);
   const isFirstRender = useRef(true);
-  const [activeClient, setActiveClient] = useState<PerpExchange | null>(null);
+  const [activeClient, setActiveClient] = useState<PerpExchange | null>(() => activeExchangeClient);
 
-  // Enforce perps network to strictly mirror global application network
   useEffect(() => {
     if (globalAppNetwork && currentNetwork !== globalAppNetwork) {
       setNetwork(globalAppNetwork);
     }
   }, [globalAppNetwork, currentNetwork, setNetwork]);
 
-  // Re-initialize the exchange client whenever the selected exchange or network changes
   useEffect(() => {
-    // Cancellation flag guards against race conditions when the exchange changes
-    // before a pending async getMarkets() call completes.
     let cancelled = false;
 
     const init = async () => {
+      const configKey = `${currentExchange}_${currentNetwork}`;
+      if (activeExchangeClient && activeExchangeKey === configKey) {
+        clientRef.current = activeExchangeClient;
+        setActiveClient(activeExchangeClient);
+        return;
+      }
+
       const exchangeLabel = currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3';
       const networkLabel = currentNetwork === 'testnet' ? 'Testnet' : 'Mainnet';
 
@@ -42,7 +48,6 @@ export function useDynamicExchange() {
           .setIsSwitching(true, `Connecting to ${exchangeLabel} (${networkLabel})...`);
       }
 
-      // 1. Immediately wipe store states to prevent stale cross-exchange data contamination
       resetPerpStores();
 
       if (clientRef.current) {
@@ -63,6 +68,9 @@ export function useDynamicExchange() {
         useExchangeManager.getState().setIsSwitching(false);
         return;
       }
+
+      activeExchangeClient = client;
+      activeExchangeKey = configKey;
 
       const markets = await client.getMarkets();
       if (cancelled) {

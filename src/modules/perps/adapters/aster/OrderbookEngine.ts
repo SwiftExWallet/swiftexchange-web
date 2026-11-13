@@ -1,43 +1,81 @@
 import { orderBookStore } from '../../core/stores/orderbookStore';
+import { asterHttpClient } from './client/asterHttpClient';
 import { ASTER_ENDPOINTS, getAsterRestUrl } from './constants';
 
 interface DiffEvent {
-  U: number; // First update ID in event
-  u: number; // Final update ID in event
-  pu: number; // Final update ID in last event
-  b: [string, string][]; // Bids: [price, size]
-  a: [string, string][]; // Asks: [price, size]
+  U: number;
+  u: number;
+  pu?: number;
+  b: [string, string][];
+  a: [string, string][];
 }
 
 export class OrderbookEngine {
-  private symbol: string; // Aster REST symbol, e.g. "BTCUSDT"
-  private uiSymbol: string; // UI symbol, e.g. "BTC-USDT"
+  private symbol: string;
+  private uiSymbol: string;
 
-  private buffer: DiffEvent[] = [];
   private lastAppliedU = -1;
   private isFetching = false;
   private hasSnapshot = false;
+  private bridgedSnapshot = false;
+  private snapshotRetryCount = 0;
+  private lastResyncTime = 0;
+
+  private isDisposed = false;
+  private abortController: AbortController | null = null;
 
   constructor(asterSymbol: string) {
-    this.symbol = asterSymbol.toUpperCase();
-    this.uiSymbol = this.symbol.replace('USDT', '-USDT');
-    // Fetch initial snapshot immediately on instantiation to guarantee instant orderbook render
+    const clean = asterSymbol
+      .replace(/[-_]/g, '')
+      .toUpperCase()
+      .replace(/(USDT)+$/g, '');
+    this.symbol = `${clean}USDT`;
+    this.uiSymbol = `${clean}-USDT`;
+    orderBookStore.startSync(this.uiSymbol);
+    orderBookStore.startSync(this.symbol);
     this.fetchSnapshot();
   }
 
   public async fetchSnapshot(): Promise<void> {
-    if (this.isFetching) return;
+    if (this.isDisposed || this.isFetching || this.hasSnapshot) return;
+
     this.isFetching = true;
+
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    this.abortController = new AbortController();
 
     try {
       const url = `${getAsterRestUrl()}${ASTER_ENDPOINTS.DEPTH}?symbol=${this.symbol}&limit=100`;
-      const res = await fetch(url);
-      const snap = await res.json();
-      if (snap && snap.bids && snap.asks) {
+      const snap = await asterHttpClient.request<any>(url, {
+        method: 'GET',
+        weight: 2,
+        ttlMs: 1000,
+        signal: this.abortController.signal,
+      });
+
+      if (!this.isDisposed && snap && snap.bids && snap.asks) {
         this.applySnapshot(snap);
+      } else if (!this.hasSnapshot) {
+        orderBookStore.reconcileAndFlush(this.uiSymbol, 0);
+        orderBookStore.reconcileAndFlush(this.symbol, 0);
       }
-    } catch (e) {
-      console.warn(`[OrderbookEngine] Initial depth snapshot error for ${this.symbol}:`, e);
+    } catch (e: any) {
+      if (!this.hasSnapshot) {
+        orderBookStore.reconcileAndFlush(this.uiSymbol, 0);
+        orderBookStore.reconcileAndFlush(this.symbol, 0);
+      }
+      if (e?.name !== 'AbortError' && !this.isDisposed) {
+        if (!this.hasSnapshot && this.snapshotRetryCount < 2) {
+          this.snapshotRetryCount++;
+          setTimeout(() => {
+            if (!this.isDisposed && !this.hasSnapshot) {
+              this.fetchSnapshot();
+            }
+          }, 3000);
+        }
+      }
     } finally {
       this.isFetching = false;
     }
@@ -54,70 +92,76 @@ export class OrderbookEngine {
     const formattedBids = snap.bids.map(([price, size]) => ({ price, size }));
     const formattedAsks = snap.asks.map(([price, size]) => ({ price, size }));
 
-    // Apply to both UI symbol (BTC-USDT) and raw symbol (BTCUSDT)
     orderBookStore.applySnapshot(this.uiSymbol, formattedBids, formattedAsks, lastUpdateId || 0);
     orderBookStore.applySnapshot(this.symbol, formattedBids, formattedAsks, lastUpdateId || 0);
 
-    this.hasSnapshot = true;
-    this.lastAppliedU = lastUpdateId || 0;
+    const flushedU1 = orderBookStore.reconcileAndFlush(this.uiSymbol, lastUpdateId || 0);
+    const flushedU2 = orderBookStore.reconcileAndFlush(this.symbol, lastUpdateId || 0);
 
-    // Drain buffered diff events that arrived while snapshot was in flight
-    if (this.buffer.length > 0) {
-      const validDiffs = this.buffer;
-      this.buffer = [];
-      for (const diff of validDiffs) {
-        if (diff.u >= this.lastAppliedU) {
-          this.applyDiff(diff);
-        }
-      }
-    }
+    this.hasSnapshot = true;
+    this.bridgedSnapshot = false;
+    this.lastAppliedU = Math.max(lastUpdateId || 0, flushedU1 || 0, flushedU2 || 0);
   }
 
-  /**
-   * Called by the WS client when a `@depth` diff event arrives.
-   */
   public onDiffEvent(raw: DiffEvent): void {
+    if (this.isDisposed) return;
+
     if (!this.hasSnapshot) {
-      this.buffer.push(raw);
-      if (this.buffer.length > 100) this.buffer.shift();
-      if (!this.isFetching) {
+      const bids = raw.b.map(([price, size]) => ({ price, size }));
+      const asks = raw.a.map(([price, size]) => ({ price, size }));
+      orderBookStore.applyDiff(this.uiSymbol, bids, asks, raw.u, raw.U, raw.pu);
+      orderBookStore.applyDiff(this.symbol, bids, asks, raw.u, raw.U, raw.pu);
+      return;
+    }
+
+    if (raw.u <= this.lastAppliedU) {
+      return;
+    }
+
+    if (!this.bridgedSnapshot) {
+      this.bridgedSnapshot = true;
+      this.lastAppliedU = raw.u;
+      const bids = raw.b.map(([price, size]) => ({ price, size }));
+      const asks = raw.a.map(([price, size]) => ({ price, size }));
+      orderBookStore.applyDiff(this.uiSymbol, bids, asks, raw.u, raw.U, raw.pu);
+      orderBookStore.applyDiff(this.symbol, bids, asks, raw.u, raw.U, raw.pu);
+      return;
+    }
+
+    if (
+      raw.pu !== undefined &&
+      this.lastAppliedU > 0 &&
+      raw.pu !== this.lastAppliedU &&
+      (raw.U === undefined || raw.U > this.lastAppliedU + 1)
+    ) {
+      const now = Date.now();
+      if (now - this.lastResyncTime > 5000) {
+        this.lastResyncTime = now;
+        this.hasSnapshot = false;
+        this.bridgedSnapshot = false;
         this.fetchSnapshot();
       }
       return;
     }
 
-    this.applyDiff(raw);
-  }
+    const bids = raw.b.map(([price, size]) => ({ price, size }));
+    const asks = raw.a.map(([price, size]) => ({ price, size }));
 
-  private applyDiff(event: DiffEvent): void {
-    // Discard diffs older than the applied snapshot
-    if (this.lastAppliedU !== -1 && event.u <= this.lastAppliedU) {
-      return;
+    orderBookStore.applyDiff(this.uiSymbol, bids, asks, raw.u, raw.U, raw.pu);
+    orderBookStore.applyDiff(this.symbol, bids, asks, raw.u, raw.U, raw.pu);
+
+    if (raw.u > this.lastAppliedU) {
+      this.lastAppliedU = raw.u;
     }
-
-    // Check continuous sequence: Aster v3 requires event.pu === previous event.u (WS-04)
-    if (this.lastAppliedU !== -1 && event.pu !== undefined && event.pu !== this.lastAppliedU) {
-      console.warn(
-        `[OrderbookEngine] Depth gap detected on ${this.symbol}: pu (${event.pu}) !== lastAppliedU (${this.lastAppliedU}). Re-syncing snapshot.`
-      );
-      this.hasSnapshot = false;
-      this.lastAppliedU = -1;
-      this.fetchSnapshot();
-      return;
-    }
-
-    const bids = event.b.map(([price, size]) => ({ price, size }));
-    const asks = event.a.map(([price, size]) => ({ price, size }));
-
-    // Apply to both keys in store
-    orderBookStore.applyDiff(this.uiSymbol, bids, asks, event.u);
-    orderBookStore.applyDiff(this.symbol, bids, asks, event.u);
-
-    this.lastAppliedU = event.u;
   }
 
   public dispose(): void {
-    this.buffer = [];
+    this.isDisposed = true;
     this.hasSnapshot = false;
+    this.bridgedSnapshot = false;
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
   }
 }

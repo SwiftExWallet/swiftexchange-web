@@ -10,6 +10,7 @@ import { useHistoryStore } from '../../../core/stores/historyStore';
 import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
+import { useTickerStore } from '../../../core/stores/tickerStore';
 import { getAsterWsUrl } from '../constants';
 import { fetchAsterSnapshot } from './useAsterDataSync';
 import { useListenKey } from './useListenKey';
@@ -37,72 +38,230 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
   const wsRef = useRef<WebSocket | null>(null);
 
   const applyAccountUpdate = (a: any) => {
-    // 1. Atomic batch balance update to prevent event loop blocking
-    if (Array.isArray(a.B) && a.B.length > 0) {
-      const balanceUpdates: AccountBalance[] = a.B.map((b: any) => {
-        const wbBn = new BigNumber(b.wb || '0');
-        const cwBn = new BigNumber(b.cw || '0');
-        return {
-          asset: b.a,
-          total: b.wb,
-          available: b.cw,
-          locked: wbBn.minus(cwBn).toString(),
-          marginBalance: b.cw,
-        };
-      });
-      useAccountStore.getState().updateBalances(balanceUpdates);
-    }
+    if (!a) return;
 
-    // 2. Atomic batch position update to eliminate layout thrashing
     if (Array.isArray(a.P) && a.P.length > 0) {
-      const upsertList: Position[] = [];
-      const removeList: string[] = [];
-      const posMap = usePositionStore.getState().positions;
-      const orderEntryState = useOrderEntryStore.getState();
+      try {
+        const upsertList: Position[] = [];
+        const removeList: string[] = [];
+        const posMap = usePositionStore.getState().positions;
+        const orderEntryState = useOrderEntryStore.getState();
 
-      a.P.forEach((p: any) => {
-        const symbol = (p.s as string).replace('USDT', '-USDT');
-        if (new BigNumber(p.pa || '0').isZero()) {
-          removeList.push(symbol);
-        } else {
-          const existing =
-            posMap[symbol] ||
-            posMap[symbol.replace('-', '')] ||
-            posMap[symbol.replace('USDT', '-USDT')];
+        a.P.forEach((p: any) => {
+          const rawSymbol = String(p.s || '');
+          const cleanSymbol = rawSymbol.replace(/(USDT|USDC)$/, '-$1');
+          const isZero = !p.pa || new BigNumber(p.pa).isZero();
 
-          const storedLev =
-            (existing?.leverage && existing.leverage > 0 ? existing.leverage : null) ||
-            orderEntryState.leverageBySymbol[symbol] ||
-            orderEntryState.leverageBySymbol[symbol.replace('-', '')] ||
-            orderEntryState.leverageBySymbol[symbol.replace('USDT', '-USDT')] ||
-            orderEntryState.leverage ||
-            0;
+          if (isZero) {
+            removeList.push(cleanSymbol);
+            removeList.push(rawSymbol);
+          } else {
+            const existing =
+              posMap[cleanSymbol] || posMap[rawSymbol] || posMap[cleanSymbol.replace('-', '')];
 
-          upsertList.push({
-            symbol,
-            size: p.pa,
-            entryPrice: p.ep,
-            markPrice: p.mp || existing?.markPrice || '0',
-            liquidationPrice: existing?.liquidationPrice || '0',
-            unrealizedPnl: p.up || '0',
-            leverage: storedLev,
-            marginType: p.mt
-              ? (p.mt as string).toLowerCase() === 'isolated'
-                ? 'isolated'
-                : 'cross'
-              : existing?.marginType || 'cross',
-            isolatedMargin: p.iw ?? '0',
-            initialMargin: (existing as any)?.initialMargin,
+            const storedLev =
+              (existing?.leverage && existing.leverage > 0 ? existing.leverage : null) ||
+              orderEntryState.leverageBySymbol[cleanSymbol] ||
+              orderEntryState.leverageBySymbol[rawSymbol] ||
+              orderEntryState.leverage ||
+              20;
+
+            const tickerMark =
+              useTickerStore.getState().assetCtxByMarket[cleanSymbol]?.markPx ||
+              useTickerStore.getState().assetCtxByMarket[rawSymbol]?.markPx;
+
+            upsertList.push({
+              symbol: cleanSymbol,
+              size: String(p.pa),
+              entryPrice: String(p.ep || '0'),
+              markPrice: String(p.mp || existing?.markPrice || tickerMark || '0'),
+              liquidationPrice: existing?.liquidationPrice || '0',
+              unrealizedPnl: String(p.up || '0'),
+              leverage: storedLev,
+              marginType: p.mt
+                ? String(p.mt).toLowerCase() === 'isolated'
+                  ? 'isolated'
+                  : 'cross'
+                : existing?.marginType || 'cross',
+              isolatedMargin: p.iw ? String(p.iw) : '0',
+              initialMargin: (existing as any)?.initialMargin,
+            });
+          }
+        });
+
+        if (upsertList.length > 0 || removeList.length > 0) {
+          usePositionStore.getState().batchUpdatePositions({
+            upsert: upsertList,
+            remove: removeList,
           });
         }
-      });
+      } catch (err) {
+        console.error('[UserDataStream] Error updating positions:', err);
+      }
+    }
 
-      if (upsertList.length > 0 || removeList.length > 0) {
-        usePositionStore.getState().batchUpdatePositions({
-          upsert: upsertList,
-          remove: removeList,
+    try {
+      const curPositions = usePositionStore.getState().positions;
+      const curOrders = useOrderStore.getState().orders;
+      const curBalances = useAccountStore.getState().balances;
+      const curAssetCtx = useTickerStore.getState().assetCtxByMarket;
+      const isMulti = useAccountStore.getState().multiAssetsMargin;
+
+      let totalWallet = 0;
+      if (isMulti) {
+        totalWallet = Object.values(curBalances).reduce((acc, b) => {
+          let bTotal = parseFloat(b.total || '0') || 0;
+          if (Array.isArray(a.B)) {
+            const matchB = a.B.find((item: any) => item.a === b.asset);
+            if (matchB) bTotal = parseFloat(matchB.wb || '0') || 0;
+          }
+          let px = 1;
+          if (b.asset !== 'USDT' && b.asset !== 'USDC') {
+            const mPx =
+              curAssetCtx[`${b.asset}-USDT`]?.markPx || curAssetCtx[`${b.asset}USDT`]?.markPx;
+            if (mPx) px = parseFloat(mPx);
+            else if (b.asset === 'ASTER') px = 0.783681;
+            else px = 0;
+          }
+          return acc + bTotal * px;
+        }, 0);
+      } else {
+        let usdtTotal =
+          parseFloat(
+            curBalances['USDT']?.total ||
+              curBalances['USDT']?.available ||
+              curBalances['USDC']?.total ||
+              '0'
+          ) || 0;
+        if (Array.isArray(a.B)) {
+          const matchUsdt = a.B.find((item: any) => item.a === 'USDT' || item.a === 'USDC');
+          if (matchUsdt && matchUsdt.wb !== undefined) {
+            usdtTotal = parseFloat(matchUsdt.wb || '0') || 0;
+          }
+        }
+        totalWallet = usdtTotal;
+      }
+
+      let resolvedTotalWallet = totalWallet;
+      if (resolvedTotalWallet <= 0) {
+        const storeTotal = parseFloat(useAccountStore.getState().totalWalletBalance || '0') || 0;
+        if (storeTotal > 0) {
+          resolvedTotalWallet = storeTotal;
+        } else {
+          const storeAvail = parseFloat(useAccountStore.getState().availableBalance || '0') || 0;
+          if (storeAvail > 0) {
+            resolvedTotalWallet = storeAvail;
+          }
+        }
+      }
+
+      const activePosList = Object.values(curPositions).filter(
+        p => p.size && !new BigNumber(p.size).isZero()
+      );
+
+      const posMargin = activePosList.reduce((acc, p) => {
+        if (p.marginType === 'isolated') {
+          return acc + (parseFloat(p.isolatedMargin || '0') || 0);
+        }
+        const sz = Math.abs(parseFloat(p.size || '0'));
+        const px =
+          parseFloat(p.entryPrice || '0') > 0
+            ? parseFloat(p.entryPrice)
+            : parseFloat(p.markPrice || '0') || 0;
+        const lev = Math.max(1, p.leverage || 1);
+        return acc + (sz * px) / lev;
+      }, 0);
+
+      const activeOrdList = Object.values(curOrders).filter(
+        o => !o.reduceOnly && (o.status === 'new' || o.status === 'partially_filled')
+      );
+
+      const orderMargin = activeOrdList.reduce((acc, o) => {
+        const remSize = Math.max(
+          0,
+          (parseFloat(o.size || '0') || 0) - (parseFloat(o.filledSize || '0') || 0)
+        );
+        if (remSize <= 0) return acc;
+        const px =
+          parseFloat(o.price || '0') > 0
+            ? parseFloat(o.price)
+            : parseFloat(curAssetCtx[o.symbol]?.markPx || '0') || 0;
+        const lev = Math.max(1, o.leverage || 1);
+        return acc + (remSize * px) / lev;
+      }, 0);
+
+      const crossLoss = activePosList
+        .filter(p => p.marginType === 'cross')
+        .reduce((acc, p) => {
+          const upnl = parseFloat(p.unrealizedPnl || '0');
+          return upnl < 0 ? acc + upnl : acc;
+        }, 0);
+
+      const realAvail = Math.max(0, resolvedTotalWallet + crossLoss - posMargin - orderMargin);
+      const realAvailStr = realAvail.toFixed(4);
+
+      if (Array.isArray(a.B) && a.B.length > 0) {
+        const balanceUpdates: AccountBalance[] = a.B.map((b: any) => {
+          const wbBn = new BigNumber(b.wb || '0');
+          const cwBn = new BigNumber(b.cw || '0');
+          const isQuoteAsset = b.a === 'USDT' || (!isMulti && (b.a === 'USDC' || b.a === 'USD'));
+          const availVal = isQuoteAsset ? realAvailStr : b.cw || '0';
+          const lockedVal = isQuoteAsset
+            ? Math.max(0, wbBn.minus(new BigNumber(realAvailStr)).toNumber()).toFixed(4)
+            : wbBn.minus(cwBn).toString();
+          return {
+            asset: b.a,
+            total: b.wb || '0',
+            available: availVal,
+            locked: lockedVal,
+            marginBalance: b.cw || '0',
+          };
+        });
+
+        useAccountStore.getState().updateBalances(balanceUpdates, {
+          availableBalance: realAvailStr,
+          totalWalletBalance: resolvedTotalWallet > 0 ? resolvedTotalWallet.toFixed(4) : undefined,
+          totalMarginBalance:
+            resolvedTotalWallet > 0 ? (resolvedTotalWallet + crossLoss).toFixed(4) : undefined,
+        });
+
+        if (a.m === 'DEPOSIT' || a.m === 'WITHDRAW' || a.m === 'TRANSFER') {
+          a.B.forEach((b: any) => {
+            if (b.bc && String(b.bc).trim() !== '' && !new BigNumber(b.bc).isZero()) {
+              useHistoryStore.getState().prependIncome({
+                symbol: '',
+                incomeType: a.m,
+                income: String(b.bc),
+                asset: b.a || 'USDT',
+                time: Date.now(),
+                tranId: String(Date.now()),
+                tradeId: '',
+                info: a.m,
+              });
+            }
+          });
+        }
+      } else {
+        const qAsset = isMulti ? 'USDT' : curBalances['USDT'] ? 'USDT' : 'USDC';
+        const qBal = curBalances[qAsset];
+        const updatedBalList: AccountBalance[] = qBal
+          ? [
+              {
+                ...qBal,
+                available: realAvailStr,
+                locked: Math.max(0, parseFloat(qBal.total || '0') - realAvail).toFixed(4),
+              },
+            ]
+          : [];
+        useAccountStore.getState().updateBalances(updatedBalList, {
+          availableBalance: realAvailStr,
+          totalWalletBalance: resolvedTotalWallet > 0 ? resolvedTotalWallet.toFixed(4) : undefined,
+          totalMarginBalance:
+            resolvedTotalWallet > 0 ? (resolvedTotalWallet + crossLoss).toFixed(4) : undefined,
         });
       }
+    } catch (err) {
+      console.error('[UserDataStream] Error updating balances:', err);
     }
   };
 
@@ -131,9 +290,7 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
       });
     }
 
-    // Fire toast notifications for order status changes (only if it's an execution report)
     if (o.x !== 'CALCULATED') {
-      // 'CALCULATED' is for liquidation/ADL updates sometimes, we care about actual trades/orders
       const actionText = o.S === 'BUY' ? 'Buy' : 'Sell';
       let title = '';
       let message = `${actionText} ${o.q} ${symbol} at ${o.p === '0' ? 'Market' : o.p}`;
@@ -164,8 +321,8 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
       }
     }
 
-    // Always push to history store
-    useHistoryStore.getState().addOrder({
+    const txTime = o.T || Date.now();
+    useHistoryStore.getState().prependOrder({
       orderId: o.i,
       symbol: o.s,
       status: o.X,
@@ -186,12 +343,12 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
       workingType: o.wt,
       priceProtect: false,
       origType: o.ot,
-      time: o.T,
-      updateTime: o.T,
+      time: txTime,
+      updateTime: txTime,
     });
 
     if (o.x === 'TRADE') {
-      useHistoryStore.getState().addTrade({
+      useHistoryStore.getState().prependTrade({
         buyer: o.S === 'BUY',
         commission: o.n || '0',
         commissionAsset: o.N || 'USDT',
@@ -205,32 +362,30 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
         side: o.S,
         positionSide: o.ps,
         symbol: o.s,
-        time: o.T,
+        time: txTime,
       });
 
-      // Real-time fee deduction sync
       if (o.n && new BigNumber(o.n).gt(0)) {
-        useHistoryStore.getState().addIncome({
+        useHistoryStore.getState().prependIncome({
           symbol: o.s,
           incomeType: 'COMMISSION',
           income: `-${o.n}`,
           asset: o.N || 'USDT',
-          time: o.T,
-          tranId: String(o.t || ''),
+          time: txTime,
+          tranId: String(o.t || txTime),
           tradeId: String(o.t || ''),
           info: '',
         });
       }
 
-      // Real-time realized PnL sync
       if (o.rp && !new BigNumber(o.rp).isZero()) {
-        useHistoryStore.getState().addIncome({
+        useHistoryStore.getState().prependIncome({
           symbol: o.s,
           incomeType: 'REALIZED_PNL',
           income: o.rp,
           asset: 'USDT',
-          time: o.T,
-          tranId: String(o.t || ''),
+          time: txTime,
+          tranId: String(o.t || txTime),
           tradeId: String(o.t || ''),
           info: '',
         });
@@ -263,17 +418,15 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
       const startWatchdog = () => {
         clearWatchdog();
         lastActivityTime = Date.now();
-        // Send a ping frame / keep-alive every 25s so proxy / cloudflare doesn't kill the socket
         watchdogTimer = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             try {
               ws.send(JSON.stringify({ method: 'ping' }));
             } catch {
-              /* ignore */
+              void 0;
             }
           }
 
-          // If no message received for >180s, then consider connection stale
           if (Date.now() - lastActivityTime > 180_000) {
             console.warn(
               '[UserDataStream] Watchdog timeout (no data for 180s), closing stale connection'
@@ -293,7 +446,6 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
         reconnectAttempts = 0;
         startWatchdog();
 
-        // Resync full account and positions on reconnection (WS-01)
         if (signer && userAddr) {
           fetchAsterSnapshot(signer, userAddr).catch(err => {
             console.error('[UserDataStream] Resync on connect failed:', err);
@@ -365,12 +517,10 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
         if (isDisposed) return;
 
         console.log('[UserDataStream] Disconnected, scheduling reconnect...');
-        // Exponential backoff with jitter: 1s, 2s, 4s, 8s, up to 30s max (WS-01)
         const delay =
           Math.min(1000 * Math.pow(2, reconnectAttempts), 30_000) + Math.random() * 1000;
         reconnectAttempts++;
         if (reconnectAttempts > 3) {
-          // If multiple reconnects failed, the listenKey may have expired on Aster server
           refresh().catch(() => {});
         }
         reconnectTimeout = setTimeout(() => {
@@ -385,9 +535,13 @@ export function useUserDataStream(signer: Signer | null, userAddr: string | null
 
     connectWs();
 
-    // Resync data snapshot when tab becomes visible or comes back online
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && signer && userAddr) {
+      if (
+        document.visibilityState === 'visible' &&
+        signer &&
+        userAddr &&
+        (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)
+      ) {
         fetchAsterSnapshot(signer, userAddr).catch(() => {});
       }
     };

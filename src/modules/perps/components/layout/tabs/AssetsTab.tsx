@@ -8,6 +8,7 @@ import { useAsterAgent } from '../../../adapters/aster/hooks/useAsterAgent';
 import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { getCoinIconUrl } from '../../../services/coinIconService';
+import { safeFormatNumber } from '../../../utils/precision';
 import { Modal } from '../../ui/Modal';
 import { TabEmptyState } from './TabEmptyState';
 
@@ -172,11 +173,7 @@ export const AssetsTab: React.FC = () => {
                   {b.marginBalance || b.available}
                 </td>
                 <td className="px-2.5 py-1.5 text-primary font-mono">
-                  $
-                  {usdValue.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  ${safeFormatNumber(usdValue, 2, 2, '0.00')}
                 </td>
                 <td
                   className={`px-2.5 py-1.5 font-mono ${

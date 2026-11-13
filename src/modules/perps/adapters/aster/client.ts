@@ -1,8 +1,8 @@
 import type { PerpNetwork } from '../../core/config/networks';
 import type { PerpExchange } from '../../core/interfaces/exchange';
 import type { Candle, Market, OrderBook, Ticker } from '../../core/models';
-import { orderBookStore } from '../../core/stores/orderbookStore';
 import { type AssetCtx, useTickerStore } from '../../core/stores/tickerStore';
+import { asterHttpClient } from './client/asterHttpClient';
 import { ASTER_ENDPOINTS, getAsterRestUrl } from './constants';
 import { AsterMapper } from './mapper';
 import { AsterWebSocket } from './websocket';
@@ -28,27 +28,34 @@ export class AsterClient implements PerpExchange {
     this.wsClient.disconnect();
   }
 
-  private static cachedExchangeInfo: { data: any; timestamp: number } | null = null;
-  private static cachedTickerData: { data: any; timestamp: number } | null = null;
-
   public async getMarkets(): Promise<Market[]> {
-    const now = Date.now();
-    let infoData = AsterClient.cachedExchangeInfo?.data;
-    if (!infoData || now - (AsterClient.cachedExchangeInfo?.timestamp || 0) > 15_000) {
-      const res = await fetch(`${this.restUrl}${ASTER_ENDPOINTS.EXCHANGE_INFO}`);
-      if (res.ok) {
-        infoData = await res.json();
-        AsterClient.cachedExchangeInfo = { data: infoData, timestamp: now };
-      }
+    let infoData: any = null;
+    let tickerData: any = null;
+
+    try {
+      infoData = await asterHttpClient.request<any>(
+        `${this.restUrl}${ASTER_ENDPOINTS.EXCHANGE_INFO}`,
+        {
+          method: 'GET',
+          weight: 10,
+          ttlMs: 300_000,
+        }
+      );
+    } catch (err) {
+      console.warn('[AsterClient] getMarkets exchangeInfo failed:', err);
     }
 
-    let tickerData = AsterClient.cachedTickerData?.data;
-    if (!tickerData || now - (AsterClient.cachedTickerData?.timestamp || 0) > 3_000) {
-      const res = await fetch(`${this.restUrl}${ASTER_ENDPOINTS.TICKER_24HR}`);
-      if (res.ok) {
-        tickerData = await res.json();
-        AsterClient.cachedTickerData = { data: tickerData, timestamp: now };
-      }
+    try {
+      tickerData = await asterHttpClient.request<any>(
+        `${this.restUrl}${ASTER_ENDPOINTS.TICKER_24HR}`,
+        {
+          method: 'GET',
+          weight: 40,
+          ttlMs: 3_000,
+        }
+      );
+    } catch (err) {
+      console.warn('[AsterClient] getMarkets ticker24hr failed:', err);
     }
 
     if (!infoData || !infoData.symbols) return [];
@@ -73,10 +80,14 @@ export class AsterClient implements PerpExchange {
   public async getOrderBook(symbol: string): Promise<OrderBook> {
     const coin = this.extractCoinFromSymbol(symbol);
     const asterSymbol = `${coin}USDT`;
-    const response = await fetch(
-      `${this.restUrl}${ASTER_ENDPOINTS.DEPTH}?symbol=${asterSymbol}&limit=100`
+    const data = await asterHttpClient.request<any>(
+      `${this.restUrl}${ASTER_ENDPOINTS.DEPTH}?symbol=${asterSymbol}&limit=50`,
+      {
+        method: 'GET',
+        weight: 5,
+        ttlMs: 1000,
+      }
     );
-    const data = await response.json();
 
     return AsterMapper.mapOrderBook(symbol, data);
   }
@@ -87,24 +98,7 @@ export class AsterClient implements PerpExchange {
     _callback?: (ob: OrderBook) => void
   ): Promise<void> {
     const coin = this.extractCoinFromSymbol(symbol);
-    // 1. Subscribe to WebSocket depth updates
     this.wsClient.subscribeOrderBook(coin);
-
-    // 2. Concurrently fetch instant REST depth snapshot to guarantee instant orderbook render
-    this.getOrderBook(symbol)
-      .then(ob => {
-        if (ob && ob.bids && ob.asks && (ob.bids.length > 0 || ob.asks.length > 0)) {
-          const updateId = ob.updateId ?? 0;
-          orderBookStore.applySnapshot(symbol, ob.bids, ob.asks, updateId);
-          const altSymbol = symbol.includes('-')
-            ? symbol.replace('-', '')
-            : symbol.replace(/USDT$/, '-USDT');
-          orderBookStore.applySnapshot(altSymbol, ob.bids, ob.asks, updateId);
-        }
-      })
-      .catch(err => {
-        console.warn('[AsterClient] HTTP initial depth snapshot fetch error:', err);
-      });
   }
 
   public async unsubscribeOrderBook(symbol: string): Promise<void> {
@@ -140,21 +134,30 @@ export class AsterClient implements PerpExchange {
     startTime: number,
     endTime: number
   ): Promise<Candle[]> {
-    const asterSymbol = `${coin}USDT`;
+    const cleanCoin = this.extractCoinFromSymbol(coin);
+    const asterSymbol = `${cleanCoin}USDT`;
     const url = `${this.restUrl}${ASTER_ENDPOINTS.KLINES}?symbol=${asterSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=500`;
-    const response = await fetch(url);
-    const data = await response.json();
+
+    const data = await asterHttpClient.request<any>(url, {
+      method: 'GET',
+      weight: 5,
+      ttlMs: 5000,
+    });
 
     if (!Array.isArray(data)) {
       return [];
     }
 
-    const uiSymbol = `${coin}-USDT`;
+    const uiSymbol = `${cleanCoin}-USDT`;
     return data.map((k: any) => AsterMapper.mapCandle(uiSymbol, interval, k));
   }
 
   private extractCoinFromSymbol(symbol: string): string {
-    // "BTC-USDC" -> "BTC"
-    return symbol.split('-')[0] || symbol;
+    return (
+      symbol
+        .replace(/[-_]/g, '')
+        .toUpperCase()
+        .replace(/(USDT|USDC)+$/g, '') || symbol
+    );
   }
 }

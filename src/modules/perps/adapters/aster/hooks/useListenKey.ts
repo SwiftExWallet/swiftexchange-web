@@ -44,14 +44,10 @@ export function useListenKey(
           setListenKey(null);
           return;
         }
-        console.error('[useListenKey] Keepalive failed, auto-refreshing key:', e);
         try {
           await refresh();
-        } catch (refreshErr) {
-          console.error(
-            '[useListenKey] Failed to refresh listenKey after keepalive failure:',
-            refreshErr
-          );
+        } catch {
+          void 0;
         }
       }
     }, LISTEN_KEY_KEEPALIVE_MS);
@@ -85,34 +81,6 @@ export function useListenKey(
     return refreshPromise;
   }, [active, signer, userAddr]);
 
-  // Tab visibility and network recovery: verify/refresh listenKey when waking up
-  useEffect(() => {
-    if (!active || !signer || !userAddr) return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && active && signer && userAddr) {
-        keepaliveListenKey(signer, userAddr).catch(() => {
-          // If keepalive fails when tab wakes up, refresh listenKey immediately
-          refresh().catch(() => {});
-        });
-      }
-    };
-
-    const handleOnline = () => {
-      if (active && signer && userAddr) {
-        refresh().catch(() => {});
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('online', handleOnline);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('online', handleOnline);
-    };
-  }, [active, signer, userAddr, refresh]);
-
   useEffect(() => {
     if (!active || !signer || !userAddr) return;
 
@@ -134,10 +102,6 @@ export function useListenKey(
       cancelled = true;
       clearKeepalive();
       setListenKey(null);
-      // Explicitly delete listenKey on unmount (PROD-04)
-      if (signer && userAddr) {
-        deleteListenKey(signer, userAddr).catch(() => {});
-      }
     };
   }, [active, signer, userAddr]);
 

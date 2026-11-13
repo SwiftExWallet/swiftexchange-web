@@ -26,9 +26,9 @@ export const DEFAULT_BROKER_ID = 1n;
 const ERC20_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
   'function decimals() view returns (uint8)',
-  'function transfer(address to, uint256 amount) returns (bool)',
+  'function transfer(address to, uint256 amount)',
   'function allowance(address owner, address spender) view returns (uint256)',
-  'function approve(address spender, uint256 amount) returns (bool)',
+  'function approve(address spender, uint256 amount)',
 ];
 
 export type DepositStep =
@@ -115,6 +115,12 @@ export async function depositAssetOnChain(
   const bnAmount = new BigNumber(amount);
   if (bnAmount.isNaN() || !bnAmount.isFinite() || bnAmount.isLessThanOrEqualTo(0)) {
     throw new Error('Please enter a valid positive deposit amount.');
+  }
+
+  if (EVM_CHAINS[chainId]?.isTestnet) {
+    throw new Error(
+      'On-chain deposits are not available on Testnet. Please use the official Aster Testnet Faucet to receive testnet funds.'
+    );
   }
 
   const bridgeAddress = getAsterDepositBridge(chainId);
@@ -222,6 +228,16 @@ export async function depositAssetOnChain(
     // Check current allowance and approve Aster treasury if needed
     const currentAllowance: bigint = await tokenContract.allowance(userAddress, bridgeAddress);
     if (currentAllowance < parsedAmount) {
+      if (currentAllowance > 0n && chainId === 1 && asset.name.toUpperCase() === 'USDT') {
+        try {
+          const resetTx = await tokenContract.approve(bridgeAddress, 0n, {
+            gasLimit: MAX_DEPOSIT_GAS_LIMIT,
+          });
+          await resetTx.wait(1);
+        } catch (err) {
+          console.warn('[Deposit] Allowance reset warning:', err);
+        }
+      }
       onProgress?.({
         step: 'AWAITING_SIGNATURE',
         message: `Please approve Aster Treasury to spend ${amount} ${asset.name}...`,

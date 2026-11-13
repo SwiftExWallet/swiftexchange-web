@@ -5,9 +5,10 @@ import { useOrderHistory as useAsterOrderHistory } from '../../../adapters/aster
 import type { AsterOrderResponse } from '../../../adapters/aster/types/orders';
 import { useHyperliquidOrderHistory } from '../../../adapters/hyperliquid/hooks/useHyperliquidOrderHistory';
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import { safeFormatNumber } from '../../../utils/precision';
 import { TabEmptyState } from './TabEmptyState';
 
-export type TimeRange = '1d' | '1w' | '1m' | '3m';
+export type TimeRange = '1d' | '1w';
 
 interface Props {
   signer: any;
@@ -21,8 +22,6 @@ interface Props {
 const TIME_RANGES: { label: string; value: TimeRange; ms: number }[] = [
   { label: '1 day', value: '1d', ms: 24 * 60 * 60 * 1000 },
   { label: '1 week', value: '1w', ms: 7 * 24 * 60 * 60 * 1000 },
-  { label: '1 month', value: '1m', ms: 30 * 24 * 60 * 60 * 1000 },
-  { label: '3 months', value: '3m', ms: 90 * 24 * 60 * 60 * 1000 },
 ];
 
 function formatSplitDate(timestamp: number): { date: string; time: string } {
@@ -64,13 +63,7 @@ function formatNum(
   maxDec = 4,
   fallback = '--'
 ): string {
-  if (val === undefined || val === null || val === '') return fallback;
-  const num = typeof val === 'string' ? parseFloat(val) : val;
-  if (isNaN(num)) return fallback;
-  return num.toLocaleString('en-US', {
-    minimumFractionDigits: minDec,
-    maximumFractionDigits: maxDec,
-  });
+  return safeFormatNumber(val, minDec, maxDec, fallback);
 }
 
 function formatSplitType(typeStr: string | undefined): { line1: string; line2?: string } {
@@ -98,7 +91,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
   signer,
   userAddr,
   asterSymbol,
-  timeRange = '1m',
+  timeRange = '1w',
   hideOtherSymbols = false,
   hideCanceled = false,
 }) => {
@@ -108,7 +101,6 @@ export const OrderHistoryTab: React.FC<Props> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeDetailsOrder, setActiveDetailsOrder] = useState<AsterOrderResponse | null>(null);
 
-  // Filter symbol for backend query
   const querySymbol = hideOtherSymbols ? asterSymbol : null;
 
   const asterHook = useAsterOrderHistory(signer, userAddr, querySymbol, timeRange);
@@ -122,7 +114,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el || isLoadingMore || !hasMore) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) {
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
       loadMore();
     }
   }, [loadMore, isLoadingMore, hasMore]);
@@ -135,7 +127,6 @@ export const OrderHistoryTab: React.FC<Props> = ({
     }
   };
 
-  // Client-side filtering for time range, symbol, and canceled status
   const filteredOrders = useMemo(() => {
     const rangeObj = TIME_RANGES.find(r => r.value === timeRange);
     const minTimestamp = rangeObj && rangeObj.ms !== Infinity ? Date.now() - rangeObj.ms : 0;
@@ -159,7 +150,6 @@ export const OrderHistoryTab: React.FC<Props> = ({
     });
   }, [orders, timeRange, hideCanceled, hideOtherSymbols, asterSymbol]);
 
-  // Aster DEX explorer based on testnet or mainnet
   const asterExplorerBase =
     currentNetwork === 'mainnet'
       ? 'https://www.asterdex.com/en/explorer'
@@ -176,235 +166,348 @@ export const OrderHistoryTab: React.FC<Props> = ({
 
   if (filteredOrders.length === 0) {
     return (
-      <TabEmptyState
-        icon={History}
-        title="No order history"
-        description="Past filled or cancelled orders will appear here."
-      />
+      <div className="w-full h-full flex flex-col justify-between">
+        <TabEmptyState
+          icon={History}
+          title="No order history"
+          description="Past filled or cancelled orders will appear here."
+        />
+        <div className="px-3 py-2 flex items-center justify-end text-[11px] text-secondary shrink-0 bg-secondary">
+          <a
+            href={userAddr ? `${asterExplorerBase}/address/${userAddr}` : asterExplorerBase}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-brand hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
+          >
+            <span>Export more historical data</span>
+            <ExternalLink size={11} />
+          </a>
+        </div>
+      </div>
     );
   }
 
   return (
     <div className="w-full h-full flex flex-col bg-secondary text-primary select-none text-[11px]">
-      {/* Table Container without extra duplicate header */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-x-auto overflow-y-auto scrollbar-none relative"
+        className="flex-1 overflow-x-auto overflow-y-auto relative"
       >
-        <table className="w-full text-left whitespace-nowrap border-collapse">
-          <thead className="text-secondary border-b border-color sticky top-0 bg-secondary z-10 text-[11px] font-medium">
-            <tr>
-              <th className="px-2.5 py-1.5 font-medium">Time</th>
-              <th className="px-2.5 py-1.5 font-medium">Type</th>
-              <th className="px-2.5 py-1.5 font-medium">Symbol</th>
-              <th className="px-2.5 py-1.5 font-medium">Side</th>
-              <th className="px-2.5 py-1.5 font-medium">Filled / Order price</th>
-              <th className="px-2.5 py-1.5 font-medium">Filled / Total amount</th>
-              <th className="px-2.5 py-1.5 font-medium">Filled / Total value</th>
-              <th className="px-2.5 py-1.5 font-medium">Trigger price</th>
-              <th className="px-2.5 py-1.5 font-medium">Reduce only</th>
-              <th className="px-2.5 py-1.5 font-medium">Explorer</th>
-              <th className="px-2.5 py-1.5 font-medium">Status / Order ID</th>
-              <th className="px-2.5 py-1.5 font-medium text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-color text-[11px]">
-            {filteredOrders.map(o => {
-              const symInfo = parseSymbol(o.symbol);
-              const isBuy = (o.side || '').toUpperCase() === 'BUY';
-              const avgPriceNum = parseFloat(o.avgPrice || '0');
-              const orderPriceNum = parseFloat(o.price || '0');
-              const isMarket = (o.type || o.origType || '').toUpperCase() === 'MARKET';
+        <div className="md:hidden space-y-2 p-2">
+          {filteredOrders.map(o => {
+            const symInfo = parseSymbol(o.symbol);
+            const isBuy = (o.side || '').toUpperCase() === 'BUY';
+            const avgPriceNum = parseFloat(o.avgPrice || '0');
+            const orderPriceNum = parseFloat(o.price || '0');
+            const isMarket = (o.type || o.origType || '').toUpperCase() === 'MARKET';
+            const execQtyNum = parseFloat(o.executedQty || '0');
+            const origQtyNum = parseFloat(o.origQty || '0');
+            const filledValueNum =
+              parseFloat(o.cumQuote || '0') || (avgPriceNum > 0 ? execQtyNum * avgPriceNum : 0);
+            const totalValueNum =
+              origQtyNum * (avgPriceNum > 0 ? avgPriceNum : orderPriceNum > 0 ? orderPriceNum : 0);
+            const dateInfo = formatSplitDate(o.updateTime || o.time || 0);
+            const typeInfo = formatSplitType(o.type || o.origType);
+            const explorerLink = o.newChainData?.hash
+              ? `${asterExplorerBase}/tx/${o.newChainData.hash}`
+              : userAddr
+                ? `${asterExplorerBase}/address/${userAddr}`
+                : null;
 
-              const execQtyNum = parseFloat(o.executedQty || '0');
-              const origQtyNum = parseFloat(o.origQty || '0');
+            return (
+              <div
+                key={o.orderId || o.clientOrderId}
+                className="bg-card/40 border border-white/[0.04] rounded-lg p-3 space-y-2 text-[11px]"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-primary">{symInfo.display}</span>
+                    <span
+                      className={`font-semibold px-1.5 py-0.5 rounded text-[10px] ${
+                        isBuy ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'
+                      }`}
+                    >
+                      {isBuy ? 'Buy' : 'Sell'}
+                    </span>
+                    <span className="text-secondary text-[10px]">{typeInfo.line1}</span>
+                  </div>
+                  <span className="text-muted text-[10px]">
+                    {dateInfo.date} {dateInfo.time}
+                  </span>
+                </div>
 
-              const filledValueNum =
-                parseFloat(o.cumQuote || '0') || (avgPriceNum > 0 ? execQtyNum * avgPriceNum : 0);
-              const totalValueNum =
-                origQtyNum *
-                (avgPriceNum > 0 ? avgPriceNum : orderPriceNum > 0 ? orderPriceNum : 0);
-
-              const triggerPriceNum = parseFloat(o.stopPrice || '0');
-
-              // Aster DEX Explorer URL
-              const explorerLink = o.newChainData?.hash
-                ? `${asterExplorerBase}/tx/${o.newChainData.hash}`
-                : userAddr
-                  ? `${asterExplorerBase}/address/${userAddr}`
-                  : null;
-
-              const orderIdStr = String(o.orderId || '');
-              const shortOrderId =
-                orderIdStr.length > 8
-                  ? `${orderIdStr.slice(0, 3)}...${orderIdStr.slice(-3)}`
-                  : orderIdStr;
-
-              const dateInfo = formatSplitDate(o.updateTime || o.time || 0);
-              const typeInfo = formatSplitType(o.type || o.origType);
-
-              return (
-                <tr
-                  key={o.orderId || o.clientOrderId}
-                  className="border-b border-color hover:bg-hover transition-colors"
-                >
-                  {/* Time (2 rows: Date on line 1, Time on line 2) */}
-                  <td className="px-2.5 py-2">
-                    <div className="flex flex-col gap-0.5 font-mono-tabular">
-                      <span className="text-secondary text-[11px] leading-tight">
-                        {dateInfo.date}
+                <div className="grid grid-cols-2 gap-2 py-1.5 border-y border-white/[0.04] text-[10px]">
+                  <div>
+                    <span className="text-secondary block">Price</span>
+                    <span className="text-primary font-mono-tabular">
+                      {avgPriceNum > 0 ? formatNum(avgPriceNum, 2, 4) : '--'}
+                      <span className="text-muted ml-1">
+                        / {isMarket ? 'Mkt' : formatNum(orderPriceNum, 2, 4)}
                       </span>
-                      <span className="text-muted text-[10px] leading-tight">{dateInfo.time}</span>
-                    </div>
-                  </td>
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-secondary block">Amount</span>
+                    <span className="text-primary font-mono-tabular">
+                      {formatNum(execQtyNum, 2, 4)} / {formatNum(origQtyNum, 2, 4)} {symInfo.base}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-secondary block">Value</span>
+                    <span className="text-primary font-mono-tabular">
+                      {formatNum(filledValueNum, 2, 2)} / {formatNum(totalValueNum, 2, 2)}{' '}
+                      {symInfo.quote}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-secondary block">Status</span>
+                    <span className="text-primary font-medium">{formatStatus(o.status)}</span>
+                  </div>
+                </div>
 
-                  {/* Type (2 rows if Stop Market) */}
-                  <td className="px-2.5 py-2">
-                    <div className="flex flex-col gap-0.5 font-medium">
-                      <span className="text-primary text-[11px] leading-tight">
-                        {typeInfo.line1}
-                      </span>
-                      {typeInfo.line2 && (
-                        <span className="text-primary text-[11px] leading-tight">
-                          {typeInfo.line2}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Symbol */}
-                  <td className="px-2.5 py-2 text-primary font-medium">{symInfo.display}</td>
-
-                  {/* Side */}
-                  <td
-                    className={`px-2.5 py-2 font-medium ${isBuy ? 'text-success' : 'text-danger'}`}
-                  >
-                    {isBuy ? 'Buy' : 'Sell'}
-                  </td>
-
-                  {/* Filled / Order price (2 clean lines with no overlap) */}
-                  <td className="px-2.5 py-2 font-mono-tabular">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-primary text-[11px] leading-tight">
-                        {avgPriceNum > 0 ? formatNum(avgPriceNum, 2, 4) : '--'}
-                      </span>
-                      <span className="text-muted text-[10px] leading-tight">
-                        {isMarket ? 'Market' : formatNum(orderPriceNum, 2, 4)}
-                      </span>
-                    </div>
-                  </td>
-
-                  {/* Filled / Total amount (2 clean lines) */}
-                  <td className="px-2.5 py-2 font-mono-tabular">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-primary text-[11px] leading-tight">
-                        {formatNum(execQtyNum, 2, 4)} {symInfo.base}
-                      </span>
-                      <span className="text-muted text-[10px] leading-tight">
-                        {formatNum(origQtyNum, 2, 4)} {symInfo.base}
-                      </span>
-                    </div>
-                  </td>
-
-                  {/* Filled / Total value (2 clean lines) */}
-                  <td className="px-2.5 py-2 font-mono-tabular">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-primary text-[11px] leading-tight">
-                        {formatNum(filledValueNum, 2, 2)} {symInfo.quote}
-                      </span>
-                      <span className="text-muted text-[10px] leading-tight">
-                        {formatNum(totalValueNum, 2, 2)} {symInfo.quote}
-                      </span>
-                    </div>
-                  </td>
-
-                  {/* Trigger price (2 rows if trigger active) */}
-                  <td className="px-2.5 py-2 font-mono-tabular">
-                    {triggerPriceNum > 0 ? (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-muted text-[10px] leading-tight">Last price</span>
-                        <span className="text-primary text-[11px] leading-tight">
-                          {`>= ${formatNum(triggerPriceNum, 2, 2)}`}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-muted">--</span>
-                    )}
-                  </td>
-
-                  {/* Reduce only */}
-                  <td className="px-2.5 py-2 text-primary">{o.reduceOnly ? 'Yes' : 'No'}</td>
-
-                  {/* Explorer (Aster DEX Explorer) */}
-                  <td className="px-2.5 py-2">
-                    {explorerLink ? (
+                <div className="flex items-center justify-between pt-0.5">
+                  <div className="flex items-center gap-2">
+                    {explorerLink && (
                       <a
                         href={explorerLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-brand hover:underline inline-flex items-center gap-1 transition-colors"
+                        className="text-brand hover:underline inline-flex items-center gap-1 text-[10px]"
                       >
-                        <span>View Explorer</span>
+                        <span>Explorer</span>
                         <ExternalLink size={10} />
                       </a>
-                    ) : (
-                      <span className="text-muted">--</span>
                     )}
-                  </td>
+                  </div>
+                  <button
+                    onClick={() => setActiveDetailsOrder(o)}
+                    className="px-2.5 py-0.5 rounded border border-white/[0.08] text-secondary hover:text-primary hover:border-brand bg-tertiary transition-colors text-[10px]"
+                  >
+                    Details
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-                  {/* Status / Order ID (2 clean lines) */}
-                  <td className="px-2.5 py-2">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-primary font-medium text-[11px] leading-tight">
-                        {formatStatus(o.status)}
-                      </span>
-                      <div className="flex items-center gap-1 text-muted text-[10px] font-mono-tabular leading-tight">
-                        <span>{shortOrderId}</span>
-                        <button
-                          onClick={() => copyToClipboard(orderIdStr, orderIdStr)}
-                          title="Copy full Order ID"
-                          className="hover:text-primary transition-colors p-0.5"
-                        >
-                          {copiedId === orderIdStr ? (
-                            <Check size={11} className="text-success" />
-                          ) : (
-                            <Copy size={11} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Action */}
-                  <td className="px-2.5 py-2 text-right">
-                    <button
-                      onClick={() => setActiveDetailsOrder(o)}
-                      className="px-2.5 py-0.5 rounded border border-color text-secondary hover:text-primary hover:border-brand bg-tertiary transition-colors text-[10px]"
-                    >
-                      Details
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-
-            {isLoadingMore && (
+        <div className="hidden md:block">
+          <table className="w-full text-left whitespace-nowrap border-collapse">
+            <thead className="text-secondary border-b border-white/[0.04] sticky top-0 bg-secondary z-10 text-[11px] font-medium">
               <tr>
-                <td colSpan={12} className="px-4 py-1.5 text-center text-muted text-[10px]">
-                  Loading more orders...
-                </td>
+                <th className="px-2.5 py-1.5 font-medium">Time</th>
+                <th className="px-2.5 py-1.5 font-medium">Type</th>
+                <th className="px-2.5 py-1.5 font-medium">Symbol</th>
+                <th className="px-2.5 py-1.5 font-medium">Side</th>
+                <th className="px-2.5 py-1.5 font-medium">Filled / Order price</th>
+                <th className="px-2.5 py-1.5 font-medium">Filled / Total amount</th>
+                <th className="px-2.5 py-1.5 font-medium">Filled / Total value</th>
+                <th className="px-2.5 py-1.5 font-medium">Trigger price</th>
+                <th className="px-2.5 py-1.5 font-medium">Reduce only</th>
+                <th className="px-2.5 py-1.5 font-medium">Explorer</th>
+                <th className="px-2.5 py-1.5 font-medium">Status / Order ID</th>
+                <th className="px-2.5 py-1.5 font-medium text-right">Action</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="text-[11px]">
+              {filteredOrders.map(o => {
+                const symInfo = parseSymbol(o.symbol);
+                const isBuy = (o.side || '').toUpperCase() === 'BUY';
+                const avgPriceNum = parseFloat(o.avgPrice || '0');
+                const orderPriceNum = parseFloat(o.price || '0');
+                const isMarket = (o.type || o.origType || '').toUpperCase() === 'MARKET';
+
+                const execQtyNum = parseFloat(o.executedQty || '0');
+                const origQtyNum = parseFloat(o.origQty || '0');
+
+                const filledValueNum =
+                  parseFloat(o.cumQuote || '0') || (avgPriceNum > 0 ? execQtyNum * avgPriceNum : 0);
+                const totalValueNum =
+                  origQtyNum *
+                  (avgPriceNum > 0 ? avgPriceNum : orderPriceNum > 0 ? orderPriceNum : 0);
+
+                const triggerPriceNum = parseFloat(o.stopPrice || '0');
+
+                const explorerLink = o.newChainData?.hash
+                  ? `${asterExplorerBase}/tx/${o.newChainData.hash}`
+                  : userAddr
+                    ? `${asterExplorerBase}/address/${userAddr}`
+                    : null;
+
+                const orderIdStr = String(o.orderId || '');
+                const shortOrderId =
+                  orderIdStr.length > 8
+                    ? `${orderIdStr.slice(0, 3)}...${orderIdStr.slice(-3)}`
+                    : orderIdStr;
+
+                const dateInfo = formatSplitDate(o.updateTime || o.time || 0);
+                const typeInfo = formatSplitType(o.type || o.origType);
+
+                return (
+                  <tr
+                    key={o.orderId || o.clientOrderId}
+                    className="border-b border-white/[0.03] hover:bg-hover/60 transition-colors"
+                  >
+                    <td className="px-2.5 py-2">
+                      <div className="flex flex-col gap-0.5 font-mono-tabular">
+                        <span className="text-secondary text-[11px] leading-tight">
+                          {dateInfo.date}
+                        </span>
+                        <span className="text-muted text-[10px] leading-tight">
+                          {dateInfo.time}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="px-2.5 py-2">
+                      <div className="flex flex-col gap-0.5 font-medium">
+                        <span className="text-primary text-[11px] leading-tight">
+                          {typeInfo.line1}
+                        </span>
+                        {typeInfo.line2 && (
+                          <span className="text-primary text-[11px] leading-tight">
+                            {typeInfo.line2}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="px-2.5 py-2 text-primary font-medium">{symInfo.display}</td>
+
+                    <td
+                      className={`px-2.5 py-2 font-medium ${isBuy ? 'text-success' : 'text-danger'}`}
+                    >
+                      {isBuy ? 'Buy' : 'Sell'}
+                    </td>
+
+                    <td className="px-2.5 py-2 font-mono-tabular">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-primary text-[11px] leading-tight">
+                          {avgPriceNum > 0 ? formatNum(avgPriceNum, 2, 4) : '--'}
+                        </span>
+                        <span className="text-muted text-[10px] leading-tight">
+                          {isMarket ? 'Market' : formatNum(orderPriceNum, 2, 4)}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="px-2.5 py-2 font-mono-tabular">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-primary text-[11px] leading-tight">
+                          {formatNum(execQtyNum, 2, 4)} {symInfo.base}
+                        </span>
+                        <span className="text-muted text-[10px] leading-tight">
+                          {formatNum(origQtyNum, 2, 4)} {symInfo.base}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="px-2.5 py-2 font-mono-tabular">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-primary text-[11px] leading-tight">
+                          {formatNum(filledValueNum, 2, 2)} {symInfo.quote}
+                        </span>
+                        <span className="text-muted text-[10px] leading-tight">
+                          {formatNum(totalValueNum, 2, 2)} {symInfo.quote}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="px-2.5 py-2 font-mono-tabular">
+                      {triggerPriceNum > 0 ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-muted text-[10px] leading-tight">Last price</span>
+                          <span className="text-primary text-[11px] leading-tight">
+                            {`>= ${formatNum(triggerPriceNum, 2, 2)}`}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-muted">--</span>
+                      )}
+                    </td>
+
+                    <td className="px-2.5 py-2 text-primary">{o.reduceOnly ? 'Yes' : 'No'}</td>
+
+                    <td className="px-2.5 py-2">
+                      {explorerLink ? (
+                        <a
+                          href={explorerLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-brand hover:underline inline-flex items-center gap-1 transition-colors"
+                        >
+                          <span>View Explorer</span>
+                          <ExternalLink size={10} />
+                        </a>
+                      ) : (
+                        <span className="text-muted">--</span>
+                      )}
+                    </td>
+
+                    <td className="px-2.5 py-2">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-primary font-medium text-[11px] leading-tight">
+                          {formatStatus(o.status)}
+                        </span>
+                        <div className="flex items-center gap-1 text-muted text-[10px] font-mono-tabular leading-tight">
+                          <span>{shortOrderId}</span>
+                          <button
+                            onClick={() => copyToClipboard(orderIdStr, orderIdStr)}
+                            title="Copy full Order ID"
+                            className="hover:text-primary transition-colors p-0.5"
+                          >
+                            {copiedId === orderIdStr ? (
+                              <Check size={11} className="text-success" />
+                            ) : (
+                              <Copy size={11} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="px-2.5 py-2 text-right">
+                      <button
+                        onClick={() => setActiveDetailsOrder(o)}
+                        className="px-2.5 py-0.5 rounded border border-white/[0.08] text-secondary hover:text-primary hover:border-brand bg-tertiary transition-colors text-[10px]"
+                      >
+                        Details
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {isLoadingMore && (
+          <div className="py-2.5 text-center text-muted text-[10px] flex items-center justify-center gap-1.5">
+            <div className="w-3.5 h-3.5 border border-brand border-t-transparent rounded-full animate-spin" />
+            <span>Loading more orders...</span>
+          </div>
+        )}
+      </div>
+
+      <div className="px-3 py-2 flex items-center justify-between text-[11px] text-secondary shrink-0 bg-secondary">
+        <span className="text-muted text-[10px]">Showing {filteredOrders.length} records</span>
+        <a
+          href={userAddr ? `${asterExplorerBase}/address/${userAddr}` : asterExplorerBase}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-brand hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
+        >
+          <span>Export more historical data</span>
+          <ExternalLink size={11} />
+        </a>
       </div>
 
       {/* Order Details Modal */}
       {activeDetailsOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-secondary border border-color rounded-lg shadow-2xl p-5 relative text-primary">
-            <div className="flex items-center justify-between pb-3 mb-4 border-b border-color">
+          <div className="w-full max-w-md bg-secondary border border-white/[0.08] rounded-lg shadow-2xl p-5 relative text-primary">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/[0.08]">
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-sm">Order Details</span>
                 <span
@@ -426,14 +529,14 @@ export const OrderHistoryTab: React.FC<Props> = ({
             </div>
 
             <div className="space-y-2.5 text-[11px]">
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Symbol</span>
                 <span className="font-medium font-mono-tabular">
                   {parseSymbol(activeDetailsOrder.symbol).display}
                 </span>
               </div>
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Order ID</span>
                 <div className="flex items-center gap-1.5 font-mono-tabular">
                   <span>{activeDetailsOrder.orderId}</span>
@@ -456,7 +559,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
               </div>
 
               {activeDetailsOrder.clientOrderId && (
-                <div className="flex justify-between py-1 border-b border-color">
+                <div className="flex justify-between py-1 border-b border-white/[0.04]">
                   <span className="text-secondary">Client Order ID</span>
                   <span className="font-mono-tabular text-secondary truncate max-w-[200px]">
                     {activeDetailsOrder.clientOrderId}
@@ -464,19 +567,19 @@ export const OrderHistoryTab: React.FC<Props> = ({
                 </div>
               )}
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Type</span>
                 <span>
                   {formatSplitType(activeDetailsOrder.type || activeDetailsOrder.origType).line1}
                 </span>
               </div>
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Status</span>
                 <span className="font-medium">{formatStatus(activeDetailsOrder.status)}</span>
               </div>
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Order Price</span>
                 <span className="font-mono-tabular">
                   {formatSplitType(activeDetailsOrder.type).line1 === 'Market'
@@ -485,14 +588,14 @@ export const OrderHistoryTab: React.FC<Props> = ({
                 </span>
               </div>
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Avg Executed Price</span>
                 <span className="font-mono-tabular">
                   {formatNum(activeDetailsOrder.avgPrice, 2, 4)}
                 </span>
               </div>
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Executed / Total Qty</span>
                 <span className="font-mono-tabular">
                   {formatNum(activeDetailsOrder.executedQty, 2, 4)} /{' '}
@@ -501,7 +604,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
                 </span>
               </div>
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Executed Value</span>
                 <span className="font-mono-tabular">
                   {formatNum(activeDetailsOrder.cumQuote, 2, 2)}{' '}
@@ -509,7 +612,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
                 </span>
               </div>
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Time</span>
                 <span className="text-secondary">
                   {
@@ -523,13 +626,13 @@ export const OrderHistoryTab: React.FC<Props> = ({
                 </span>
               </div>
 
-              <div className="flex justify-between py-1 border-b border-color">
+              <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Reduce Only</span>
                 <span>{activeDetailsOrder.reduceOnly ? 'Yes' : 'No'}</span>
               </div>
 
               {activeDetailsOrder.newChainData?.hash && (
-                <div className="flex justify-between py-1 border-b border-color">
+                <div className="flex justify-between py-1 border-b border-white/[0.04]">
                   <span className="text-secondary">Transaction Hash</span>
                   <a
                     href={`${asterExplorerBase}/tx/${activeDetailsOrder.newChainData.hash}`}
@@ -550,7 +653,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
             <div className="mt-5 flex justify-end">
               <button
                 onClick={() => setActiveDetailsOrder(null)}
-                className="px-4 py-1.5 bg-tertiary hover:bg-hover text-primary border border-color rounded transition-colors text-xs font-medium"
+                className="px-4 py-1.5 bg-tertiary hover:bg-hover text-primary border border-white/[0.08] rounded transition-colors text-xs font-medium"
               >
                 Close
               </button>
