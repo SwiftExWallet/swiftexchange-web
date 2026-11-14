@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import type { Wallet } from 'ethers';
 import { create } from 'zustand';
