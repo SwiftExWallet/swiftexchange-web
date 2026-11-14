@@ -205,6 +205,11 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
   const lastRestoredKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (currentExchange !== 'hyperliquid') {
+      lastRestoredKeyRef.current = null;
+      return;
+    }
+
     const key = `${userAddr}_${network}_${currentExchange}`;
     if (userAddr) {
       if (lastRestoredKeyRef.current !== key) {

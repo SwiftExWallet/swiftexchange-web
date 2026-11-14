@@ -307,7 +307,7 @@ export function useAsterAgent(): UseAsterAgentResult {
 
   useEffect(() => {
     setTimeRemaining(formatRemainingTime(sessionExpiry));
-    if (!sessionExpiry) return;
+    if (!sessionExpiry || currentExchange !== 'aster') return;
 
     const interval = setInterval(() => {
       const formatted = formatRemainingTime(sessionExpiry);
@@ -318,11 +318,16 @@ export function useAsterAgent(): UseAsterAgentResult {
     }, 60000);
 
     return () => clearInterval(interval);
-  }, [sessionExpiry, restoreKey]);
+  }, [sessionExpiry, currentExchange, restoreKey]);
 
   const lastRestoredKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (currentExchange !== 'aster') {
+      lastRestoredKeyRef.current = null;
+      return;
+    }
+
     const key = `${userAddr}_${network}_${currentExchange}`;
     if (userAddr) {
       if (lastRestoredKeyRef.current !== key) {

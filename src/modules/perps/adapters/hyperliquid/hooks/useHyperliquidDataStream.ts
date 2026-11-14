@@ -89,28 +89,32 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
           if (marginSummary) {
             const accountValue = String(marginSummary.accountValue || '0');
             const totalMarginUsed = String(marginSummary.totalMarginUsed || '0');
+            const totalRawUsd = String(marginSummary.totalRawUsd || accountValue);
             const withdrawable = String(
               marginSummary.withdrawable !== undefined && marginSummary.withdrawable !== null
                 ? marginSummary.withdrawable
                 : Math.max(0, parseFloat(accountValue) - parseFloat(totalMarginUsed)).toFixed(2)
             );
+            const unrealizedPnl = (parseFloat(accountValue) - parseFloat(totalRawUsd)).toFixed(2);
 
-            useAccountStore.getState().setBalances([
+            useAccountStore.getState().setBalances(
+              [
+                {
+                  asset: 'USDC',
+                  total: accountValue,
+                  available: withdrawable,
+                  locked: totalMarginUsed,
+                  marginBalance: accountValue,
+                  unrealizedPnl,
+                },
+              ],
               {
-                asset: 'USDC',
-                total: accountValue,
-                available: withdrawable,
-                locked: totalMarginUsed,
-                marginBalance: accountValue,
-              },
-              {
-                asset: 'USD',
-                total: accountValue,
-                available: withdrawable,
-                locked: totalMarginUsed,
-                marginBalance: accountValue,
-              },
-            ]);
+                totalWalletBalance: totalRawUsd,
+                totalMarginBalance: accountValue,
+                availableBalance: withdrawable,
+                totalUnrealizedProfit: unrealizedPnl,
+              }
+            );
           }
 
           const tickerState = useTickerStore.getState().assetCtxByMarket;

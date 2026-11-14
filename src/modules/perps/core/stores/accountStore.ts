@@ -90,7 +90,13 @@ export const useAccountStore = create<AccountStoreState>()(
               : {}),
           };
         }),
-      getBalance: asset => get().balances[asset],
+      getBalance: asset => {
+        const balances = get().balances;
+        if (balances[asset]) return balances[asset];
+        if (asset === 'USD') return balances['USDC'];
+        if (asset === 'USDC') return balances['USD'];
+        return undefined;
+      },
       clear: () =>
         set({
           balances: {},

@@ -103,8 +103,16 @@ export const OrderHistoryTab: React.FC<Props> = ({
 
   const querySymbol = hideOtherSymbols ? asterSymbol : null;
 
-  const asterHook = useAsterOrderHistory(signer, userAddr, querySymbol, timeRange);
-  const hlHook = useHyperliquidOrderHistory(userAddr, querySymbol);
+  const asterHook = useAsterOrderHistory(
+    currentExchange === 'aster' ? signer : null,
+    currentExchange === 'aster' ? userAddr : null,
+    querySymbol,
+    timeRange
+  );
+  const hlHook = useHyperliquidOrderHistory(
+    currentExchange === 'hyperliquid' ? userAddr : null,
+    querySymbol
+  );
 
   const { orders, isLoading, isLoadingMore, hasMore, loadMore } =
     currentExchange === 'hyperliquid' ? hlHook : asterHook;

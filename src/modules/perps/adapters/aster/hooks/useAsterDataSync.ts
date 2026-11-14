@@ -255,7 +255,8 @@ export function useAsterDataSync(signer: Signer | IAsterSigner | null, userAddr:
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const currentNetwork = useExchangeManager(s => s.currentNetwork);
   const [isRestSynced, setIsRestSynced] = useState(false);
-  const { connected } = useUserDataStream(signer, userAddr);
+  const isAster = currentExchange === 'aster';
+  const { connected } = useUserDataStream(isAster ? signer : null, isAster ? userAddr : null);
 
   const initializedKeyRef = useRef<string | null>(null);
 

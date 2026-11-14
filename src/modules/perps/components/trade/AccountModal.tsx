@@ -377,14 +377,13 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
   useEffect(() => {
     if (currentExchange === 'hyperliquid') {
-      setSelectedChainId(42161);
-      // Hyperliquid only supports USDC natively right now via bridge
+      setSelectedChainId(currentNetwork === 'testnet' ? 421614 : 42161);
       if (activeTab === 'deposit' && selectedDepositAsset?.name !== 'USDC') {
         const usdcAsset = depositAssets.find(a => a.name === 'USDC');
         if (usdcAsset) setSelectedDepositAsset(usdcAsset);
       }
     }
-  }, [currentExchange, activeTab, depositAssets, selectedDepositAsset]);
+  }, [currentExchange, currentNetwork, activeTab, depositAssets, selectedDepositAsset]);
 
   // Withdraw State
   const [withdrawAssets, setWithdrawAssets] = useState<WithdrawAsset[]>([]);
@@ -645,11 +644,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     try {
       if (currentExchange === 'hyperliquid') {
         // HYPERLIQUID NATIVE DEPOSIT FLOW
-        if (selectedChainId !== 42161) {
+        const targetChainId = currentNetwork === 'testnet' ? 421614 : 42161;
+        if (selectedChainId !== targetChainId) {
           updateActiveTx({
-            message: 'Please switch to Arbitrum One in your wallet...',
+            message: `Please switch to ${currentNetwork === 'testnet' ? 'Arbitrum Sepolia' : 'Arbitrum One'} in your wallet...`,
           });
-          await switchOrAddChain(provider, 42161);
+          await switchOrAddChain(provider, targetChainId);
         }
 
         const res = await depositToHyperliquid(provider, depositAmount, progress => {

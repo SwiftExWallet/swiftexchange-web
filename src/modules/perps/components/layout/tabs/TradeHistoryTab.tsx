@@ -86,8 +86,16 @@ export const TradeHistoryTab: React.FC<Props> = ({
 
   const querySymbol = hideOtherSymbols ? asterSymbol : null;
 
-  const asterHook = useAsterTradeHistory(signer, userAddr, querySymbol, timeRange);
-  const hlHook = useHyperliquidTradeHistory(userAddr, querySymbol);
+  const asterHook = useAsterTradeHistory(
+    currentExchange === 'aster' ? signer : null,
+    currentExchange === 'aster' ? userAddr : null,
+    querySymbol,
+    timeRange
+  );
+  const hlHook = useHyperliquidTradeHistory(
+    currentExchange === 'hyperliquid' ? userAddr : null,
+    querySymbol
+  );
 
   const { trades, isLoading, isLoadingMore, hasMore, loadMore } =
     currentExchange === 'hyperliquid' ? hlHook : asterHook;

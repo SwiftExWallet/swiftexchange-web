@@ -76,8 +76,11 @@ export const ExchangeOrderFormPanel: React.FC = () => {
   const { userAddr } = activeAgent;
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
 
-  useAsterDataSync(asterAgent.isReady ? asterAgent.asterSigner : null, asterAgent.userAddr);
-  useHyperliquidDataStream(hyperliquidAgent.userAddr);
+  useAsterDataSync(
+    currentExchange === 'aster' && asterAgent.isReady ? asterAgent.asterSigner : null,
+    currentExchange === 'aster' ? asterAgent.userAddr : null
+  );
+  useHyperliquidDataStream(currentExchange === 'hyperliquid' ? hyperliquidAgent.userAddr : null);
 
   const { executeOrder } = useUnifiedExecution();
   const { placeChase, placeBatch } = useOrders(asterAgent.asterSigner, userAddr);
@@ -419,7 +422,13 @@ export const ExchangeAccountPanel: React.FC = () => {
     ? multiAssetsMargin && storeMarginBalance && parseFloat(storeMarginBalance) > 0
       ? parseFloat(storeMarginBalance)
       : parseFloat(balances['USDT']?.total || balances['USDT']?.marginBalance || '0') + totalPnl
-    : parseFloat(balances['USDC']?.total || balances['USD']?.total || '0') + totalPnl;
+    : parseFloat(
+        balances['USDC']?.marginBalance ||
+          balances['USDC']?.total ||
+          balances['USD']?.marginBalance ||
+          balances['USD']?.total ||
+          '0'
+      );
 
   const marginCurrency = isAster ? (multiAssetsMargin ? 'USD' : 'USDT') : 'USDC';
 

@@ -50,6 +50,12 @@ export function useDynamicExchange() {
 
       resetPerpStores();
 
+      if (activeExchangeClient) {
+        await activeExchangeClient.disconnect();
+        activeExchangeClient = null;
+        activeExchangeKey = '';
+      }
+
       if (clientRef.current) {
         await clientRef.current.disconnect();
         clientRef.current = null;
@@ -168,7 +174,9 @@ export function useDynamicExchange() {
 
     return () => {
       cancelled = true;
-      clientRef.current?.disconnect();
+      if (clientRef.current && clientRef.current !== activeExchangeClient) {
+        clientRef.current.disconnect();
+      }
       clientRef.current = null;
       setActiveClient(null);
       useExchangeManager.getState().setIsSwitching(false);

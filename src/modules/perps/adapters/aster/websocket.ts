@@ -212,9 +212,11 @@ export class AsterWebSocket {
     });
   }
 
-  public disconnect(): void {
-    this.refCount--;
-    if (this.refCount > 0) return; // Only close if no one is using it
+  public disconnect(force: boolean = false): void {
+    if (!force) {
+      this.refCount--;
+      if (this.refCount > 0) return;
+    }
     this.refCount = 0;
 
     this.intentionalClose = true;
