@@ -282,7 +282,7 @@ export const OpenOrdersTab: React.FC<Props> = ({ hideOtherSymbols, currentSymbol
                 <div>
                   {o.hash && (
                     <a
-                      href={`${explorerBase}${o.hash}`}
+                      href={getPerpExplorerTxUrl(currentExchange, currentNetwork, o.hash, userAddr)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-brand hover:underline inline-flex items-center gap-1 text-[10px]"

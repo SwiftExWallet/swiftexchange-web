@@ -132,4 +132,8 @@ export interface AsterUserTrade {
   positionSide: string;
   symbol: string;
   time: number;
+  newChainData?: {
+    hash?: string;
+  };
+  hash?: string;
 }
