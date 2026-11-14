@@ -63,7 +63,10 @@ export const useHyperliquidOrderHistory = (userAddr: string | null, symbol: stri
 
         let filtered = data;
         if (symbol) {
-          filtered = data.filter(o => o.symbol === symbol);
+          const cleanTarget = symbol.replace('-', '').toUpperCase();
+          filtered = data.filter(
+            o => (o.symbol || '').replace('-', '').toUpperCase() === cleanTarget
+          );
         }
 
         if (isMounted) {

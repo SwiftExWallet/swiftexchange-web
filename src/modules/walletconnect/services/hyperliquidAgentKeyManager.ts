@@ -9,7 +9,6 @@ import { signerIframeBridge } from './signerIframeBridge';
 
 const BLOB_KEY_PREFIX = '_sx_hl_agentkey';
 const ADDR_KEY_PREFIX = '_sx_hl_agentaddr';
-const AGENT_NAME = 'SwiftExDesktop';
 
 export class HyperliquidIsolatedSigner {
   readonly address: string;
@@ -85,16 +84,71 @@ export async function deriveHyperliquidAgentKey(
   const transport = new HttpTransport({ isTestnet: activeTestnet });
 
   try {
+    const roleInfo: any = await transport.request('info', {
+      type: 'userRole',
+      user: agentAddress as `0x${string}`,
+    });
+    if (
+      roleInfo?.role === 'agent' &&
+      roleInfo?.data?.user?.toLowerCase() === evmAddress.toLowerCase()
+    ) {
+      localStorage.setItem(getAddrKey(activeTestnet), agentAddress);
+      cleanupLegacyStorage(activeTestnet);
+      return {
+        agentAddress,
+        wallet: new HyperliquidIsolatedSigner(agentAddress),
+      };
+    }
+  } catch {
+    void 0;
+  }
+
+  try {
     await approveAgent(
       { transport, wallet: signer },
-      { agentAddress: agentAddress as `0x${string}`, agentName: AGENT_NAME }
+      { agentAddress: agentAddress as `0x${string}`, agentName: '' }
     );
   } catch (error: any) {
     console.error('[hyperliquid] approveAgent failed:', error);
     const msg = error?.message || '';
+
+    if (msg.includes('Extra agent already used') || msg.includes('already used')) {
+      try {
+        const roleInfo: any = await transport.request('info', {
+          type: 'userRole',
+          user: agentAddress as `0x${string}`,
+        });
+        if (
+          roleInfo?.role === 'agent' &&
+          roleInfo?.data?.user?.toLowerCase() === evmAddress.toLowerCase()
+        ) {
+          localStorage.setItem(getAddrKey(activeTestnet), agentAddress);
+          cleanupLegacyStorage(activeTestnet);
+          return {
+            agentAddress,
+            wallet: new HyperliquidIsolatedSigner(agentAddress),
+          };
+        }
+      } catch {
+        void 0;
+      }
+
+      await signerIframeBridge.revokeKey().catch(() => {});
+      throw new Error(
+        'Agent slot was already used on Hyperliquid. Key vault has been refreshed. Please click again to activate with a fresh key.'
+      );
+    }
+
     if (msg.includes('Must deposit')) {
       throw new Error('Must deposit funds into Hyperliquid before approving a trading agent.');
     }
+
+    if (error?.code === 4001 || msg.includes('rejected') || msg.includes('denied')) {
+      throw new Error(
+        'Signature was rejected in your wallet. Please approve the signature to activate trading.'
+      );
+    }
+
     throw new Error(
       msg || 'Failed to approve Hyperliquid agent key. Please check your wallet signature.'
     );

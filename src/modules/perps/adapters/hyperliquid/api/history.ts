@@ -15,29 +15,33 @@ export const getHyperliquidOpenOrders = async (userAddr: string): Promise<AsterO
   try {
     const transport = getTransport();
     const data = await openOrders({ transport }, { user: userAddr as `0x${string}` });
-    return data.map((o: any) => ({
-      orderId: o.oid,
-      symbol: o.coin,
-      status: 'NEW',
-      clientOrderId: '',
-      price: o.limitPx,
-      avgPrice: '0',
-      origQty: o.sz,
-      executedQty: '0',
-      cumQty: '0',
-      cumQuote: '0',
-      timeInForce: 'GTC' as any,
-      type: 'LIMIT',
-      origType: 'LIMIT',
-      side: o.side === 'A' ? 'SELL' : 'BUY',
-      positionSide: 'BOTH',
-      stopPrice: '0',
-      closePosition: o.reduceOnly || false,
-      updateTime: o.timestamp || Date.now(),
-      workingType: 'CONTRACT_PRICE' as any,
-      priceProtect: false,
-      reduceOnly: o.reduceOnly || false,
-    }));
+    return data.map((o: any) => {
+      const coin = o.coin || '';
+      const symbol = coin.includes('-') ? coin : `${coin}-USDC`;
+      return {
+        orderId: o.oid,
+        symbol,
+        status: 'NEW',
+        clientOrderId: '',
+        price: o.limitPx,
+        avgPrice: '0',
+        origQty: o.sz,
+        executedQty: '0',
+        cumQty: '0',
+        cumQuote: '0',
+        timeInForce: 'GTC' as any,
+        type: 'LIMIT',
+        origType: 'LIMIT',
+        side: o.side === 'A' ? 'SELL' : 'BUY',
+        positionSide: 'BOTH',
+        stopPrice: '0',
+        closePosition: o.reduceOnly || false,
+        updateTime: o.timestamp || Date.now(),
+        workingType: 'CONTRACT_PRICE' as any,
+        priceProtect: false,
+        reduceOnly: o.reduceOnly || false,
+      };
+    });
   } catch (err) {
     console.error('getHyperliquidOpenOrders error', err);
     return [];
@@ -66,9 +70,12 @@ export const getHyperliquidHistoricalOrders = async (
       if (item.status === 'canceled' || item.status.includes('Canceled')) mappedStatus = 'CANCELED';
       if (item.status.includes('Rejected')) mappedStatus = 'REJECTED';
 
+      const coin = o.coin || '';
+      const symbol = coin.includes('-') ? coin : `${coin}-USDC`;
+
       return {
         orderId: o.oid,
-        symbol: o.coin,
+        symbol,
         status: mappedStatus as any,
         clientOrderId: '',
         price: o.limitPx,
@@ -127,11 +134,13 @@ export const getHyperliquidUserFills = async (
             ? `${f.hash}-${f.oid}`
             : `${f.oid}-${f.time}`;
       const quoteQty = new BigNumber(f.px || 0).times(f.sz || 0).toFixed();
+      const coin = f.coin || '';
+      const symbol = coin.includes('-') ? coin : `${coin}-USDC`;
 
       return {
         id: fillId,
         orderId: f.oid,
-        symbol: f.coin,
+        symbol,
         price: f.px,
         qty: f.sz,
         quoteQty,
@@ -141,7 +150,7 @@ export const getHyperliquidUserFills = async (
         time: f.time,
         buyer: f.side === 'B',
         maker: (f as any).maker || false,
-        side: f.side === 'B' ? 'BUY' : 'SELL', // Some UI components rely on 'side' existing in trade object
+        side: f.side === 'B' ? 'BUY' : 'SELL',
       } as unknown as AsterUserTrade;
     });
 

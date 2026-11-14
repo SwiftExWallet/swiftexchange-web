@@ -2,6 +2,8 @@ import { ChevronDown } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
+import { useHyperliquidAgent } from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
+import { useExchangeManager } from '../../core/ExchangeManager';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useOrderStore } from '../../core/stores/orderStore';
 import { usePositionStore } from '../../core/stores/positionStore';
@@ -55,18 +57,22 @@ export const ExchangePositionsPanel: React.FC = () => {
   const selectedSymbol = useMarketStore(state => state.selectedSymbol);
   const asterSymbol = selectedSymbol.replace('-', '');
 
-  const { asterSigner, userAddr } = useAsterAgent();
+  const { asterSigner, userAddr: asterUserAddr } = useAsterAgent();
+  const { hyperliquidSigner, userAddr: hlUserAddr } = useHyperliquidAgent();
+  const currentExchange = useExchangeManager(state => state.currentExchange);
+  const userAddr = currentExchange === 'hyperliquid' ? hlUserAddr : asterUserAddr;
+  const activeSigner = currentExchange === 'hyperliquid' ? hyperliquidSigner : asterSigner;
 
   const renderTabContent = () => {
     switch (activeTab) {
       case 'Assets':
         return <AssetsTab />;
       case 'Positions':
-        return <PositionsTab signer={asterSigner} userAddr={userAddr!} />;
+        return <PositionsTab signer={activeSigner} userAddr={userAddr!} />;
       case 'Open Orders':
         return (
           <OpenOrdersTab
-            signer={asterSigner}
+            signer={activeSigner}
             userAddr={userAddr!}
             hideOtherSymbols={hideOtherSymbols}
             currentSymbol={selectedSymbol}
@@ -75,7 +81,7 @@ export const ExchangePositionsPanel: React.FC = () => {
       case 'Order History':
         return (
           <OrderHistoryTab
-            signer={asterSigner}
+            signer={activeSigner}
             userAddr={userAddr!}
             asterSymbol={asterSymbol}
             timeRange={historyTimeRange}
@@ -86,7 +92,7 @@ export const ExchangePositionsPanel: React.FC = () => {
       case 'Trade History':
         return (
           <TradeHistoryTab
-            signer={asterSigner}
+            signer={activeSigner}
             userAddr={userAddr!}
             asterSymbol={asterSymbol}
             timeRange={historyTimeRange}
@@ -94,15 +100,7 @@ export const ExchangePositionsPanel: React.FC = () => {
           />
         );
       case 'Transaction History':
-        return (
-          <TransactionHistoryTab
-            signer={asterSigner}
-            userAddr={userAddr!}
-            timeRange={historyTimeRange}
-            hideOtherSymbols={hideOtherSymbols}
-            asterSymbol={asterSymbol}
-          />
-        );
+        return <TransactionHistoryTab signer={activeSigner} userAddr={userAddr!} />;
       default:
         return (
           <div className="flex-1 overflow-y-auto flex items-center justify-center h-full">

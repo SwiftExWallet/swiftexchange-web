@@ -42,6 +42,8 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
     (deriveError?.message?.includes('Signer') ||
       deriveError?.message?.includes('offline') ||
       deriveError?.message?.includes('Unavailable'));
+  const isAgentSlotError =
+    deriveState === 'error' && deriveError?.message?.includes('already used');
 
   if (!isEvmConnected) {
     return (
@@ -95,7 +97,9 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
                     : 'Deposit to Activate'
                   : isSignerOffline
                     ? 'Trading Engine Maintenance — Retry'
-                    : 'Signature Rejected — Try Again'}
+                    : isAgentSlotError
+                      ? 'Reconnecting Key Vault — Retry'
+                      : 'Signature Rejected — Try Again'}
               </span>
             </>
           ) : (
@@ -113,7 +117,9 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
               ? `Account requires initial deposit or faucet funds to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`
               : isSignerOffline
                 ? 'Secure trading engine is undergoing a brief update. Our team is actively working on it.'
-                : `One-time signature to activate gas-free execution on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`}
+                : isAgentSlotError
+                  ? 'Key vault has been refreshed with a clean agent key. Click to activate.'
+                  : `One-time signature to activate gas-free execution on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`}
         </p>
       </div>
     );

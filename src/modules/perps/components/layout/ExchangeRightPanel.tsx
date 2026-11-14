@@ -467,6 +467,19 @@ export const ExchangeAccountPanel: React.FC = () => {
           </a>
         )}
 
+        {currentNetwork === 'testnet' && !isAster && (
+          <a
+            href="https://app.hyperliquid-testnet.xyz"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <Sparkles size={12} className="text-cyan-400" />
+            <span>Claim Hyperliquid Testnet Faucet</span>
+            <ExternalLink size={10} className="opacity-70" />
+          </a>
+        )}
+
         {/* Account Equity Section */}
         <div className="space-y-1">
           <h4 className="text-[11px] font-medium text-primary mb-0.5">Account Equity</h4>
