@@ -146,7 +146,7 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
 
       const isTestnet = useWalletStore.getState().network === 'testnet';
       const result = await deriveHyperliquidAgentKey(userAddr, provider, isTestnet);
-      await encryptAndStoreAgentKey(result.wallet.privateKey, isTestnet);
+      await encryptAndStoreAgentKey(result.agentAddress, isTestnet);
 
       set({
         hyperliquidSigner: result.wallet,
