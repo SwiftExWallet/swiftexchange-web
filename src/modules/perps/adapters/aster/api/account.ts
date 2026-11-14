@@ -3,6 +3,7 @@ import { getAddress, isAddress } from 'ethers';
 
 import { asterHttpClient } from '../client/asterHttpClient';
 import {
+  ASTER_CHAIN_ID,
   ASTER_ENDPOINTS,
   getAsterBapiUrl,
   getAsterRestUrl,
@@ -25,6 +26,7 @@ import {
   generateMonotonicNonce,
   getSyncedServerTime,
   signedRequest,
+  throwIfApiError,
 } from './auth';
 
 export interface MigrateUserResult {
@@ -501,7 +503,7 @@ export async function getDepositWithdrawHistory(
 }
 
 export async function submitWithdraw(
-  signer: Signer,
+  userWalletSigner: Signer,
   userAddr: string,
   params: {
     chainId: number;
@@ -518,25 +520,46 @@ export async function submitWithdraw(
     throw new Error(`Invalid receiver address format: ${params.receiver}`);
   }
 
+  const checksummedUser = getAddress(userAddr);
   const checksummedReceiver = getAddress(params.receiver);
   const baseUrl = params.accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
+  const serverTime = await getSyncedServerTime(baseUrl);
 
-  return signedRequest(
-    signer,
-    userAddr,
-    'POST',
-    ASTER_ENDPOINTS.ASTER_USER_WITHDRAW,
-    {
-      chainId: String(params.chainId),
-      asset: params.asset,
-      amount: params.amount,
-      fee: params.fee,
-      receiver: checksummedReceiver,
-      userNonce: params.userNonce,
-      userSignature: params.userSignature,
-    },
-    baseUrl
+  const corePayload: Record<string, string> = {
+    user: checksummedUser,
+    signer: checksummedUser,
+    chainId: String(params.chainId),
+    asset: params.asset,
+    amount: params.amount,
+    fee: params.fee,
+    receiver: checksummedReceiver,
+    userNonce: params.userNonce,
+    nonce: params.userNonce,
+  };
+
+  const sortedCoreQs = buildSortedQueryString(corePayload);
+  const msgToSign = `${sortedCoreQs}&userSignature=${params.userSignature}`;
+
+  const requestTypedData = buildTypedData(msgToSign, ASTER_CHAIN_ID);
+  const requestSignature = await userWalletSigner.signTypedData(
+    requestTypedData.domain,
+    EIP712_TYPES,
+    requestTypedData.message
   );
+
+  const finalBody = `${msgToSign}&signature=${requestSignature}&timestamp=${serverTime}&recvWindow=5000`;
+
+  const data = await asterHttpClient.request<{ success: boolean; id?: string; msg?: string }>(
+    `${baseUrl}${ASTER_ENDPOINTS.ASTER_USER_WITHDRAW}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: finalBody,
+      weight: 5,
+    }
+  );
+  throwIfApiError(data);
+  return data;
 }
 
 export async function migrateUserAssets(

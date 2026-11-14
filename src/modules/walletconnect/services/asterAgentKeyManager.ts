@@ -384,7 +384,12 @@ export async function deriveAsterAgentKey(
     nonce,
     expired,
     chainId,
-    asterChain
+    asterChain,
+    {
+      canSpotTrade: true,
+      canPerpTrade: true,
+      canWithdraw: false,
+    }
   );
 
   const signature = await signTypedData(provider, evmAddress, typedData);

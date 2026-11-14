@@ -66,7 +66,7 @@ export class AsterApiError extends Error {
   }
 }
 
-function throwIfApiError(data: any): void {
+export function throwIfApiError(data: any): void {
   if (data && typeof data.code === 'number' && data.code < 0) {
     throw new AsterApiError(data as { code: number; msg: string });
   }

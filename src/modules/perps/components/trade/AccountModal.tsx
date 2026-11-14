@@ -467,30 +467,21 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       })
       .catch(console.error);
 
-    if (currentNetwork !== 'testnet' && userAddr) {
-      const provider = walletService.getProvider('evm');
-      if (provider) {
-        const ep = new ethers.BrowserProvider(provider as any);
-        ep.getSigner()
-          .then(userSigner => {
-            if (!alive) return;
-            setIsLoadingWithdrawInfo(true);
-            getUserWithdrawInfo(userSigner, userAddr, accountType)
-              .then(info => {
-                if (alive) setWithdrawInfo(info);
-              })
-              .catch(() => {})
-              .finally(() => {
-                if (alive) setIsLoadingWithdrawInfo(false);
-              });
-          })
-          .catch(() => {});
-      }
+    if (asterSigner && userAddr) {
+      setIsLoadingWithdrawInfo(true);
+      getUserWithdrawInfo(asterSigner, userAddr, accountType)
+        .then(info => {
+          if (alive) setWithdrawInfo(info);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (alive) setIsLoadingWithdrawInfo(false);
+        });
     }
     return () => {
       alive = false;
     };
-  }, [isOpen, activeTab, selectedChainId, accountType, currentNetwork, userAddr]);
+  }, [isOpen, activeTab, selectedChainId, accountType, currentNetwork, userAddr, asterSigner]);
 
   // Chain-specific withdraw details
   const chainWithdrawDetails = useMemo(

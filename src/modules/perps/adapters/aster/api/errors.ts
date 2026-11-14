@@ -111,6 +111,11 @@ const ERROR_MAP: Record<number, { name: string; userMessage: string }> = {
     userMessage: 'Order rejected by exchange risk engine. Please check balance and inputs.',
   },
   '-2011': { name: 'CANCEL_REJECTED', userMessage: 'Order cancellation could not be completed.' },
+  '-2015': {
+    name: 'INVALID_API_KEY_OR_PERMISSIONS',
+    userMessage:
+      'Agent key lacks permissions for this action. Please re-authorize your session in wallet settings.',
+  },
   '-2018': {
     name: 'BALANCE_NOT_SUFFICIENT',
     userMessage: 'Insufficient available balance to place this order.',
