@@ -40,6 +40,10 @@ interface AsterAgentStoreState {
   purge: () => void;
 }
 
+let activeRestorePromise: Promise<any> | null = null;
+let lastFailedRestoreKey = '';
+let lastFailedRestoreTime = 0;
+
 export const useAsterAgentStore = create<AsterAgentStoreState>((set, get) => ({
   asterSigner: null,
   agentAddress: null,
@@ -62,7 +66,13 @@ export const useAsterAgentStore = create<AsterAgentStoreState>((set, get) => ({
   restoreKey: async () => {
     const network = useWalletStore.getState().network;
     if (!hasStoredAgentKey(network)) {
-      set({ asterSigner: null, agentAddress: null, deriveState: 'idle', sessionExpiry: null });
+      if (
+        get().asterSigner !== null ||
+        get().agentAddress !== null ||
+        get().deriveState !== 'idle'
+      ) {
+        set({ asterSigner: null, agentAddress: null, deriveState: 'idle', sessionExpiry: null });
+      }
       return null;
     }
 
@@ -70,41 +80,67 @@ export const useAsterAgentStore = create<AsterAgentStoreState>((set, get) => ({
     const currentStoredAddr = getStoredAgentAddress(network);
     const storedExpiry = getStoredAgentExpiry(network);
 
-    if (current && get().agentAddress === currentStoredAddr) {
+    if (
+      current &&
+      (get().agentAddress || '').toLowerCase() === (currentStoredAddr || '').toLowerCase()
+    ) {
       if (storedExpiry !== get().sessionExpiry) {
         set({ sessionExpiry: storedExpiry });
       }
       return current;
     }
 
-    if (get().isRestoring) return null;
+    const restoreKeyId = `${network}_${currentStoredAddr}`;
+    if (lastFailedRestoreKey === restoreKeyId && Date.now() - lastFailedRestoreTime < 5000) {
+      return null;
+    }
+
+    if (activeRestorePromise) return activeRestorePromise;
 
     set({ isRestoring: true });
-    try {
-      const signer = await restoreAgentWallet(network);
-      if (signer) {
-        const addr = await signer.getAddress();
-        set({
-          asterSigner: signer,
-          agentAddress: addr,
-          sessionExpiry: storedExpiry,
-          deriveState: 'ready',
-          isRestoring: false,
-          error: null,
-        });
-        return signer;
+    activeRestorePromise = (async () => {
+      try {
+        const signer = await restoreAgentWallet(network);
+        if (signer) {
+          const addr = await signer.getAddress();
+          lastFailedRestoreKey = '';
+          set({
+            asterSigner: signer,
+            agentAddress: addr,
+            sessionExpiry: storedExpiry,
+            deriveState: 'ready',
+            isRestoring: false,
+            error: null,
+          });
+          return signer;
+        }
+      } catch (e) {
+        console.error('[AsterAgentStore] Failed to restore agent signer:', e);
+      } finally {
+        activeRestorePromise = null;
       }
-    } catch (e) {
-      console.error('[AsterAgentStore] Failed to restore agent signer:', e);
-    }
-    set({
-      isRestoring: false,
-      asterSigner: null,
-      agentAddress: null,
-      sessionExpiry: null,
-      deriveState: 'idle',
-    });
-    return null;
+
+      lastFailedRestoreKey = restoreKeyId;
+      lastFailedRestoreTime = Date.now();
+      if (
+        get().asterSigner !== null ||
+        get().agentAddress !== null ||
+        get().deriveState !== 'idle'
+      ) {
+        set({
+          isRestoring: false,
+          asterSigner: null,
+          agentAddress: null,
+          sessionExpiry: null,
+          deriveState: 'idle',
+        });
+      } else {
+        set({ isRestoring: false });
+      }
+      return null;
+    })();
+
+    return activeRestorePromise;
   },
 
   deriveAgentKey: async (userAddr: string) => {
@@ -284,15 +320,22 @@ export function useAsterAgent(): UseAsterAgentResult {
     return () => clearInterval(interval);
   }, [sessionExpiry, restoreKey]);
 
+  const lastRestoredKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
+    const key = `${userAddr}_${network}_${currentExchange}`;
     if (userAddr) {
-      restoreKey();
+      if (lastRestoredKeyRef.current !== key) {
+        lastRestoredKeyRef.current = key;
+        restoreKey();
+      }
     } else {
+      lastRestoredKeyRef.current = null;
       if (asterSigner) {
         purgeStore();
       }
     }
-  }, [userAddr, network, currentExchange, restoreKey, purgeStore]);
+  }, [userAddr, network, currentExchange, restoreKey, purgeStore, asterSigner]);
 
   const deriveAgentKey = useCallback(async () => {
     if (!userAddr) return;

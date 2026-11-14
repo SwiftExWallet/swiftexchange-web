@@ -37,6 +37,10 @@ interface HyperliquidAgentStoreState {
   purge: () => void;
 }
 
+let activeHlRestorePromise: Promise<any> | null = null;
+let lastFailedHlRestoreKey = '';
+let lastFailedHlRestoreTime = 0;
+
 export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set, get) => ({
   hyperliquidSigner: null,
   agentAddress: null,
@@ -57,34 +61,73 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
   restoreKey: async () => {
     const isTestnet = useWalletStore.getState().network === 'testnet';
     if (!hasStoredAgentKey(isTestnet)) {
-      set({ hyperliquidSigner: null, agentAddress: null, deriveState: 'idle' });
+      if (
+        get().hyperliquidSigner !== null ||
+        get().agentAddress !== null ||
+        get().deriveState !== 'idle'
+      ) {
+        set({ hyperliquidSigner: null, agentAddress: null, deriveState: 'idle' });
+      }
       return null;
     }
 
     const current = get().hyperliquidSigner;
     const currentStoredAddr = getStoredAgentAddress(isTestnet);
-    if (current && get().agentAddress === currentStoredAddr) return current;
+    if (
+      current &&
+      (get().agentAddress || '').toLowerCase() === (currentStoredAddr || '').toLowerCase()
+    ) {
+      return current;
+    }
 
-    if (get().isRestoring) return null;
+    const restoreKeyId = `${isTestnet}_${currentStoredAddr}`;
+    if (lastFailedHlRestoreKey === restoreKeyId && Date.now() - lastFailedHlRestoreTime < 5000) {
+      return null;
+    }
+
+    if (activeHlRestorePromise) return activeHlRestorePromise;
 
     set({ isRestoring: true });
-    try {
-      const wallet = await restoreAgentWallet(isTestnet);
-      if (wallet) {
-        set({
-          hyperliquidSigner: wallet,
-          agentAddress: wallet.address,
-          deriveState: 'ready',
-          isRestoring: false,
-          error: null,
-        });
-        return wallet;
+    activeHlRestorePromise = (async () => {
+      try {
+        const wallet = await restoreAgentWallet(isTestnet);
+        if (wallet) {
+          lastFailedHlRestoreKey = '';
+          set({
+            hyperliquidSigner: wallet,
+            agentAddress: wallet.address,
+            deriveState: 'ready',
+            isRestoring: false,
+            error: null,
+          });
+          return wallet;
+        }
+      } catch (e) {
+        console.error('[HyperliquidAgentStore] Failed to restore agent wallet:', e);
+      } finally {
+        activeHlRestorePromise = null;
       }
-    } catch (e) {
-      console.error('[HyperliquidAgentStore] Failed to restore agent wallet:', e);
-    }
-    set({ isRestoring: false, hyperliquidSigner: null, agentAddress: null, deriveState: 'idle' });
-    return null;
+
+      lastFailedHlRestoreKey = restoreKeyId;
+      lastFailedHlRestoreTime = Date.now();
+      if (
+        get().hyperliquidSigner !== null ||
+        get().agentAddress !== null ||
+        get().deriveState !== 'idle'
+      ) {
+        set({
+          isRestoring: false,
+          hyperliquidSigner: null,
+          agentAddress: null,
+          deriveState: 'idle',
+        });
+      } else {
+        set({ isRestoring: false });
+      }
+      return null;
+    })();
+
+    return activeHlRestorePromise;
   },
 
   deriveAgentKey: async (userAddr: string) => {
@@ -159,10 +202,17 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
   const deriveAgentKeyStore = useHyperliquidAgentStore(s => s.deriveAgentKey);
   const purgeStore = useHyperliquidAgentStore(s => s.purge);
 
+  const lastRestoredKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
+    const key = `${userAddr}_${network}_${currentExchange}`;
     if (userAddr) {
-      restoreKey();
+      if (lastRestoredKeyRef.current !== key) {
+        lastRestoredKeyRef.current = key;
+        restoreKey();
+      }
     } else {
+      lastRestoredKeyRef.current = null;
       if (hyperliquidSigner) {
         purgeStore();
       }

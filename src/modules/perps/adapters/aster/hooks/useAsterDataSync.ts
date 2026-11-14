@@ -300,9 +300,13 @@ export function useAsterDataSync(signer: Signer | IAsterSigner | null, userAddr:
           setIsRestSynced(true);
         }
       } catch (err: any) {
-        if (!isAsterDepositRequiredError(err) && !isAsterNoAgentError(err)) {
-          initializedKeyRef.current = null;
-        }
+        console.warn('[AsterDataSync] Initial snapshot sync deferred:', err?.message || err);
+        // Delay any retry so we never create a tight re-render/network loop
+        setTimeout(() => {
+          if (isMounted) {
+            initializedKeyRef.current = null;
+          }
+        }, 15000);
       }
     };
 
