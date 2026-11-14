@@ -137,7 +137,17 @@ export const useHyperliquidTradeHistory = (userAddr: string | null, symbol: stri
   const recentTrades = useHistoryStore(state => state.recentTrades);
 
   const mergedTrades = useMemo(() => {
-    const socketTrades = symbol ? recentTrades.filter(t => t.symbol === symbol) : recentTrades;
+    const hlSocketTrades = recentTrades.filter(t => {
+      const sym = (t.symbol || '').toUpperCase();
+      return sym.endsWith('USDC') || sym.endsWith('-USDC') || t.marginAsset === 'USDC';
+    });
+    const socketTrades = symbol
+      ? hlSocketTrades.filter(
+          t =>
+            (t.symbol || '').replace('-', '').toUpperCase() ===
+            symbol.replace('-', '').toUpperCase()
+        )
+      : hlSocketTrades;
     const all = [...socketTrades, ...trades];
     const seen = new Set();
     return all

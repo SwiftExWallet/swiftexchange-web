@@ -5,6 +5,7 @@ import { useOrderHistory as useAsterOrderHistory } from '../../../adapters/aster
 import type { AsterOrderResponse } from '../../../adapters/aster/types/orders';
 import { useHyperliquidOrderHistory } from '../../../adapters/hyperliquid/hooks/useHyperliquidOrderHistory';
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import { getPerpExplorerAddressUrl, getPerpExplorerTxUrl } from '../../../utils/explorer';
 import { safeFormatNumber } from '../../../utils/precision';
 import { TabEmptyState } from './TabEmptyState';
 
@@ -158,10 +159,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
     });
   }, [orders, timeRange, hideCanceled, hideOtherSymbols, asterSymbol]);
 
-  const asterExplorerBase =
-    currentNetwork === 'mainnet'
-      ? 'https://www.asterdex.com/en/explorer'
-      : 'https://www.asterdex-testnet.com/en/explorer';
+  const explorerAddressUrl = getPerpExplorerAddressUrl(currentExchange, currentNetwork, userAddr);
 
   if (isLoading && filteredOrders.length === 0) {
     return (
@@ -182,7 +180,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
         />
         <div className="px-3 py-2 flex items-center justify-end text-[11px] text-secondary shrink-0 bg-secondary">
           <a
-            href={userAddr ? `${asterExplorerBase}/address/${userAddr}` : asterExplorerBase}
+            href={explorerAddressUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-brand hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
@@ -217,11 +215,12 @@ export const OrderHistoryTab: React.FC<Props> = ({
               origQtyNum * (avgPriceNum > 0 ? avgPriceNum : orderPriceNum > 0 ? orderPriceNum : 0);
             const dateInfo = formatSplitDate(o.updateTime || o.time || 0);
             const typeInfo = formatSplitType(o.type || o.origType);
-            const explorerLink = o.newChainData?.hash
-              ? `${asterExplorerBase}/tx/${o.newChainData.hash}`
-              : userAddr
-                ? `${asterExplorerBase}/address/${userAddr}`
-                : null;
+            const explorerLink = getPerpExplorerTxUrl(
+              currentExchange,
+              currentNetwork,
+              o.newChainData?.hash,
+              userAddr
+            );
 
             return (
               <div
@@ -337,11 +336,12 @@ export const OrderHistoryTab: React.FC<Props> = ({
 
                 const triggerPriceNum = parseFloat(o.stopPrice || '0');
 
-                const explorerLink = o.newChainData?.hash
-                  ? `${asterExplorerBase}/tx/${o.newChainData.hash}`
-                  : userAddr
-                    ? `${asterExplorerBase}/address/${userAddr}`
-                    : null;
+                const explorerLink = getPerpExplorerTxUrl(
+                  currentExchange,
+                  currentNetwork,
+                  o.newChainData?.hash,
+                  userAddr
+                );
 
                 const orderIdStr = String(o.orderId || '');
                 const shortOrderId =
@@ -501,7 +501,7 @@ export const OrderHistoryTab: React.FC<Props> = ({
       <div className="px-3 py-2 flex items-center justify-between text-[11px] text-secondary shrink-0 bg-secondary">
         <span className="text-muted text-[10px]">Showing {filteredOrders.length} records</span>
         <a
-          href={userAddr ? `${asterExplorerBase}/address/${userAddr}` : asterExplorerBase}
+          href={explorerAddressUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="text-brand hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
@@ -643,7 +643,12 @@ export const OrderHistoryTab: React.FC<Props> = ({
                 <div className="flex justify-between py-1 border-b border-white/[0.04]">
                   <span className="text-secondary">Transaction Hash</span>
                   <a
-                    href={`${asterExplorerBase}/tx/${activeDetailsOrder.newChainData.hash}`}
+                    href={getPerpExplorerTxUrl(
+                      currentExchange,
+                      currentNetwork,
+                      activeDetailsOrder.newChainData.hash,
+                      userAddr
+                    )}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-brand hover:underline flex items-center gap-1 font-mono-tabular"

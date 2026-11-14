@@ -104,6 +104,28 @@ export async function deriveHyperliquidAgentKey(
   }
 
   try {
+    const agents: any = await transport.request('info', {
+      type: 'extraAgents',
+      user: evmAddress as `0x${string}`,
+    });
+    if (Array.isArray(agents)) {
+      const match = agents.find(
+        (a: any) => a.address?.toLowerCase() === agentAddress.toLowerCase()
+      );
+      if (match) {
+        localStorage.setItem(getAddrKey(activeTestnet), agentAddress);
+        cleanupLegacyStorage(activeTestnet);
+        return {
+          agentAddress,
+          wallet: new HyperliquidIsolatedSigner(agentAddress),
+        };
+      }
+    }
+  } catch {
+    void 0;
+  }
+
+  try {
     await approveAgent(
       { transport, wallet: signer },
       { agentAddress: agentAddress as `0x${string}`, agentName: '' }
@@ -128,6 +150,28 @@ export async function deriveHyperliquidAgentKey(
             agentAddress,
             wallet: new HyperliquidIsolatedSigner(agentAddress),
           };
+        }
+      } catch {
+        void 0;
+      }
+
+      try {
+        const agents: any = await transport.request('info', {
+          type: 'extraAgents',
+          user: evmAddress as `0x${string}`,
+        });
+        if (Array.isArray(agents)) {
+          const match = agents.find(
+            (a: any) => a.address?.toLowerCase() === agentAddress.toLowerCase()
+          );
+          if (match) {
+            localStorage.setItem(getAddrKey(activeTestnet), agentAddress);
+            cleanupLegacyStorage(activeTestnet);
+            return {
+              agentAddress,
+              wallet: new HyperliquidIsolatedSigner(agentAddress),
+            };
+          }
         }
       } catch {
         void 0;
@@ -188,19 +232,59 @@ export async function restoreAgentWallet(
   const activeTestnet =
     isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
 
-  const storedAddr = getStoredAgentAddress(activeTestnet);
-  if (!storedAddr) return null;
-
   const isReady = await signerIframeBridge.initialize();
   if (!isReady) return null;
 
   const bridgeAddr = await signerIframeBridge.getAddress().catch(() => null);
   if (!bridgeAddr) return null;
 
-  // Cleanup legacy localStorage raw key
-  cleanupLegacyStorage(activeTestnet);
+  const storedAddr = getStoredAgentAddress(activeTestnet);
+  if (storedAddr && storedAddr.toLowerCase() === bridgeAddr.toLowerCase()) {
+    cleanupLegacyStorage(activeTestnet);
+    return new HyperliquidIsolatedSigner(bridgeAddr);
+  }
 
-  return new HyperliquidIsolatedSigner(bridgeAddr);
+  const transport = new HttpTransport({ isTestnet: activeTestnet });
+  const evmAddress = useWalletStore.getState().connectedWallets.evm?.address;
+  if (evmAddress) {
+    try {
+      const roleInfo: any = await transport.request('info', {
+        type: 'userRole',
+        user: bridgeAddr as `0x${string}`,
+      });
+      if (
+        roleInfo?.role === 'agent' &&
+        roleInfo?.data?.user?.toLowerCase() === evmAddress.toLowerCase()
+      ) {
+        localStorage.setItem(getAddrKey(activeTestnet), bridgeAddr);
+        cleanupLegacyStorage(activeTestnet);
+        return new HyperliquidIsolatedSigner(bridgeAddr);
+      }
+    } catch {
+      void 0;
+    }
+
+    try {
+      const agents: any = await transport.request('info', {
+        type: 'extraAgents',
+        user: evmAddress as `0x${string}`,
+      });
+      if (Array.isArray(agents)) {
+        const match = agents.find(
+          (a: any) => a.address?.toLowerCase() === bridgeAddr.toLowerCase()
+        );
+        if (match) {
+          localStorage.setItem(getAddrKey(activeTestnet), bridgeAddr);
+          cleanupLegacyStorage(activeTestnet);
+          return new HyperliquidIsolatedSigner(bridgeAddr);
+        }
+      }
+    } catch {
+      void 0;
+    }
+  }
+
+  return null;
 }
 
 export function getStoredAgentAddress(isTestnet?: boolean): string | null {
@@ -219,7 +303,8 @@ export function hasStoredAgentKey(isTestnet?: boolean): boolean {
     localStorage.getItem(getAddrKey(activeTestnet)) ||
     (!activeTestnet && localStorage.getItem(ADDR_KEY_PREFIX)) ||
     localStorage.getItem(getBlobKey(activeTestnet)) ||
-    (!activeTestnet && localStorage.getItem(BLOB_KEY_PREFIX))
+    (!activeTestnet && localStorage.getItem(BLOB_KEY_PREFIX)) ||
+    signerIframeBridge.cachedAgentAddress
   );
 }
 

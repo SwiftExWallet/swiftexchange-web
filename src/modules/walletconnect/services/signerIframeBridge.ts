@@ -41,6 +41,10 @@ class SignerIframeBridge implements IAsterSigner {
   private handshakeRetryTimer: ReturnType<typeof setTimeout> | null = null;
   readonly isIsolated = true;
 
+  get cachedAgentAddress(): string | null {
+    return this.cachedAddress;
+  }
+
   constructor() {
     if (typeof window !== 'undefined') {
       this.messageListener = this.handleMessage.bind(this);

@@ -5,6 +5,11 @@ import { useTradeHistory as useAsterTradeHistory } from '../../../adapters/aster
 import type { AsterUserTrade } from '../../../adapters/aster/types/account';
 import { useHyperliquidTradeHistory } from '../../../adapters/hyperliquid/hooks/useHyperliquidTradeHistory';
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import {
+  getPerpExplorerAddressUrl,
+  getPerpExplorerName,
+  getPerpExplorerTxUrl,
+} from '../../../utils/explorer';
 import { safeFormatNumber } from '../../../utils/precision';
 import type { TimeRange } from './OrderHistoryTab';
 import { TabEmptyState } from './TabEmptyState';
@@ -127,10 +132,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
     });
   }, [trades, timeRange, hideOtherSymbols, asterSymbol]);
 
-  const asterExplorerBase =
-    currentNetwork === 'mainnet'
-      ? 'https://www.asterdex.com/en/explorer'
-      : 'https://www.asterdex-testnet.com/en/explorer';
+  const explorerAddressUrl = getPerpExplorerAddressUrl(currentExchange, currentNetwork, userAddr);
 
   if (isLoading && filteredTrades.length === 0) {
     return (
@@ -151,7 +153,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
         />
         <div className="px-3 py-2 flex items-center justify-end text-[11px] text-secondary shrink-0 bg-secondary">
           <a
-            href={userAddr ? `${asterExplorerBase}/address/${userAddr}` : asterExplorerBase}
+            href={explorerAddressUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-brand hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
@@ -229,7 +231,12 @@ export const TradeHistoryTab: React.FC<Props> = ({
                   <div>
                     <span className="text-secondary block">Fee</span>
                     <span className="text-secondary font-mono-tabular">
-                      {formatFee(t.commission, t.commissionAsset || 'ASTER')}
+                      {formatFee(
+                        t.commission,
+                        currentExchange === 'hyperliquid'
+                          ? t.commissionAsset || 'USDC'
+                          : t.commissionAsset || 'ASTER'
+                      )}
                     </span>
                   </div>
                 </div>
@@ -289,7 +296,8 @@ export const TradeHistoryTab: React.FC<Props> = ({
                 const isPnlNegative = pnlNum < 0;
 
                 const role = t.maker ? 'Maker' : 'Taker';
-                const marginUnit = t.marginAsset || 'USDT';
+                const marginUnit =
+                  currentExchange === 'hyperliquid' ? 'USDC' : t.marginAsset || 'USDT';
                 const dateInfo = formatSplitDate(t.time);
 
                 return (
@@ -329,7 +337,12 @@ export const TradeHistoryTab: React.FC<Props> = ({
                     </td>
 
                     <td className="px-2.5 py-2 text-secondary font-mono-tabular">
-                      {formatFee(t.commission, t.commissionAsset || 'ASTER')}
+                      {formatFee(
+                        t.commission,
+                        currentExchange === 'hyperliquid'
+                          ? t.commissionAsset || 'USDC'
+                          : t.commissionAsset || 'ASTER'
+                      )}
                     </td>
 
                     <td className="px-2.5 py-2 font-mono-tabular">
@@ -375,7 +388,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
       <div className="px-3 py-2 flex items-center justify-between text-[11px] text-secondary shrink-0 bg-secondary">
         <span className="text-muted text-[10px]">Showing {filteredTrades.length} records</span>
         <a
-          href={userAddr ? `${asterExplorerBase}/address/${userAddr}` : asterExplorerBase}
+          href={explorerAddressUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="text-brand hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
@@ -452,7 +465,9 @@ export const TradeHistoryTab: React.FC<Props> = ({
                 <span className="font-mono-tabular text-secondary">
                   {formatFee(
                     activeShareTrade.commission,
-                    activeShareTrade.commissionAsset || 'ASTER'
+                    currentExchange === 'hyperliquid'
+                      ? activeShareTrade.commissionAsset || 'USDC'
+                      : activeShareTrade.commissionAsset || 'ASTER'
                   )}
                 </span>
               </div>
@@ -469,7 +484,9 @@ export const TradeHistoryTab: React.FC<Props> = ({
                 >
                   {parseFloat(activeShareTrade.realizedPnl || '0') > 0 ? '+' : ''}
                   {formatNum(activeShareTrade.realizedPnl, 2, 2)}{' '}
-                  {activeShareTrade.marginAsset || 'USDT'}
+                  {currentExchange === 'hyperliquid'
+                    ? 'USDC'
+                    : activeShareTrade.marginAsset || 'USDT'}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-white/[0.04]">
@@ -486,14 +503,17 @@ export const TradeHistoryTab: React.FC<Props> = ({
               <div className="flex justify-between py-1 border-b border-white/[0.04]">
                 <span className="text-secondary">Explorer</span>
                 <a
-                  href={
-                    userAddr ? `${asterExplorerBase}/address/${userAddr}` : `${asterExplorerBase}`
-                  }
+                  href={getPerpExplorerTxUrl(
+                    currentExchange,
+                    currentNetwork,
+                    activeShareTrade.newChainData?.hash || (activeShareTrade as any).hash,
+                    userAddr
+                  )}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-brand hover:underline flex items-center gap-1 font-mono-tabular"
                 >
-                  <span>View on Aster Explorer</span>
+                  <span>View on {getPerpExplorerName(currentExchange)} Explorer</span>
                   <ExternalLink size={10} />
                 </a>
               </div>

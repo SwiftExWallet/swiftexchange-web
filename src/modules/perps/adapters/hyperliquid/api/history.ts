@@ -61,7 +61,6 @@ export const getHyperliquidHistoricalOrders = async (
       filtered = data.filter(o => o.order.timestamp <= options.endTime!);
     }
 
-    // Convert to AsterOrderResponse
     let mapped: AsterOrderResponse[] = filtered.map(item => {
       const o = item.order;
 
@@ -72,21 +71,39 @@ export const getHyperliquidHistoricalOrders = async (
 
       const coin = o.coin || '';
       const symbol = coin.includes('-') ? coin : `${coin}-USDC`;
+      const orderQty = o.origSz || o.sz || '0';
+      const executedQty =
+        mappedStatus === 'FILLED'
+          ? orderQty
+          : new BigNumber(orderQty)
+              .minus(o.sz || '0')
+              .abs()
+              .toFixed();
+      const priceNum = o.limitPx && o.limitPx !== '0' ? o.limitPx : o.triggerPx || '0';
+      const cumQuote = new BigNumber(executedQty).times(priceNum).toFixed(2);
 
       return {
         orderId: o.oid,
         symbol,
         status: mappedStatus as any,
-        clientOrderId: '',
+        clientOrderId: o.cloid || '',
         price: o.limitPx,
-        avgPrice: '0',
-        origQty: o.sz,
-        executedQty: '0',
-        cumQty: '0',
-        cumQuote: '0',
-        timeInForce: 'GTC' as any,
-        type: (o.orderType === 'Limit' ? 'LIMIT' : 'MARKET') as OrderType,
-        origType: (o.orderType === 'Limit' ? 'LIMIT' : 'MARKET') as OrderType,
+        avgPrice: priceNum,
+        origQty: orderQty,
+        executedQty,
+        cumQty: executedQty,
+        cumQuote,
+        timeInForce: (o.tif || 'GTC').toUpperCase() as any,
+        type: (o.orderType === 'Limit'
+          ? 'LIMIT'
+          : o.orderType?.toUpperCase().includes('STOP')
+            ? 'STOP_MARKET'
+            : 'MARKET') as OrderType,
+        origType: (o.orderType === 'Limit'
+          ? 'LIMIT'
+          : o.orderType?.toUpperCase().includes('STOP')
+            ? 'STOP_MARKET'
+            : 'MARKET') as OrderType,
         side: (o.side === 'A' ? 'SELL' : 'BUY') as OrderSide,
         positionSide: 'BOTH',
         stopPrice: o.triggerPx || '0',
@@ -147,10 +164,14 @@ export const getHyperliquidUserFills = async (
         realizedPnl: f.closedPnl || '0',
         commission: f.fee || '0',
         commissionAsset: (f as any).feeToken || 'USDC',
+        marginAsset: 'USDC',
         time: f.time,
         buyer: f.side === 'B',
-        maker: (f as any).maker || false,
+        maker: (f as any).maker !== undefined ? (f as any).maker : !f.crossed,
         side: f.side === 'B' ? 'BUY' : 'SELL',
+        newChainData: {
+          hash: f.hash,
+        },
       } as unknown as AsterUserTrade;
     });
 

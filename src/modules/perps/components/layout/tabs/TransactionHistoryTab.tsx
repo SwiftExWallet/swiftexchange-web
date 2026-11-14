@@ -3,6 +3,7 @@ import React, { useCallback, useMemo, useRef } from 'react';
 
 import { useTransactionHistory } from '../../../adapters/aster/hooks/useTransactionHistory';
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import { getPerpExplorerAddressUrl } from '../../../utils/explorer';
 import type { TimeRange } from './OrderHistoryTab';
 import { TabEmptyState } from './TabEmptyState';
 
@@ -104,10 +105,7 @@ export const TransactionHistoryTab: React.FC<Props> = ({
     });
   }, [income, timeRange, hideOtherSymbols, asterSymbol]);
 
-  const asterExplorerBase =
-    currentNetwork === 'mainnet'
-      ? 'https://www.asterdex.com/en/explorer'
-      : 'https://www.asterdex-testnet.com/en/explorer';
+  const explorerAddressUrl = getPerpExplorerAddressUrl(currentExchange, currentNetwork, userAddr);
 
   if (isLoading && filteredIncome.length === 0) {
     return (
@@ -128,7 +126,7 @@ export const TransactionHistoryTab: React.FC<Props> = ({
         />
         <div className="px-3 py-2 flex items-center justify-end text-[11px] text-secondary shrink-0 bg-secondary">
           <a
-            href={userAddr ? `${asterExplorerBase}/address/${userAddr}` : asterExplorerBase}
+            href={explorerAddressUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-brand hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
@@ -226,7 +224,7 @@ export const TransactionHistoryTab: React.FC<Props> = ({
       <div className="px-3 py-2 flex items-center justify-between text-[11px] text-secondary shrink-0 bg-secondary">
         <span className="text-muted text-[10px]">Showing {filteredIncome.length} records</span>
         <a
-          href={userAddr ? `${asterExplorerBase}/address/${userAddr}` : asterExplorerBase}
+          href={explorerAddressUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="text-brand hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
