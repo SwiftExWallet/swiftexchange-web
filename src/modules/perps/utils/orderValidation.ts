@@ -2,6 +2,7 @@ import BigNumber from 'bignumber.js';
 
 import type { AccountBalance, Market } from '../core/models';
 import type { OrderSide, OrderType } from '../core/stores/orderEntryStore';
+import { safeFormatNumber } from './precision';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -13,7 +14,9 @@ export interface ValidationResult {
     | 'callbackRate'
     | 'scaledPriceLower'
     | 'scaledPriceUpper'
-    | 'scaledOrderCount';
+    | 'scaledOrderCount'
+    | 'attachedTpPrice'
+    | 'attachedSlPrice';
 }
 
 function isMultipleOf(val: number | string, step: number | string): boolean {
@@ -39,7 +42,11 @@ export function validateOrder(
   maxPossibleSize?: number,
   scaledPriceLower?: string,
   scaledPriceUpper?: string,
-  scaledOrderCount?: string
+  scaledOrderCount?: string,
+  attachedTpEnabled?: boolean,
+  attachedTpPrice?: string,
+  attachedSlEnabled?: boolean,
+  attachedSlPrice?: string
 ): ValidationResult {
   if (!market) {
     return { isValid: false };
@@ -96,14 +103,14 @@ export function validateOrder(
         if (_side === 'BUY' && bnStopPrice.lt(bnCurrentPrice)) {
           return {
             isValid: false,
-            error: `Stop BUY trigger price must be ≥ current price (${bnCurrentPrice.toString()})`,
+            error: `Stop BUY trigger price must be ≥ current price (${safeFormatNumber(bnCurrentPrice.toNumber(), 2, 2)})`,
             errorField: 'stopPrice',
           };
         }
         if (_side === 'SELL' && bnStopPrice.gt(bnCurrentPrice)) {
           return {
             isValid: false,
-            error: `Stop SELL trigger price must be ≤ current price (${bnCurrentPrice.toString()})`,
+            error: `Stop SELL trigger price must be ≤ current price (${safeFormatNumber(bnCurrentPrice.toNumber(), 2, 2)})`,
             errorField: 'stopPrice',
           };
         }
@@ -111,17 +118,89 @@ export function validateOrder(
         if (_side === 'BUY' && bnStopPrice.gt(bnCurrentPrice)) {
           return {
             isValid: false,
-            error: `Take Profit BUY trigger price must be ≤ current price (${bnCurrentPrice.toString()})`,
+            error: `Take Profit BUY trigger price must be ≤ current price (${safeFormatNumber(bnCurrentPrice.toNumber(), 2, 2)})`,
             errorField: 'stopPrice',
           };
         }
         if (_side === 'SELL' && bnStopPrice.lt(bnCurrentPrice)) {
           return {
             isValid: false,
-            error: `Take Profit SELL trigger price must be ≥ current price (${bnCurrentPrice.toString()})`,
+            error: `Take Profit SELL trigger price must be ≥ current price (${safeFormatNumber(bnCurrentPrice.toNumber(), 2, 2)})`,
             errorField: 'stopPrice',
           };
         }
+      }
+    }
+  }
+
+  if (attachedTpEnabled && attachedTpPrice && attachedTpPrice.trim() !== '') {
+    const bnTp = new BigNumber(attachedTpPrice);
+    if (bnTp.isNaN() || bnTp.lte(0)) {
+      return {
+        isValid: false,
+        error: 'Enter a valid Take Profit price',
+        errorField: 'attachedTpPrice',
+      };
+    }
+    const effectiveEntry =
+      (orderType === 'LIMIT' || orderType === 'POST_ONLY') && parseFloat(priceStr) > 0
+        ? new BigNumber(priceStr)
+        : bnCurrentPrice;
+    if (effectiveEntry.gt(0)) {
+      const displayPrice = safeFormatNumber(effectiveEntry.toNumber(), 2, 2);
+      const refLabel =
+        (orderType === 'LIMIT' || orderType === 'POST_ONLY') && parseFloat(priceStr) > 0
+          ? 'order price'
+          : 'current price';
+      if (_side === 'BUY' && bnTp.lte(effectiveEntry)) {
+        return {
+          isValid: false,
+          error: `Take Profit for Long must be > ${refLabel} (${displayPrice})`,
+          errorField: 'attachedTpPrice',
+        };
+      }
+      if (_side === 'SELL' && bnTp.gte(effectiveEntry)) {
+        return {
+          isValid: false,
+          error: `Take Profit for Short must be < ${refLabel} (${displayPrice})`,
+          errorField: 'attachedTpPrice',
+        };
+      }
+    }
+  }
+
+  if (attachedSlEnabled && attachedSlPrice && attachedSlPrice.trim() !== '') {
+    const bnSl = new BigNumber(attachedSlPrice);
+    if (bnSl.isNaN() || bnSl.lte(0)) {
+      return {
+        isValid: false,
+        error: 'Enter a valid Stop Loss price',
+        errorField: 'attachedSlPrice',
+      };
+    }
+    const effectiveEntry =
+      (orderType === 'LIMIT' || orderType === 'POST_ONLY') && parseFloat(priceStr) > 0
+        ? new BigNumber(priceStr)
+        : bnCurrentPrice;
+    if (effectiveEntry.gt(0)) {
+      const displayPrice = safeFormatNumber(effectiveEntry.toNumber(), 2, 2);
+      const refLabel =
+        (orderType === 'LIMIT' || orderType === 'POST_ONLY') && parseFloat(priceStr) > 0
+          ? 'order price'
+          : 'current price';
+      if (_side === 'BUY' && bnSl.gte(effectiveEntry)) {
+        return {
+          isValid: false,
+          error: `Stop Loss for Long must be < ${refLabel} (${displayPrice})`,
+          errorField: 'attachedSlPrice',
+        };
+      }
+      if (_side === 'SELL' && bnSl.lte(effectiveEntry)) {
+        return {
+          isValid: false,
+          error: `Stop Loss for Short must be > ${refLabel} (${displayPrice})`,
+          errorField: 'attachedSlPrice',
+        };
       }
     }
   }

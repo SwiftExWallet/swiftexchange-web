@@ -33,9 +33,10 @@ export const MobilePerpsView: React.FC<MobilePerpsViewProps> = ({ sidebar }) => 
     <div className="flex flex-col h-[calc(100dvh-3.5rem)] w-full bg-secondary font-body text-primary relative overflow-hidden">
       {sidebar}
 
-      {currentScreen === 'chart' ? (
+      <div className={currentScreen === 'chart' ? 'flex flex-col h-full w-full' : 'hidden'}>
         <MobileChartScreen onOpenTrade={handleOpenTrade} />
-      ) : (
+      </div>
+      {currentScreen === 'trade' && (
         <MobileTradeScreen
           side={tradeSide}
           onSwitchSide={side => {

@@ -1,6 +1,8 @@
 import { ExternalLink, HelpCircle, Sparkles } from 'lucide-react';
 import React, { useState } from 'react';
 
+import BigNumber from 'bignumber.js';
+
 import { useNotificationStore } from '../../../../store/notificationStore';
 import { parseAsterError } from '../../adapters/aster/api/errors';
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
@@ -15,6 +17,7 @@ import { usePositionStore } from '../../core/stores/positionStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
 import { useUnifiedExecution } from '../../services/useUnifiedExecution';
+import { formatPriceToTick, formatQuantityToStep } from '../../utils/precision';
 import { AccountModal } from '../trade/AccountModal';
 import { AssetModeModal } from '../trade/AssetModeModal';
 import { LeverageModal } from '../trade/LeverageModal';
@@ -86,7 +89,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
     'margin' | 'leverage' | 'account' | 'assetMode' | null
   >(null);
   const [accountModalTab, setAccountModalTab] = useState<
-    'deposit' | 'withdraw' | 'transfer' | 'history'
+    'deposit' | 'withdraw' | 'history' | 'faucet'
   >('deposit');
 
   const handlePlaceOrder = async (payload: any) => {
@@ -99,56 +102,45 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         tif = 'GTX';
       }
 
-      const formatPrecision = (
-        val: string | number | undefined,
-        step: number | undefined
-      ): string | undefined => {
-        if (val === undefined || val === null || val === '') return undefined;
-        if (!step) return String(val);
-        const num = typeof val === 'string' ? parseFloat(val) : val;
-        if (isNaN(num)) return String(val);
-
-        // Compute decimals from step, e.g. 0.001 -> 3
-        const decimals = Math.max(0, -Math.floor(Math.log10(step)));
-
-        // Truncate (floor) instead of round
-        const factor = Math.pow(10, decimals);
-        const truncated = Math.floor(num * factor) / factor;
-
-        return truncated.toFixed(decimals);
-      };
-
-      // Handle both hyphenated and unhyphenated symbol lookups for Aster/HL compatibility
       const currentMarket =
         market ||
         useMarketStore.getState().markets[payload.symbol] ||
         useMarketStore.getState().markets[payload.symbol.replace(/([A-Z]+)USD(T?)/, '$1-USD$2')];
 
-      let finalSize = payload.size;
+      let finalSize = String(payload.size || '0');
       if (payload.sizeAsset === 'quote') {
-        let conversionPrice = 1;
+        let conversionPrice = '1';
         if (
           (payload.type === 'LIMIT' ||
             payload.type === 'POST_ONLY' ||
             payload.type === 'STOP' ||
             payload.type === 'TAKE_PROFIT') &&
-          payload.price
+          payload.price &&
+          new BigNumber(payload.price).gt(0)
         ) {
-          conversionPrice = parseFloat(payload.price);
+          conversionPrice = String(payload.price);
         } else {
           const assetCtx = useTickerStore.getState().getAssetCtx(payload.symbol);
-          conversionPrice = parseFloat(assetCtx?.markPx || '1');
+          conversionPrice =
+            assetCtx?.markPx && new BigNumber(assetCtx.markPx).gt(0) ? assetCtx.markPx : '1';
         }
 
-        if (!isNaN(conversionPrice) && conversionPrice > 0) {
-          finalSize = String(parseFloat(payload.size) / conversionPrice);
+        if (new BigNumber(conversionPrice).gt(0)) {
+          finalSize = new BigNumber(payload.size).div(conversionPrice).toString();
         }
       }
 
-      const formattedQty = formatPrecision(finalSize, currentMarket?.stepSize);
-      const formattedPrice = formatPrecision(payload.price, currentMarket?.tickSize);
-      const formattedStopPrice = formatPrecision(payload.stopPrice, currentMarket?.tickSize);
-      const formattedActivation = formatPrecision(payload.activationPrice, currentMarket?.tickSize);
+      const stepSize = currentMarket?.stepSize || '0.001';
+      const tickSize = currentMarket?.tickSize || '0.1';
+
+      const formattedQty = formatQuantityToStep(finalSize, stepSize);
+      const formattedPrice = payload.price ? formatPriceToTick(payload.price, tickSize) : undefined;
+      const formattedStopPrice = payload.stopPrice
+        ? formatPriceToTick(payload.stopPrice, tickSize)
+        : undefined;
+      const formattedActivation = payload.activationPrice
+        ? formatPriceToTick(payload.activationPrice, tickSize)
+        : undefined;
 
       let res: any = null;
 
@@ -178,8 +170,8 @@ export const ExchangeOrderFormPanel: React.FC = () => {
           if (dist === 'ASCENDING') size = (tSize * (i + 1)) / sumWeights;
           if (dist === 'DESCENDING') size = (tSize * (n - i)) / sumWeights;
 
-          const fPrice = formatPrecision(price, currentMarket?.tickSize);
-          const fSize = formatPrecision(size, currentMarket?.stepSize);
+          const fPrice = formatPriceToTick(price, tickSize);
+          const fSize = formatQuantityToStep(size, stepSize);
 
           if (fPrice && fSize && parseFloat(fSize) > 0) {
             scaledOrders.push({
@@ -209,13 +201,14 @@ export const ExchangeOrderFormPanel: React.FC = () => {
 
         res = await placeBatch(scaledOrders);
       } else if (payload.type === 'CHASE') {
-        const formattedChaseOffset =
-          formatPrecision(payload.chaseOffset || '0', currentMarket?.tickSize) || '0';
+        const formattedChaseOffset = payload.chaseOffset
+          ? formatPriceToTick(payload.chaseOffset, tickSize)
+          : '0';
         const formattedMaxChaseOffset =
           payload.maxChaseDifferenceEnabled &&
           payload.maxChaseOffset &&
           parseFloat(payload.maxChaseOffset) > 0
-            ? formatPrecision(payload.maxChaseOffset, currentMarket?.tickSize)
+            ? formatPriceToTick(payload.maxChaseOffset, tickSize)
             : undefined;
 
         res = await placeChase({
@@ -246,16 +239,13 @@ export const ExchangeOrderFormPanel: React.FC = () => {
           currentPrice: currentMarketPrice,
         });
 
-        // If attached TP was configured, place TAKE_PROFIT_MARKET order
         if (
           payload.attachedTpEnabled &&
           payload.attachedTpPrice &&
-          parseFloat(payload.attachedTpPrice) > 0
+          new BigNumber(payload.attachedTpPrice).gt(0)
         ) {
           const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
-          const formattedTp =
-            formatPrecision(payload.attachedTpPrice, currentMarket?.tickSize) ||
-            payload.attachedTpPrice;
+          const formattedTp = formatPriceToTick(payload.attachedTpPrice, tickSize);
           try {
             await executeOrder({
               symbol: payload.symbol,
@@ -265,23 +255,27 @@ export const ExchangeOrderFormPanel: React.FC = () => {
               size: formattedQty || payload.size,
               reduceOnly: true,
               stopPrice: formattedTp,
+              workingType: payload.attachedTpTrigger || 'MARK_PRICE',
               currentPrice: currentMarketPrice,
             });
           } catch (tpErr: any) {
             console.warn('Attached Take Profit order notice:', tpErr);
+            useNotificationStore.getState().showToast({
+              type: 'SYSTEM',
+              status: 'error',
+              title: 'Take Profit Failed',
+              message: tpErr?.message || 'Failed to place attached Take Profit order',
+            });
           }
         }
 
-        // If attached SL was configured, place STOP_MARKET order
         if (
           payload.attachedSlEnabled &&
           payload.attachedSlPrice &&
-          parseFloat(payload.attachedSlPrice) > 0
+          new BigNumber(payload.attachedSlPrice).gt(0)
         ) {
           const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
-          const formattedSl =
-            formatPrecision(payload.attachedSlPrice, currentMarket?.tickSize) ||
-            payload.attachedSlPrice;
+          const formattedSl = formatPriceToTick(payload.attachedSlPrice, tickSize);
           try {
             await executeOrder({
               symbol: payload.symbol,
@@ -291,10 +285,17 @@ export const ExchangeOrderFormPanel: React.FC = () => {
               size: formattedQty || payload.size,
               reduceOnly: true,
               stopPrice: formattedSl,
+              workingType: payload.attachedSlTrigger || 'MARK_PRICE',
               currentPrice: currentMarketPrice,
             });
           } catch (slErr: any) {
             console.warn('Attached Stop Loss order notice:', slErr);
+            useNotificationStore.getState().showToast({
+              type: 'SYSTEM',
+              status: 'error',
+              title: 'Stop Loss Failed',
+              message: slErr?.message || 'Failed to place attached Stop Loss order',
+            });
           }
         }
       }
@@ -381,10 +382,10 @@ export const ExchangeAccountPanel: React.FC = () => {
     'margin' | 'leverage' | 'account' | 'assetMode' | null
   >(null);
   const [accountModalTab, setAccountModalTab] = useState<
-    'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet'
+    'deposit' | 'withdraw' | 'history' | 'faucet'
   >('deposit');
 
-  const handleOpenAccount = (tab: 'deposit' | 'withdraw' | 'transfer' | 'history' | 'faucet') => {
+  const handleOpenAccount = (tab: 'deposit' | 'withdraw' | 'history' | 'faucet') => {
     setAccountModalTab(tab);
     setActiveModal('account');
   };
@@ -440,13 +441,6 @@ export const ExchangeAccountPanel: React.FC = () => {
             className="flex-1 bg-tertiary hover:bg-hover border border-color text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
           >
             Withdraw
-          </button>
-          <button
-            type="button"
-            onClick={() => handleOpenAccount('transfer')}
-            className="flex-1 bg-tertiary hover:bg-hover border border-color text-secondary hover:text-primary py-1.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer text-center"
-          >
-            Transfer
           </button>
         </div>
 

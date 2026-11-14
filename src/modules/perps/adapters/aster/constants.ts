@@ -157,6 +157,8 @@ export const ASTER_ENDPOINTS = {
   ASTER_USER_WITHDRAW_INFO: '/fapi/v3/aster/user-withdraw-info',
   ASTER_USER_WITHDRAW: '/fapi/v3/aster/user-withdraw',
   DEPOSIT_WITHDRAW_HISTORY: '/fapi/v3/aster/deposit-withdraw-history',
+  MIGRATE_USER: '/fapi/v3/asset/migrateUser',
+  MIGRATE_USER_HISTORY: '/fapi/v3/asset/migrateUser/history',
 } as const;
 
 export const ASTER_WS_STREAMS = {

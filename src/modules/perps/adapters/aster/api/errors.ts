@@ -3,24 +3,23 @@
  * Source: https://asterdex.github.io/aster-api-website/futures-v3/error-codes/
  */
 
+export {
+  AsterClientError,
+  AsterBannedError,
+  AsterRateLimitError,
+  AsterCircuitBreakerError,
+  AsterHttpError,
+  AsterNetworkError,
+  AsterParsingError,
+  AsterUserRejectedError,
+} from '../client/errors';
+
 export interface AsterErrorDetail {
   code: number;
   name: string;
   message: string;
   userMessage: string;
   isRetryable?: boolean;
-}
-
-export class AsterRateLimitError extends Error {
-  readonly status: number;
-  readonly retryAfterSec: number;
-
-  constructor(status: number, retryAfterSec: number = 60) {
-    super(`Aster rate limit exceeded (HTTP ${status}). Back off for ${retryAfterSec}s.`);
-    this.name = 'AsterRateLimitError';
-    this.status = status;
-    this.retryAfterSec = retryAfterSec;
-  }
 }
 
 const ERROR_MAP: Record<number, { name: string; userMessage: string }> = {
@@ -112,6 +111,11 @@ const ERROR_MAP: Record<number, { name: string; userMessage: string }> = {
     userMessage: 'Order rejected by exchange risk engine. Please check balance and inputs.',
   },
   '-2011': { name: 'CANCEL_REJECTED', userMessage: 'Order cancellation could not be completed.' },
+  '-2015': {
+    name: 'INVALID_API_KEY_OR_PERMISSIONS',
+    userMessage:
+      'Agent key lacks permissions for this action. Please re-authorize your session in wallet settings.',
+  },
   '-2018': {
     name: 'BALANCE_NOT_SUFFICIENT',
     userMessage: 'Insufficient available balance to place this order.',
@@ -194,9 +198,29 @@ const ERROR_MAP: Record<number, { name: string; userMessage: string }> = {
     userMessage:
       'Order exceeds the account risk limit for this leverage tier. Please reduce size or leverage.',
   },
+  '-5048': {
+    name: 'VAULT_SYMBOL_NOT_ALLOWED',
+    userMessage: 'This symbol is not allowed for this vault asset restriction.',
+  },
+  '-5049': {
+    name: 'BUILDER_QUERY_NOT_ENABLED',
+    userMessage: 'Builder query API is not enabled for this account.',
+  },
   '-5050': {
     name: 'DEPOSIT_REQUIRED',
     userMessage: 'This function can only be used after deposit.',
+  },
+  '-5051': {
+    name: 'PRIVACY_CHECK_FAILED',
+    userMessage: 'Failed to verify account privacy status.',
+  },
+  '-5052': {
+    name: 'USER_PRIVACY_MODE_ENABLED',
+    userMessage: 'User privacy mode is enabled. This operation is not allowed.',
+  },
+  '-5053': {
+    name: 'USER_NOT_BOUND_TO_BUILDER',
+    userMessage: 'This user address is not bound to this builder.',
   },
 };
 

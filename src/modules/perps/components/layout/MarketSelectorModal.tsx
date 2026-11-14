@@ -4,6 +4,7 @@ import type { Market } from '../../core/models';
 import { useLeverageStore } from '../../core/stores/leverageStore';
 import { marketStore, useMarketStore } from '../../core/stores/marketStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
+import { safeFormatNumber } from '../../utils/precision';
 import { CoinIcon } from '../ui/CoinIcon';
 
 interface MarketSelectorModalProps {
@@ -174,10 +175,7 @@ const MarketRow = React.memo(function MarketRow({
   const changePct = prevDayPx > 0 ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0;
   const isPositive = changePct >= 0;
 
-  const formatPrice = (v: number) =>
-    v > 0
-      ? `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
-      : '—';
+  const formatPrice = (v: number) => (v > 0 ? `$${safeFormatNumber(v, 2, 4, '—')}` : '—');
 
   const formatVolume = (v: number) => {
     if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;

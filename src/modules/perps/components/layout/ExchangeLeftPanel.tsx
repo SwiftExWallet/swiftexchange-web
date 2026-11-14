@@ -46,7 +46,7 @@ export const ExchangeChartPanel: React.FC<ExchangeChartPanelProps> = ({ hideTopB
 
 export const ExchangePositionsPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState('Positions');
-  const [historyTimeRange, setHistoryTimeRange] = useState<'1d' | '1w' | '1m' | '3m'>('1m');
+  const [historyTimeRange, setHistoryTimeRange] = useState<'1d' | '1w'>('1w');
   const [hideOtherSymbols, setHideOtherSymbols] = useState(false);
   const [hideCanceled, setHideCanceled] = useState(false);
 
@@ -145,7 +145,7 @@ export const ExchangePositionsPanel: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full relative min-w-0">
-      <div className="flex items-center justify-between px-3 h-8.5 border-b border-color text-[11px] text-secondary shrink-0 bg-secondary gap-3">
+      <div className="flex items-center justify-between px-3 h-8.5 border-b border-white/[0.04] text-[11px] text-secondary shrink-0 bg-secondary gap-3">
         <div className="flex items-center gap-4 h-full whitespace-nowrap overflow-x-auto scrollbar-none">
           {tabs.map(tab => (
             <button
@@ -187,12 +187,10 @@ export const ExchangePositionsPanel: React.FC = () => {
                 <select
                   value={historyTimeRange}
                   onChange={e => setHistoryTimeRange(e.target.value as any)}
-                  className="bg-tertiary text-secondary hover:text-primary border border-color rounded px-2 py-0.5 text-[10.5px] outline-none cursor-pointer pr-4 appearance-none transition-colors"
+                  className="bg-tertiary text-secondary hover:text-primary border border-white/[0.08] rounded px-2 py-0.5 text-[10.5px] outline-none cursor-pointer pr-4 appearance-none transition-colors"
                 >
                   <option value="1d">1 day</option>
                   <option value="1w">1 week</option>
-                  <option value="1m">1 month</option>
-                  <option value="3m">3 months</option>
                 </select>
                 <ChevronDown
                   size={10}
@@ -206,7 +204,7 @@ export const ExchangePositionsPanel: React.FC = () => {
                 type="checkbox"
                 checked={hideOtherSymbols}
                 onChange={e => setHideOtherSymbols(e.target.checked)}
-                className="rounded border-color bg-tertiary text-brand focus:ring-0 cursor-pointer w-3 h-3"
+                className="rounded border-white/[0.1] bg-tertiary text-brand focus:ring-0 cursor-pointer w-3 h-3"
               />
               <span>Hide other symbols</span>
             </label>
@@ -217,7 +215,7 @@ export const ExchangePositionsPanel: React.FC = () => {
                   type="checkbox"
                   checked={hideCanceled}
                   onChange={e => setHideCanceled(e.target.checked)}
-                  className="rounded border-color bg-tertiary text-brand focus:ring-0 cursor-pointer w-3 h-3"
+                  className="rounded border-white/[0.1] bg-tertiary text-brand focus:ring-0 cursor-pointer w-3 h-3"
                 />
                 <span>Hide canceled</span>
               </label>

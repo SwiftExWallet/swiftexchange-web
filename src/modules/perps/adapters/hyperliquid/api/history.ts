@@ -94,7 +94,7 @@ export const getHyperliquidHistoricalOrders = async (
     if (options?.limit) {
       mapped = mapped.slice(0, options.limit);
     }
-    return mapped;
+    return mapped as unknown as AsterOrderResponse[];
   } catch (err) {
     console.error('getHyperliquidHistoricalOrders error', err);
     return [];

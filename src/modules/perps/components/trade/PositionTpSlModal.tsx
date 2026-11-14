@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 
 import { useNotificationStore } from '../../../../store/notificationStore';
 import { useUnifiedExecution } from '../../services/useUnifiedExecution';
+import { safeFormatNumber } from '../../utils/precision';
 import { Modal } from '../ui/Modal';
 
 interface PositionTpSlModalProps {
@@ -180,13 +181,13 @@ export const PositionTpSlModal: React.FC<PositionTpSlModalProps> = ({
           <div className="flex justify-between text-secondary">
             <span>Entry Price</span>
             <span className="text-primary font-mono font-medium">
-              ${entryPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              ${safeFormatNumber(entryPrice, 2, 2, '0.00')}
             </span>
           </div>
           <div className="flex justify-between text-secondary">
             <span>Mark Price</span>
             <span className="text-primary font-mono font-medium">
-              ${markPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              ${safeFormatNumber(markPrice, 2, 2, '0.00')}
             </span>
           </div>
         </div>

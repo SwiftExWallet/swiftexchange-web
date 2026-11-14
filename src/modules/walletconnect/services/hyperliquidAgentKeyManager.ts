@@ -78,11 +78,6 @@ export async function deriveHyperliquidAgentKey(
 
   const agentWallet = new Wallet(Wallet.createRandom().privateKey);
 
-  console.groupCollapsed('[hyperliquid] deriveHyperliquidAgentKey');
-  console.log('evmAddress (signer):', evmAddress);
-  console.log('agentWallet.address:', agentWallet.address);
-  console.log('isTestnet:', activeTestnet);
-
   const transport = new HttpTransport({ isTestnet: activeTestnet });
 
   try {

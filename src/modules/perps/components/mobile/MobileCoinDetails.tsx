@@ -9,6 +9,7 @@ import {
 } from '../../adapters/aster/api/funding';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
+import { safeFormatNumber } from '../../utils/precision';
 import { CoinIcon } from '../ui/CoinIcon';
 
 function formatLargeNum(val: number): string {
@@ -20,11 +21,11 @@ function formatLargeNum(val: number): string {
 }
 
 function formatPrice(val: number, tickSize?: number): string {
-  if (!val || isNaN(val)) return '--';
+  if (!Number.isFinite(val) || val <= 0) return '--';
   if (tickSize && tickSize < 0.001) return val.toFixed(4);
   if (val < 1) return val.toFixed(4);
   if (val < 10) return val.toFixed(3);
-  return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return safeFormatNumber(val, 2, 2, '--');
 }
 
 type DetailsSubTab = 'overview' | 'funding' | 'brackets' | 'token';

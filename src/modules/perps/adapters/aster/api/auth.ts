@@ -1,7 +1,9 @@
 import { type Signer, getAddress } from 'ethers';
 
+import { asterHttpClient } from '../client/asterHttpClient';
+import { AsterUserRejectedError } from '../client/errors';
 import { getAsterChainId, getAsterRestUrl } from '../constants';
-import { AsterRateLimitError, parseAsterError } from './errors';
+import { parseAsterError } from './errors';
 
 export function buildSortedQueryString(params: Record<string, string>): string {
   const keys = Object.keys(params).sort();
@@ -17,7 +19,7 @@ export function getAsterDomain(chainId: number = getAsterChainId()) {
   } as const;
 }
 
-const EIP712_TYPES = {
+export const EIP712_TYPES = {
   Message: [{ name: 'msg', type: 'string' }],
 };
 
@@ -64,7 +66,7 @@ export class AsterApiError extends Error {
   }
 }
 
-function throwIfApiError(data: any): void {
+export function throwIfApiError(data: any): void {
   if (data && typeof data.code === 'number' && data.code < 0) {
     throw new AsterApiError(data as { code: number; msg: string });
   }
@@ -98,11 +100,12 @@ export async function getSyncedServerTime(baseUrl?: string): Promise<number> {
   const restUrl = baseUrl || getAsterRestUrl();
   pendingTimeSyncPromise = (async () => {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1500);
-      const res = await fetch(`${restUrl}/fapi/v3/time`, { signal: controller.signal });
-      clearTimeout(timeoutId);
-      const data = await res.json();
+      const data = await asterHttpClient.request<any>(`${restUrl}/fapi/v3/time`, {
+        method: 'GET',
+        weight: 1,
+        ttlMs: 60_000,
+        timeoutMs: 2500,
+      });
       if (data && typeof data.serverTime === 'number') {
         serverTimeOffset = data.serverTime - Date.now();
         lastTimeSync = Date.now();
@@ -134,8 +137,17 @@ export async function signedRequest(
   path: string,
   params: Record<string, string> = {},
   baseUrl?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  weight: number = 1
 ): Promise<any> {
+  if (signal?.aborted) {
+    throw new Error('Request aborted');
+  }
+
+  if (!signer || !userAddr) {
+    throw new Error('Wallet signer and user address are required for private Aster requests.');
+  }
+
   const defaultBaseUrl = getAsterRestUrl();
   let effectiveBaseUrl = defaultBaseUrl;
   if (baseUrl) {
@@ -154,8 +166,18 @@ export async function signedRequest(
       );
     }
   }
+
+  let signerAddr: string;
+  try {
+    signerAddr = await signer.getAddress();
+  } catch (err: any) {
+    if (err?.code === 4001 || /rejected|denied/i.test(err?.message || '')) {
+      throw new AsterUserRejectedError('User rejected address retrieval.');
+    }
+    throw err;
+  }
+
   const chainId = getAsterChainId();
-  const signerAddr = await signer.getAddress();
   const serverTime = await getSyncedServerTime(effectiveBaseUrl);
   const nonce = generateMonotonicNonce(serverTime);
 
@@ -171,65 +193,40 @@ export async function signedRequest(
   const sortedQs = buildSortedQueryString(allParams);
   const typedData = buildTypedData(sortedQs, chainId);
 
-  const signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
+  let signature: string;
+  try {
+    signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
+  } catch (err: any) {
+    if (err?.code === 4001 || /rejected|denied|user rejected/i.test(err?.message || '')) {
+      throw new AsterUserRejectedError('User rejected cryptographic signature.');
+    }
+    throw err;
+  }
+
   const finalQs = `${sortedQs}&signature=${signature}`;
 
   let url: string;
-  let fetchOptions: RequestInit;
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-  if (signal) {
-    if (signal.aborted) {
-      clearTimeout(timeoutId);
-      throw new Error('Request aborted');
-    }
-    signal.addEventListener('abort', () => controller.abort(), { once: true });
-  }
+  let options: import('../client/asterHttpClient').AsterRequestOptions;
 
   if (method === 'GET') {
     url = `${effectiveBaseUrl}${path}?${finalQs}`;
-    fetchOptions = { method: 'GET', signal: controller.signal };
+    options = {
+      method: 'GET',
+      weight,
+      signal,
+    };
   } else {
     url = `${effectiveBaseUrl}${path}`;
-    fetchOptions = {
+    options = {
       method,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: finalQs,
-      signal: controller.signal,
+      weight,
+      signal,
     };
   }
 
-  let res: Response;
-  try {
-    res = await fetch(url, fetchOptions);
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    if (signal?.aborted || err?.name === 'AbortError') {
-      if (signal?.aborted) {
-        throw new Error('Request aborted');
-      }
-      throw new Error(`Aster API request timed out after 15s: ${method} ${path}`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-
-  if (res.status === 429 || res.status === 418) {
-    const retryHeader = res.headers.get('Retry-After');
-    const retrySec = retryHeader ? parseInt(retryHeader, 10) || 60 : 60;
-    throw new AsterRateLimitError(res.status, retrySec);
-  }
-
-  if (res.status >= 500) {
-    throw new Error(
-      `Aster server error (HTTP ${res.status}) on ${method} ${path}. Execution status unknown.`
-    );
-  }
-
-  const data = await res.json();
+  const data = await asterHttpClient.request(url, options);
   throwIfApiError(data);
   return data;
 }

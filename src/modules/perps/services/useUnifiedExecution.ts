@@ -8,7 +8,6 @@ import {
   placeOrder as placeAsterOrder,
 } from '../adapters/aster/api/orders';
 import { useAsterAgent } from '../adapters/aster/hooks/useAsterAgent';
-import { fetchAsterSnapshot } from '../adapters/aster/hooks/useAsterDataSync';
 import {
   cancelAllHyperliquidOrders,
   cancelHyperliquidOrder,
@@ -42,6 +41,8 @@ export interface UnifiedOrderParams {
   callbackRate?: string | number;
   activationPrice?: string | number;
   currentPrice?: number;
+  workingType?: 'MARK_PRICE' | 'CONTRACT_PRICE';
+  closePosition?: boolean;
 }
 
 export function useUnifiedExecution() {
@@ -109,6 +110,8 @@ export function useUnifiedExecution() {
             price: cleanPrice,
             newClientOrderId: clientOrderId,
             reduceOnly: params.reduceOnly ? true : undefined,
+            closePosition: params.closePosition ? true : undefined,
+            workingType: params.workingType,
             timeInForce:
               !isMarket && !isStopMarket && !isTrailingStop
                 ? isPostOnly
@@ -146,12 +149,6 @@ export function useUnifiedExecution() {
               });
             }
           }
-
-          // Instantly sync positions and orders via REST so UI doesn't lag behind WebSocket
-          fetchAsterSnapshot(asterSigner, effectiveUserAddr).catch(() => {});
-          setTimeout(() => {
-            fetchAsterSnapshot(asterSigner, effectiveUserAddr).catch(() => {});
-          }, 400);
 
           return asterRes;
         } else {

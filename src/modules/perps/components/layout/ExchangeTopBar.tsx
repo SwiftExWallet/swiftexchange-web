@@ -6,24 +6,20 @@ import { useLeverageStore } from '../../core/stores/leverageStore';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useOrderbookStore } from '../../core/stores/orderbookStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
+import { safeFormatNumber } from '../../utils/precision';
 import { CoinIcon } from '../ui/CoinIcon';
 // import { ExchangeNetworkSelector } from './ExchangeNetworkSelector';
 import { MarketSelectorModal } from './MarketSelectorModal';
 
 function formatExactNumber(num: number): string {
-  if (!isFinite(num) || isNaN(num) || num <= 0) return '0.00';
-  return num.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  if (!Number.isFinite(num) || num <= 0) return '0.00';
+  return safeFormatNumber(num, 2, 2, '0.00');
 }
 
 function formatPrice(px: number): string {
-  if (px <= 0 || isNaN(px)) return '—';
-  return px.toLocaleString('en-US', {
-    minimumFractionDigits: px < 10 ? 4 : 2,
-    maximumFractionDigits: px < 10 ? 4 : 2,
-  });
+  if (!Number.isFinite(px) || px <= 0) return '—';
+  const dec = px < 10 ? (px < 0.001 ? 6 : 4) : 2;
+  return safeFormatNumber(px, dec, dec, '—');
 }
 export const ExchangeTopBar: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);

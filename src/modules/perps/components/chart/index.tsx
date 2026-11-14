@@ -1,3 +1,4 @@
+import { X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -76,6 +77,7 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
   const [activeDrawingColor, setActiveDrawingColor] = useState('#3b82f6');
   const [activeDrawingWidth, setActiveDrawingWidth] = useState(2);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
 
   // Hooks
   const {
@@ -783,9 +785,15 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
           />
         )}
 
-        {error && (
-          <div className="absolute top-14 left-2 right-2 sm:mx-4 p-2 sm:p-3 bg-red-500/10 border border-red-500/30 rounded-lg z-10 backdrop-blur-sm">
+        {error && candles.length === 0 && dismissedError !== error && (
+          <div className="absolute top-14 left-2 right-2 sm:mx-4 p-2 sm:p-3 bg-red-500/10 border border-red-500/30 rounded-lg z-10 backdrop-blur-sm flex items-center justify-between">
             <p className="text-xs sm:text-sm text-red-400 font-medium">{error}</p>
+            <button
+              onClick={() => setDismissedError(error)}
+              className="text-red-400/80 hover:text-red-300 p-1 rounded transition-colors"
+            >
+              <X size={14} />
+            </button>
           </div>
         )}
 

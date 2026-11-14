@@ -4,170 +4,106 @@ import type { Signer } from 'ethers';
 
 import { useHistoryStore } from '../../../core/stores/historyStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
-import { useOrderStore } from '../../../core/stores/orderStore';
-import { usePositionStore } from '../../../core/stores/positionStore';
 import { getAllOrders } from '../api/orders';
+import { type ScanProgress, getPersistedHistory, persistHistory } from '../historyScanner';
 import type { AsterOrderResponse } from '../types/orders';
 
-export type TimeRange = '1d' | '1w' | '1m' | '3m';
+export type TimeRange = '1d' | '1w';
 
 const PAGE_LIMIT = 100;
-const CACHE_TTL = 30000;
 
-interface CacheEntry {
-  data: AsterOrderResponse[];
-  timestamp: number;
-  hasMore: boolean;
-  oldestQueried: number;
-}
-
-const globalOrderCache: Record<string, CacheEntry> = {};
-
-const getOrderTime = (o: AsterOrderResponse) => {
+const getOrderTime = (o: AsterOrderResponse): number => {
   return o.updateTime || o.time || 0;
-};
-
-const sortDesc = (items: AsterOrderResponse[]) => {
-  return [...items].sort((a, b) => getOrderTime(b) - getOrderTime(a));
-};
-
-function getTargetSymbols(specificSymbol?: string | null): string[] {
-  if (specificSymbol && specificSymbol.trim()) {
-    return [specificSymbol.replace('-', '').toUpperCase()];
-  }
-  const symbolSet = new Set<string>();
-  const cur = useMarketStore.getState().selectedSymbol;
-  if (cur) symbolSet.add(cur.replace('-', '').toUpperCase());
-
-  // Add all active markets
-  const allMarkets = Object.keys(useMarketStore.getState().markets);
-  allMarkets.forEach(m => {
-    symbolSet.add(m.replace('-', '').toUpperCase());
-  });
-
-  // Open positions
-  Object.keys(usePositionStore.getState().positions).forEach(s => {
-    symbolSet.add(s.replace('-', '').toUpperCase());
-  });
-
-  // Open orders
-  Object.values(useOrderStore.getState().orders).forEach(o => {
-    if (o.symbol) symbolSet.add(o.symbol.replace('-', '').toUpperCase());
-  });
-
-  // Always include major traded pairs as baseline fallback
-  ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'].forEach(s => symbolSet.add(s));
-
-  return Array.from(symbolSet);
-}
-
-const deduplicateOrders = (existing: AsterOrderResponse[], incoming: AsterOrderResponse[]) => {
-  const seen = new Set<string>();
-  const combined: AsterOrderResponse[] = [];
-  for (const item of [...incoming, ...existing]) {
-    const id = String(item.orderId || item.clientOrderId);
-    if (!seen.has(id)) {
-      seen.add(id);
-      combined.push(item);
-    }
-  }
-  return sortDesc(combined);
 };
 
 export const useOrderHistory = (
   signer: Signer | null,
   userAddr: string | null,
   symbol: string | null,
-  timeRange: TimeRange = '1m'
+  timeRange: TimeRange = '1w'
 ) => {
-  const marketCount = useMarketStore(state => Object.keys(state.markets).length);
-  const cacheKey = userAddr ? `${userAddr}_${symbol || 'all'}_${timeRange}_orders` : '';
-  const cachedEntry = cacheKey ? globalOrderCache[cacheKey] : undefined;
+  const orderHistory = useHistoryStore(state => state.orderHistory);
+  const hasFetched = useHistoryStore(state => state.hasFetchedOrderHistory);
+  const hasMore = useHistoryStore(state => state.hasMoreOrderHistory);
+  const oldestOrderTime = useHistoryStore(state => state.oldestOrderTime);
 
-  const [orders, setOrders] = useState<AsterOrderResponse[]>(() => cachedEntry?.data || []);
-  const [isLoading, setIsLoading] = useState(() => !cachedEntry || cachedEntry.data.length === 0);
+  const [isLoading, setIsLoading] = useState(() => !hasFetched && !!userAddr && !!signer);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(() => (cachedEntry ? cachedEntry.hasMore : true));
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
+  const [pausedNotice, setPausedNotice] = useState<string | null>(null);
 
   const isFetchingMoreRef = useRef(false);
-  const oldestQueriedRef = useRef<number>(cachedEntry?.oldestQueried || Date.now());
+  const lastUserRef = useRef<string | null>(userAddr);
+
+  useEffect(() => {
+    if (userAddr !== lastUserRef.current) {
+      lastUserRef.current = userAddr;
+      useHistoryStore.getState().clear();
+    }
+  }, [userAddr]);
 
   useEffect(() => {
     if (!signer || !userAddr) {
-      setOrders([]);
-      setHasMore(false);
+      setIsLoading(false);
+      setScanProgress(null);
+      setPausedNotice(null);
+      return;
+    }
+
+    if (useHistoryStore.getState().hasFetchedOrderHistory) {
       setIsLoading(false);
       return;
+    }
+
+    const persisted = getPersistedHistory<AsterOrderResponse>(userAddr, 'orders');
+    if (
+      persisted?.data &&
+      persisted.data.length > 0 &&
+      useHistoryStore.getState().orderHistory.length === 0
+    ) {
+      useHistoryStore.getState().loadPersistedOrderHistory(persisted.data);
     }
 
     let isMounted = true;
-    const currentCached = globalOrderCache[cacheKey];
-
-    // Only skip fetching if we have valid non-empty cached data within TTL
-    if (
-      currentCached &&
-      currentCached.data.length > 0 &&
-      Date.now() - currentCached.timestamp < CACHE_TTL
-    ) {
-      setOrders(currentCached.data);
-      setHasMore(currentCached.hasMore);
-      oldestQueriedRef.current = currentCached.oldestQueried;
-      setIsLoading(false);
-      return;
-    }
-
     setIsLoading(true);
+    const abortController = new AbortController();
+
+    const rangeMs = 7 * 24 * 60 * 60 * 1000;
+    const minTimestamp = Date.now() - rangeMs;
+    const targetSymbol = (symbol || useMarketStore.getState().selectedSymbol || 'BTCUSDT')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .toUpperCase();
 
     const fetchHistory = async () => {
       try {
-        const now = Date.now();
-        const targetSymbols = getTargetSymbols(symbol);
-
-        // Fetch recent orders up to `now` without specifying a 30-day startTime to prevent Aster's 7-day interval error
-        const requests = targetSymbols.map(sym =>
-          getAllOrders(signer, userAddr, {
-            symbol: sym,
-            endTime: Math.floor(now),
+        const res = await getAllOrders(
+          signer,
+          userAddr,
+          {
+            symbol: targetSymbol,
+            startTime: minTimestamp,
+            endTime: Math.floor(Date.now()),
             limit: PAGE_LIMIT,
-          })
+          },
+          abortController.signal
         );
 
-        const results = await Promise.allSettled(requests);
         if (!isMounted) return;
 
-        const collected: AsterOrderResponse[] = [];
-        for (const res of results) {
-          if (res.status === 'fulfilled' && Array.isArray(res.value)) {
-            collected.push(...res.value);
-          }
+        const items = Array.isArray(res) ? res : [];
+        const more = items.length >= PAGE_LIMIT;
+        useHistoryStore.getState().setOrderHistory(items, more);
+        persistHistory(userAddr, 'orders', items, Date.now());
+      } catch (err) {
+        if (!abortController.signal.aborted) {
+          console.error('[Aster Order History] Failed to load order history:', err);
         }
-
-        const sorted = sortDesc(
-          collected.filter((item, idx, arr) => {
-            const id = String(item.orderId || item.clientOrderId);
-            return arr.findIndex(x => String(x.orderId || x.clientOrderId) === id) === idx;
-          })
-        );
-
-        const oldest = sorted.length > 0 ? getOrderTime(sorted[sorted.length - 1]) : now;
-        const more = sorted.length >= PAGE_LIMIT;
-
-        setOrders(sorted);
-        setHasMore(more);
-        oldestQueriedRef.current = oldest;
-
-        if (sorted.length > 0) {
-          globalOrderCache[cacheKey] = {
-            data: sorted,
-            timestamp: Date.now(),
-            hasMore: more,
-            oldestQueried: oldest,
-          };
-        }
-      } catch (err: any) {
-        console.error('[Aster Order History] Failed to load order history:', err);
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+          setScanProgress(null);
+          setPausedNotice(null);
+        }
       }
     };
 
@@ -175,16 +111,19 @@ export const useOrderHistory = (
 
     return () => {
       isMounted = false;
+      abortController.abort();
     };
-  }, [signer, userAddr, symbol, timeRange, cacheKey, marketCount]);
+  }, [signer, userAddr, symbol]);
 
   const loadMore = useCallback(async () => {
     if (!signer || !userAddr || isLoadingMore || !hasMore || isFetchingMoreRef.current) return;
 
-    const curEnd = oldestQueriedRef.current - 1;
-    if (curEnd <= 0) {
-      setHasMore(false);
-      if (globalOrderCache[cacheKey]) globalOrderCache[cacheKey].hasMore = false;
+    const curEnd = (oldestOrderTime || Date.now()) - 1;
+    const rangeMs = 7 * 24 * 60 * 60 * 1000;
+    const minTimestamp = Date.now() - rangeMs;
+
+    if (curEnd <= minTimestamp || curEnd <= 0) {
+      useHistoryStore.getState().appendOrderHistory([], false);
       return;
     }
 
@@ -192,66 +131,47 @@ export const useOrderHistory = (
     setIsLoadingMore(true);
 
     try {
-      const targetSymbols = getTargetSymbols(symbol);
-      const requests = targetSymbols.map(sym =>
-        getAllOrders(signer, userAddr, {
-          symbol: sym,
-          endTime: Math.floor(curEnd),
-          limit: PAGE_LIMIT,
-        })
-      );
-      const results = await Promise.allSettled(requests);
-
-      const nextBatch: AsterOrderResponse[] = [];
-      for (const res of results) {
-        if (res.status === 'fulfilled' && Array.isArray(res.value)) {
-          nextBatch.push(...res.value);
-        }
-      }
-
-      const sortedNext = sortDesc(nextBatch);
-      const oldest =
-        sortedNext.length > 0 ? getOrderTime(sortedNext[sortedNext.length - 1]) : curEnd;
-      const more = sortedNext.length >= PAGE_LIMIT;
-
-      oldestQueriedRef.current = oldest;
-
-      setOrders(prev => {
-        const combined = deduplicateOrders(prev, sortedNext);
-        if (globalOrderCache[cacheKey]) {
-          globalOrderCache[cacheKey] = {
-            data: combined,
-            timestamp: Date.now(),
-            hasMore: more,
-            oldestQueried: oldest,
-          };
-        }
-        return combined;
+      const targetSymbol = (symbol || useMarketStore.getState().selectedSymbol || 'BTCUSDT')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase();
+      const res = await getAllOrders(signer, userAddr, {
+        symbol: targetSymbol,
+        startTime: minTimestamp,
+        endTime: Math.floor(curEnd),
+        limit: PAGE_LIMIT,
       });
-      setHasMore(more);
+
+      const nextBatch = Array.isArray(res) ? res : [];
+      const more = nextBatch.length >= PAGE_LIMIT;
+      useHistoryStore.getState().appendOrderHistory(nextBatch, more);
     } catch (err) {
       console.error('[Aster Order History] Failed to load more order history:', err);
     } finally {
       setIsLoadingMore(false);
       isFetchingMoreRef.current = false;
     }
-  }, [signer, userAddr, symbol, timeRange, isLoadingMore, hasMore, cacheKey]);
+  }, [signer, userAddr, isLoadingMore, hasMore, oldestOrderTime, symbol]);
 
-  const recentOrders = useHistoryStore(state => state.recentOrders);
+  const filteredOrders = useMemo(() => {
+    let list = orderHistory;
+    if (symbol && symbol.trim()) {
+      const cleanTarget = symbol.replace('-', '').toUpperCase();
+      list = list.filter(o => (o.symbol || '').replace('-', '').toUpperCase() === cleanTarget);
+    }
+    if (timeRange === '1d') {
+      const minTimestamp = Date.now() - 24 * 60 * 60 * 1000;
+      list = list.filter(o => getOrderTime(o) >= minTimestamp);
+    }
+    return list;
+  }, [orderHistory, symbol, timeRange]);
 
-  const mergedOrders = useMemo(() => {
-    const socketOrders = symbol ? recentOrders.filter(o => o.symbol === symbol) : recentOrders;
-    const all = [...socketOrders, ...orders];
-    const seen = new Set();
-    return all
-      .filter(o => {
-        const key = String(o.orderId || o.clientOrderId);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .sort((a, b) => getOrderTime(b) - getOrderTime(a));
-  }, [symbol, recentOrders, orders]);
-
-  return { orders: mergedOrders, isLoading, isLoadingMore, hasMore, loadMore };
+  return {
+    orders: filteredOrders,
+    isLoading,
+    isLoadingMore,
+    hasMore,
+    loadMore,
+    scanProgress,
+    pausedNotice,
+  };
 };

@@ -1,23 +1,22 @@
 import { ArrowUpDown, Check, ChevronDown, Plus } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-import InfoBanner from '../../../../components/common/InfoBanner';
+import BigNumber from 'bignumber.js';
+
 import { useExchangeManager } from '../../core/ExchangeManager';
 import { useAccountStore } from '../../core/stores/accountStore';
 import { useMarketStore } from '../../core/stores/marketStore';
-import {
-  type TimeInForce,
-  type WorkingType,
-  useOrderEntryStore,
-} from '../../core/stores/orderEntryStore';
+import { type TimeInForce, useOrderEntryStore } from '../../core/stores/orderEntryStore';
 import { useOrderbookStore } from '../../core/stores/orderbookStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
 import { validateOrder } from '../../utils/orderValidation';
+import { formatQuantityToStep, safeDecimals, safeFormatNumber } from '../../utils/precision';
 import { AssetModeModal } from './AssetModeModal';
 import { OrderActionButton } from './OrderActionButton';
 import { OrderInput } from './OrderInput';
 import { OrderTypeSelector } from './OrderTypeSelector';
+import { TpSlSection } from './TpSlSection';
 
 interface OrderFormProps {
   onSubmitOrder: (params: any) => Promise<void>;
@@ -102,12 +101,34 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     store.marginType
   );
 
-  const validation = useMemo(() => {
-    return validateOrder(
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitErrorField, setSubmitErrorField] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (submitError || submitErrorField) {
+      setSubmitError(null);
+      setSubmitErrorField(null);
+    }
+  }, [
+    store.size,
+    store.price,
+    store.stopPrice,
+    store.callbackRate,
+    store.attachedTpPrice,
+    store.attachedSlPrice,
+    store.orderType,
+    store.side,
+    store.sizeAsset,
+    store.leverage,
+  ]);
+
+  const handleSubmit = (side: 'BUY' | 'SELL') => {
+    store.setSide(side);
+    const result = validateOrder(
       market,
       currentPrice,
       relevantBalances,
-      store.side,
+      side,
       store.orderType,
       store.price,
       store.size,
@@ -117,27 +138,22 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       maxPossibleSize,
       store.scaledPriceLower,
       store.scaledPriceUpper,
-      store.scaledOrderCount
+      store.scaledOrderCount,
+      store.attachedTpEnabled,
+      store.attachedTpPrice,
+      store.attachedSlEnabled,
+      store.attachedSlPrice
     );
-  }, [
-    market,
-    currentPrice,
-    relevantBalances,
-    store.side,
-    store.orderType,
-    store.price,
-    store.size,
-    store.sizeAsset,
-    store.stopPrice,
-    store.callbackRate,
-    maxPossibleSize,
-    store.scaledPriceLower,
-    store.scaledPriceUpper,
-    store.scaledOrderCount,
-  ]);
 
-  const handleSubmit = (side: 'BUY' | 'SELL') => {
-    store.setSide(side);
+    if (!result.isValid) {
+      setSubmitError(result.error || 'Please review order parameters');
+      setSubmitErrorField(result.errorField || null);
+      return;
+    }
+
+    setSubmitError(null);
+    setSubmitErrorField(null);
+
     const payload = {
       symbol: selectedSymbol,
       side,
@@ -175,10 +191,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   };
 
   const currentCurrency = store.sizeAsset === 'base' ? baseAsset : quoteAsset;
-  const baseDecimals = market?.stepSize ? Math.max(0, -Math.floor(Math.log10(market.stepSize))) : 4;
-  const priceDecimals = market?.tickSize
-    ? Math.max(0, -Math.floor(Math.log10(market.tickSize)))
-    : 2;
+  const baseDecimals = safeDecimals(market?.stepSize, 4, 8);
+  const priceDecimals = safeDecimals(market?.tickSize, 2, 8);
 
   const actionSubtext = useMemo(() => {
     const size = parseFloat(store.size) || 0;
@@ -210,12 +224,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const handleCurrencyToggle = (curr: string) => {
     const newAsset = curr === baseAsset ? 'base' : 'quote';
     if (newAsset !== store.sizeAsset) {
-      const currentSize = parseFloat(store.size) || 0;
-      if (currentSize > 0 && currentPrice > 0) {
+      const bnSize = new BigNumber(store.size);
+      if (!bnSize.isNaN() && bnSize.isGreaterThan(0) && currentPrice > 0) {
         if (newAsset === 'quote') {
-          store.setSize((currentSize * currentPrice).toFixed(2));
+          store.setSize(bnSize.times(currentPrice).toFixed(2, BigNumber.ROUND_DOWN));
+        } else if (market?.stepSize) {
+          store.setSize(
+            formatQuantityToStep(bnSize.dividedBy(currentPrice).toString(), market.stepSize)
+          );
         } else {
-          store.setSize((currentSize / currentPrice).toFixed(baseDecimals));
+          store.setSize(bnSize.dividedBy(currentPrice).toFixed(baseDecimals, BigNumber.ROUND_DOWN));
         }
       }
       store.setSizeAsset(newAsset);
@@ -415,7 +433,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               store.setWorkingType(opt === 'Mark' ? 'MARK_PRICE' : 'CONTRACT_PRICE')
             }
             onTriggerFill={handleTriggerFill}
-            error={validation.errorField === 'stopPrice'}
+            error={submitErrorField === 'stopPrice'}
           />
         )}
 
@@ -428,7 +446,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             currency={quoteAsset}
             placeholder="0.00"
             onBboClick={handleBboFill}
-            error={validation.errorField === 'price'}
+            error={submitErrorField === 'price'}
           />
         )}
 
@@ -455,7 +473,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               onChange={store.setCallbackRate}
               currency="%"
               placeholder="0.1 to 5"
-              error={validation.errorField === 'callbackRate'}
+              error={submitErrorField === 'callbackRate'}
             />
             <div className="flex gap-1.5 pt-0.5">
               {['0.5', '1.0', '2.0', '3.0', '5.0'].map(rate => (
@@ -615,7 +633,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               onFocus={() => store.setActiveInput('scaledPriceLower')}
               currency={quoteAsset}
               placeholder={currentPrice > 0 ? (currentPrice * 0.98).toFixed(priceDecimals) : '0.00'}
-              error={validation.errorField === 'scaledPriceLower'}
+              error={submitErrorField === 'scaledPriceLower'}
             />
 
             <OrderInput
@@ -625,7 +643,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               onFocus={() => store.setActiveInput('scaledPriceUpper')}
               currency={quoteAsset}
               placeholder={currentPrice > 0 ? (currentPrice * 1.02).toFixed(priceDecimals) : '0.00'}
-              error={validation.errorField === 'scaledPriceUpper'}
+              error={submitErrorField === 'scaledPriceUpper'}
             />
 
             <div className="space-y-1">
@@ -635,7 +653,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                 onChange={store.setScaledOrderCount}
                 currency=""
                 placeholder="2 - 20"
-                error={validation.errorField === 'scaledOrderCount'}
+                error={submitErrorField === 'scaledOrderCount'}
               />
               <div className="flex items-center justify-end gap-1">
                 {[3, 5, 8, 10, 15].map(n => (
@@ -717,7 +735,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           currencyOptions={[quoteAsset, baseAsset]}
           onCurrencyChange={handleCurrencyToggle}
           placeholder="0.00"
-          error={validation.errorField === 'size'}
+          error={submitErrorField === 'size'}
         />
         <div className="px-1 py-1">
           <div className="relative w-full h-1 bg-border-color rounded-full flex items-center">
@@ -745,13 +763,18 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               max="100"
               value={currentSliderPct.toFixed(0)}
               onChange={e => {
-                const pct = parseFloat(e.target.value) / 100;
-                const newSize = maxPossibleSize * pct;
-                if (newSize > 0) {
-                  const stepPrecision = store.sizeAsset === 'quote' ? 2 : baseDecimals;
-                  store.setSize(newSize.toFixed(stepPrecision));
-                } else {
+                const val = parseFloat(e.target.value);
+                if (val <= 0 || !maxPossibleSize) {
                   store.setSize('');
+                  return;
+                }
+                const rawSize = new BigNumber(maxPossibleSize).times(val).dividedBy(100);
+                if (store.sizeAsset === 'quote') {
+                  store.setSize(rawSize.toFixed(2, BigNumber.ROUND_DOWN));
+                } else if (market?.stepSize) {
+                  store.setSize(formatQuantityToStep(rawSize.toString(), market.stepSize));
+                } else {
+                  store.setSize(rawSize.toFixed(baseDecimals, BigNumber.ROUND_DOWN));
                 }
               }}
               className="absolute inset-0 w-full h-4 -top-1.5 opacity-0 cursor-pointer z-10"
@@ -766,7 +789,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           </div>
         </div>
 
-        {validation.error && (
+        {submitError && (
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-danger/10 border border-danger/30 text-danger text-[11px] font-medium animate-fade-in">
             <svg
               width="12"
@@ -783,7 +806,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               <line x1="12" y1="8" x2="12" y2="12"></line>
               <line x1="12" y1="16" x2="12.01" y2="16"></line>
             </svg>
-            <span>{validation.error}</span>
+            <span>{submitError}</span>
           </div>
         )}
       </div>
@@ -901,65 +924,40 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         )}
 
         {supportsTpSl && (store.attachedTpEnabled || store.attachedSlEnabled) && (
-          <div className="pl-4 space-y-2 border-l border-color my-1">
-            <div className="space-y-1">
-              <div className="flex justify-between items-center text-[11px]">
-                <span>Take Profit</span>
-                <select
-                  value={store.attachedTpTrigger}
-                  onChange={e => store.setAttachedTpTrigger(e.target.value as WorkingType)}
-                  className="bg-transparent text-primary text-[11px] outline-none cursor-pointer"
-                >
-                  <option value="MARK_PRICE" className="bg-secondary">
-                    Mark
-                  </option>
-                  <option value="CONTRACT_PRICE" className="bg-secondary">
-                    Last
-                  </option>
-                </select>
-              </div>
-              <OrderInput
-                label="TP"
-                value={store.attachedTpPrice}
-                onChange={store.setAttachedTpPrice}
-                currency={quoteAsset}
-                placeholder="0.00"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex justify-between items-center text-[11px]">
-                <span>Stop Loss</span>
-                <select
-                  value={store.attachedSlTrigger}
-                  onChange={e => store.setAttachedSlTrigger(e.target.value as WorkingType)}
-                  className="bg-transparent text-primary text-[11px] outline-none cursor-pointer"
-                >
-                  <option value="MARK_PRICE" className="bg-secondary">
-                    Mark
-                  </option>
-                  <option value="CONTRACT_PRICE" className="bg-secondary">
-                    Last
-                  </option>
-                </select>
-              </div>
-              <OrderInput
-                label="SL"
-                value={store.attachedSlPrice}
-                onChange={store.setAttachedSlPrice}
-                currency={quoteAsset}
-                placeholder="0.00"
-              />
-            </div>
-          </div>
+          <TpSlSection
+            entryPrice={
+              store.orderType === 'LIMIT' && parseFloat(store.price) > 0
+                ? parseFloat(store.price)
+                : currentPrice || markPrice
+            }
+            currentPrice={currentPrice}
+            markPrice={markPrice}
+            size={store.size}
+            sizeAsset={store.sizeAsset}
+            leverage={store.leverage}
+            side={store.side}
+            onSideChange={store.setSide}
+            quoteAsset={quoteAsset}
+            baseAsset={baseAsset}
+            priceDecimals={priceDecimals}
+            tickSize={market?.tickSize}
+            attachedTpEnabled={store.attachedTpEnabled}
+            attachedTpPrice={store.attachedTpPrice}
+            attachedTpTrigger={store.attachedTpTrigger}
+            attachedSlEnabled={store.attachedSlEnabled}
+            attachedSlPrice={store.attachedSlPrice}
+            attachedSlTrigger={store.attachedSlTrigger}
+            onTpPriceChange={store.setAttachedTpPrice}
+            onSlPriceChange={store.setAttachedSlPrice}
+            onTpTriggerChange={store.setAttachedTpTrigger}
+            onSlTriggerChange={store.setAttachedSlTrigger}
+          />
         )}
       </div>
 
       <OrderActionButton
         onSubmit={handleSubmit}
         isLoading={isLoading}
-        isValid={validation.isValid}
-        validationError={validation.error}
         onOpenDepositModal={onOpenDepositModal}
         walletBalance={calcWalletBalance}
         actionSubtext={actionSubtext}
@@ -976,10 +974,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span>Max</span>
             <span className="text-primary font-medium font-mono truncate ml-1">
               {maxPossibleSize > 0
-                ? `${maxPossibleSize.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: store.sizeAsset === 'quote' ? 2 : baseDecimals,
-                  })} ${currentCurrency}`
+                ? `${safeFormatNumber(maxPossibleSize, 2, store.sizeAsset === 'quote' ? 2 : baseDecimals)} ${currentCurrency}`
                 : `0.00 ${quoteAsset}`}
             </span>
           </div>
@@ -987,10 +982,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span>Est. Liq</span>
             <span className="text-success font-medium font-mono">
               {estimatedIsolatedLiqPrice.long && estimatedIsolatedLiqPrice.long > 0
-                ? `$${estimatedIsolatedLiqPrice.long.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}`
+                ? `$${safeFormatNumber(estimatedIsolatedLiqPrice.long, 2, 2)}`
                 : '--'}
             </span>
           </div>
@@ -1007,10 +999,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span>Max</span>
             <span className="text-primary font-medium font-mono truncate ml-1">
               {maxPossibleSize > 0
-                ? `${maxPossibleSize.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: store.sizeAsset === 'quote' ? 2 : baseDecimals,
-                  })} ${currentCurrency}`
+                ? `${safeFormatNumber(maxPossibleSize, 2, store.sizeAsset === 'quote' ? 2 : baseDecimals)} ${currentCurrency}`
                 : `0.00 ${quoteAsset}`}
             </span>
           </div>
@@ -1018,21 +1007,18 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span>Est. Liq</span>
             <span className="text-danger font-medium font-mono">
               {estimatedIsolatedLiqPrice.short && estimatedIsolatedLiqPrice.short > 0
-                ? `$${estimatedIsolatedLiqPrice.short.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}`
+                ? `$${safeFormatNumber(estimatedIsolatedLiqPrice.short, 2, 2)}`
                 : '--'}
             </span>
           </div>
         </div>
       </div>
-      <InfoBanner
+      {/* <InfoBanner
         variant="warning"
         label="Beta:"
         message={"This feature is currently in Beta. We're actively testing and improving it."}
         margin="mx-0 mt-0 mb-2"
-      />
+      /> */}
       <AssetModeModal
         isOpen={isAssetModeModalOpen}
         onClose={() => setIsAssetModeModalOpen(false)}

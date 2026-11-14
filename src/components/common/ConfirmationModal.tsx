@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface ConfirmationModalProps {
   isOpen: boolean;
@@ -48,7 +49,7 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in p-4"
       onClick={isLoading ? undefined : onCancel}
@@ -116,4 +117,6 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };

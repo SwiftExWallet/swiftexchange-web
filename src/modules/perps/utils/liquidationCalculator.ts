@@ -2,6 +2,7 @@ import BigNumber from 'bignumber.js';
 
 import type { AccountBalance, Position } from '../core/models';
 import type { LeverageBracket } from '../core/stores/leverageStore';
+import { safeFormatNumber } from './precision';
 
 export interface LiqCalcParams {
   position: Position;
@@ -243,8 +244,5 @@ export function formatPricePrecision(
         : decimals;
   const maxDec = Math.max(minDec, decimals);
 
-  return num.toLocaleString('en-US', {
-    minimumFractionDigits: minDec,
-    maximumFractionDigits: maxDec,
-  });
+  return safeFormatNumber(num, minDec, maxDec, '--');
 }

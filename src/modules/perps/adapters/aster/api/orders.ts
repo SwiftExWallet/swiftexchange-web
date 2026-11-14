@@ -233,7 +233,16 @@ export async function getOpenOrders(
 ): Promise<AsterOrderResponse[]> {
   const p: Record<string, string> = {};
   if (symbol) p.symbol = symbol;
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.OPEN_ORDERS, p);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.OPEN_ORDERS,
+    p,
+    undefined,
+    undefined,
+    symbol ? 1 : 40
+  );
 }
 
 // Get order history with optional time-range and pagination.
@@ -248,19 +257,28 @@ export async function getAllOrders(
   }
   const p: Record<string, string> = { symbol: params.symbol };
   if (params.orderId !== undefined) p.orderId = String(params.orderId);
-  if (params.startTime !== undefined) p.startTime = String(params.startTime);
+  if (params.startTime !== undefined && params.endTime !== undefined) {
+    const startNum = Number(params.startTime);
+    const endNum = Number(params.endTime);
+    const maxWindow = 7 * 24 * 3600 * 1000;
+    const safeStart = endNum - startNum > maxWindow ? endNum - maxWindow : startNum;
+    p.startTime = String(safeStart);
+  } else if (params.startTime !== undefined) {
+    p.startTime = String(params.startTime);
+  }
   if (params.endTime !== undefined) p.endTime = String(params.endTime);
   if (params.limit !== undefined) p.limit = String(params.limit);
 
-  if (
-    params.startTime &&
-    params.endTime &&
-    Number(params.endTime) - Number(params.startTime) > 7 * 24 * 3600 * 1000
-  ) {
-    throw new Error('Query time window cannot exceed 7 days for getAllOrders.');
-  }
-
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ALL_ORDERS, p, undefined, signal);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.ALL_ORDERS,
+    p,
+    undefined,
+    signal,
+    5
+  );
 }
 
 /**
