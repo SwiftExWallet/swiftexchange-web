@@ -558,8 +558,8 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
               {deriveState === 'signing'
                 ? 'Confirm the signature request in your wallet'
                 : isDepositError
-                  ? `Account requires initial deposit to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`
-                  : `One-time signature to activate 1-click trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
+                  ? `Account requires initial deposit to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`
+                  : `One-time signature to activate 1-click trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`}
             </p>
           </div>
         ) : isAccountLoading && !walletBalance && positionsCount === 0 ? (

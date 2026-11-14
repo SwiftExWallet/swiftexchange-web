@@ -974,7 +974,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               <p className="text-[12px] text-secondary leading-relaxed">
                 Get free testnet funds to trade risk-free on{' '}
                 <strong className="text-primary font-semibold">
-                  {currentExchange === 'hyperliquid' ? 'Hyperliquid Testnet' : 'Aster V3 Testnet'}
+                  {currentExchange === 'hyperliquid' ? 'Hyperliquid Testnet' : 'Aster Testnet'}
                 </strong>
                 . Claim tokens below using your connected EVM wallet:
               </p>

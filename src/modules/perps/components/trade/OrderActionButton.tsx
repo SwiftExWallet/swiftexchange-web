@@ -110,10 +110,10 @@ export const OrderActionButton: React.FC<OrderActionButtonProps> = ({
           {isSigning
             ? 'Confirm the signature request in your wallet'
             : isDepositError
-              ? `Account requires initial deposit or faucet funds to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`
+              ? `Account requires initial deposit or faucet funds to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`
               : isSignerOffline
                 ? 'Secure trading engine is undergoing a brief update. Our team is actively working on it.'
-                : `One-time signature to activate gas-free execution on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
+                : `One-time signature to activate gas-free execution on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`}
         </p>
       </div>
     );

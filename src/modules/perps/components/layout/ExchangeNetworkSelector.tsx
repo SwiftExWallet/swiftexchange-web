@@ -74,7 +74,7 @@ export const ExchangeNetworkSelector: React.FC = () => {
             ? 'bg-hover border-brand/50 ring-2 ring-brand/10'
             : 'bg-tertiary hover:bg-hover border-color hover:border-color-hover'
         }`}
-        title={`DEX Protocol: ${isAster ? 'Aster V3' : 'Hyperliquid'}`}
+        title={`Exchange: ${isAster ? 'Aster' : 'Hyperliquid'}`}
       >
         {/* Exchange Actual Logo */}
         <div className="flex items-center gap-1.5 font-semibold text-primary">
@@ -83,7 +83,7 @@ export const ExchangeNetworkSelector: React.FC = () => {
             alt={isAster ? 'Aster' : 'Hyperliquid'}
             className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
           />
-          <span>{isAster ? 'Aster V3' : 'Hyperliquid'}</span>
+          <span>{isAster ? 'Aster' : 'Hyperliquid'}</span>
         </div>
 
         <ChevronDown
@@ -102,19 +102,18 @@ export const ExchangeNetworkSelector: React.FC = () => {
               top: `${coords.top}px`,
               right: `${coords.right}px`,
             }}
-            className="fixed z-[99999] w-[275px] bg-secondary/95 backdrop-blur-xl border border-color rounded-2xl shadow-2xl p-3 animate-in fade-in slide-in-from-top-2 duration-150 space-y-2.5"
+            className="fixed z-[99999] w-[260px] bg-secondary/95 backdrop-blur-xl border border-color rounded-2xl shadow-2xl p-3 animate-in fade-in slide-in-from-top-2 duration-150 space-y-2.5"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-1 pb-1.5 border-b border-color">
               <span className="text-[10px] font-bold text-muted uppercase tracking-wider">
-                Select DEX Protocol
+                Select Exchange
               </span>
-              <span className="text-[10px] text-secondary font-mono">Real-time Feed</span>
             </div>
 
             {/* Protocol Selection List */}
             <div className="space-y-1.5">
-              {/* Aster V3 */}
+              {/* Aster */}
               <button
                 type="button"
                 onClick={() => {
@@ -130,18 +129,15 @@ export const ExchangeNetworkSelector: React.FC = () => {
                 <div className="flex items-center gap-2.5">
                   <img
                     src="/aster.png"
-                    alt="Aster V3"
+                    alt="Aster"
                     className="w-7 h-7 rounded-lg object-cover shrink-0 shadow-sm"
                   />
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[12px] font-bold text-primary">Aster V3</span>
-                      <span className="text-[9px] bg-tertiary px-1 py-0.2 rounded text-muted font-medium border border-color">
-                        Multi-Asset
-                      </span>
+                      <span className="text-[12px] font-bold text-primary">Aster</span>
                     </div>
                     <p className="text-[10px] text-muted leading-tight mt-0.5">
-                      Orderbook DEX with cross & isolated margin
+                      Perpetuals Trading
                     </p>
                   </div>
                 </div>
@@ -170,12 +166,9 @@ export const ExchangeNetworkSelector: React.FC = () => {
                   <div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[12px] font-bold text-primary">Hyperliquid</span>
-                      <span className="text-[9px] bg-cyan-500/10 text-cyan-400 px-1 py-0.2 rounded font-semibold border border-cyan-500/20">
-                        L1 Appchain
-                      </span>
                     </div>
                     <p className="text-[10px] text-muted leading-tight mt-0.5">
-                      Sub-second finality with USDC collateral
+                      Perpetuals Trading
                     </p>
                   </div>
                 </div>

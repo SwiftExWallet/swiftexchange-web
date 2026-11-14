@@ -1520,10 +1520,10 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                   {deriveState === 'signing'
                     ? 'Confirm signature request in your wallet'
                     : isDepositError
-                      ? `Initial deposit or faucet required to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`
+                      ? `Initial deposit or faucet required to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`
                       : isSignerOffline
                         ? 'Secure trading engine is undergoing a brief update. Our team is actively working on it.'
-                        : `One-time signature to activate gas-free trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
+                        : `One-time signature to activate gas-free trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`}
                 </p>
               </div>
             ) : isAccountLoading && !hasFunds ? (

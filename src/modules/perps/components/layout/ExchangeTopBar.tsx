@@ -8,7 +8,7 @@ import { useOrderbookStore } from '../../core/stores/orderbookStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { safeFormatNumber } from '../../utils/precision';
 import { CoinIcon } from '../ui/CoinIcon';
-// import { ExchangeNetworkSelector } from './ExchangeNetworkSelector';
+import { ExchangeNetworkSelector } from './ExchangeNetworkSelector';
 import { MarketSelectorModal } from './MarketSelectorModal';
 
 function formatExactNumber(num: number): string {
@@ -37,13 +37,6 @@ export const ExchangeTopBar: React.FC = () => {
 
   const assetCtx = useTickerStore(state => state.assetCtxByMarket[symbol]);
   const currentExchange = useExchangeManager(state => state.currentExchange);
-  const setExchange = useExchangeManager(state => state.setExchange);
-
-  React.useEffect(() => {
-    if (currentExchange !== 'aster') {
-      setExchange('aster');
-    }
-  }, [currentExchange, setExchange]);
 
   // Mark price from backend ticker; fall back to orderbook mid-price if unavailable
   const markPxFromTicker = parseFloat(assetCtx?.markPx || '0');
@@ -268,11 +261,11 @@ export const ExchangeTopBar: React.FC = () => {
           </div>
         </div>
 
-        {/* <div className="flex items-center pl-1.5 shrink-0 z-20 bg-secondary h-full ml-auto">
+        <div className="flex items-center pl-1.5 shrink-0 z-20 bg-secondary h-full ml-auto">
           <div className="flex items-center pl-1.5 border-l border-color h-full">
             <ExchangeNetworkSelector />
           </div>
-        </div> */}
+        </div>
       </div>
 
       <MarketSelectorModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />

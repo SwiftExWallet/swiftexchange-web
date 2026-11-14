@@ -12,7 +12,7 @@ export const ExchangeSwitchingOverlay: React.FC = () => {
 
   const isAster = currentExchange === 'aster';
   const isTestnet = currentNetwork === 'testnet';
-  const exchangeName = isAster ? 'Aster V3' : 'Hyperliquid';
+  const exchangeName = isAster ? 'Aster' : 'Hyperliquid';
   const logoSrc = isAster ? '/aster.png' : '/hyperliquid.webp';
 
   return (
