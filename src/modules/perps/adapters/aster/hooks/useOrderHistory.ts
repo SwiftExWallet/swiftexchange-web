@@ -7,6 +7,7 @@ import { useMarketStore } from '../../../core/stores/marketStore';
 import { getAllOrders } from '../api/orders';
 import { type ScanProgress, getPersistedHistory, persistHistory } from '../historyScanner';
 import type { AsterOrderResponse } from '../types/orders';
+import type { IAsterSigner } from '../types/signer';
 
 export type TimeRange = '1d' | '1w';
 
@@ -17,7 +18,7 @@ const getOrderTime = (o: AsterOrderResponse): number => {
 };
 
 export const useOrderHistory = (
-  signer: Signer | null,
+  signer: Signer | IAsterSigner | null,
   userAddr: string | null,
   symbol: string | null,
   timeRange: TimeRange = '1w'

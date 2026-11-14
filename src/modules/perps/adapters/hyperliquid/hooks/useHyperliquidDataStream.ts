@@ -11,6 +11,50 @@ import { useMarketStore } from '../../../core/stores/marketStore';
 import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
+import { useTickerStore } from '../../../core/stores/tickerStore';
+
+export function mapHyperliquidPositions(
+  assetPositions: any[],
+  assetCtxByMarket: Record<string, any> = {}
+) {
+  if (!Array.isArray(assetPositions)) return [];
+
+  return assetPositions
+    .map((p: any) => {
+      const rawPos = p?.position;
+      if (!rawPos) return null;
+
+      // Prune closed positions with zero size so they don't linger in UI
+      if (!rawPos.szi || rawPos.szi === '0' || Number(rawPos.szi) === 0) {
+        return null;
+      }
+
+      const rawCoin = rawPos.coin || '';
+      const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
+      const levValue = rawPos.leverage?.value ? Number(rawPos.leverage.value) : 1;
+      const marginType =
+        rawPos.leverage?.type === 'isolated' ? ('isolated' as const) : ('cross' as const);
+
+      const liveMarkPx =
+        assetCtxByMarket[symbol]?.markPx ||
+        assetCtxByMarket[rawCoin]?.markPx ||
+        rawPos.entryPx ||
+        '0';
+
+      return {
+        symbol,
+        size: rawPos.szi || '0',
+        entryPrice: rawPos.entryPx || '0',
+        markPrice: liveMarkPx,
+        liquidationPrice: rawPos.liquidationPx ? String(rawPos.liquidationPx) : '0',
+        unrealizedPnl: rawPos.unrealizedPnl || '0',
+        leverage: levValue,
+        marginType,
+        isolatedMargin: rawPos.marginUsed || '0',
+      };
+    })
+    .filter(Boolean);
+}
 
 export const useHyperliquidDataStream = (userAddr: string | null) => {
   const currentExchange = useExchangeManager(s => s.currentExchange);
@@ -46,8 +90,9 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
             const accountValue = String(marginSummary.accountValue || '0');
             const totalMarginUsed = String(marginSummary.totalMarginUsed || '0');
             const withdrawable = String(
-              marginSummary.withdrawable ||
-                Math.max(0, parseFloat(accountValue) - parseFloat(totalMarginUsed)).toFixed(2)
+              marginSummary.withdrawable !== undefined && marginSummary.withdrawable !== null
+                ? marginSummary.withdrawable
+                : Math.max(0, parseFloat(accountValue) - parseFloat(totalMarginUsed)).toFixed(2)
             );
 
             useAccountStore.getState().setBalances([
@@ -68,29 +113,8 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
             ]);
           }
 
-          const positions = ch.assetPositions
-            ?.map((p: any) => {
-              const rawPos = p.position;
-              if (!rawPos) return null;
-              const rawCoin = rawPos.coin || '';
-              const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
-              const levValue = rawPos.leverage?.value ? Number(rawPos.leverage.value) : 1;
-              const marginType =
-                rawPos.leverage?.type === 'isolated' ? ('isolated' as const) : ('cross' as const);
-
-              return {
-                symbol,
-                size: rawPos.szi || '0',
-                entryPrice: rawPos.entryPx || '0',
-                markPrice: rawPos.entryPx || '0',
-                liquidationPrice: rawPos.liquidationPx || '0',
-                unrealizedPnl: rawPos.unrealizedPnl || '0',
-                leverage: levValue,
-                marginType,
-                isolatedMargin: rawPos.marginUsed || '0',
-              };
-            })
-            .filter(Boolean);
+          const tickerState = useTickerStore.getState().assetCtxByMarket;
+          const positions = mapHyperliquidPositions(ch.assetPositions, tickerState);
 
           if (positions) {
             usePositionStore.getState().setPositions(positions as any);
@@ -161,8 +185,15 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
           const trades = fills.map((f: any) => {
             const rawCoin = f.coin || '';
             const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
+            const fillId =
+              f.tid !== undefined && f.tid !== null
+                ? String(f.tid)
+                : f.hash
+                  ? `${f.hash}-${f.oid}`
+                  : `${f.oid}-${f.time}`;
+
             return {
-              id: String(f.oid || f.tid || Date.now()),
+              id: fillId,
               orderId: String(f.oid || ''),
               symbol,
               side: f.side === 'B' ? ('buy' as const) : ('sell' as const),

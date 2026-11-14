@@ -9,9 +9,10 @@ import {
   deleteListenKey,
   keepaliveListenKey,
 } from '../api/listenKey';
+import type { IAsterSigner } from '../types/signer';
 
 export function useListenKey(
-  signer: Signer | null,
+  signer: Signer | IAsterSigner | null,
   userAddr: string | null
 ): {
   listenKey: string | null;

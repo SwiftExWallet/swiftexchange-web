@@ -7,12 +7,13 @@ import { useMarketStore } from '../../../core/stores/marketStore';
 import { getUserTrades } from '../api/account';
 import { type ScanProgress, getPersistedHistory, persistHistory } from '../historyScanner';
 import type { AsterUserTrade } from '../types/account';
+import type { IAsterSigner } from '../types/signer';
 import type { TimeRange } from './useOrderHistory';
 
 const PAGE_LIMIT = 100;
 
 export const useTradeHistory = (
-  signer: Signer | null,
+  signer: Signer | IAsterSigner | null,
   userAddr: string | null,
   symbol: string | null,
   timeRange: TimeRange = '1w'

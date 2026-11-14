@@ -16,6 +16,7 @@ export interface HyperliquidNetworkConfig {
   restUrl: string;
   wsUrl: string;
   depositBridge: string;
+  usdcAddress: string;
   l1ChainId: number;
   isTestnet: boolean;
 }
@@ -59,13 +60,15 @@ export const HYPERLIQUID_CONFIGS: Record<PerpNetwork, HyperliquidNetworkConfig> 
     restUrl: 'https://api.hyperliquid.xyz',
     wsUrl: 'wss://api.hyperliquid.xyz/ws',
     depositBridge: '0x2df1c51e09aecf9cacb7bc98cb1742757f163df7',
+    usdcAddress: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
     l1ChainId: 42161, // Arbitrum One
     isTestnet: false,
   },
   testnet: {
     restUrl: 'https://api.hyperliquid-testnet.xyz',
     wsUrl: 'wss://api.hyperliquid-testnet.xyz/ws',
-    depositBridge: '0x0000000000000000000000000000000000000000',
+    depositBridge: '0x08cfc1B6b2dCF36A1480b99353A354AA8AC56f89',
+    usdcAddress: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
     l1ChainId: 421614, // Arbitrum Sepolia
     isTestnet: true,
   },

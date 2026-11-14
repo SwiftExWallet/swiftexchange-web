@@ -4,13 +4,14 @@ import type { Signer } from 'ethers';
 
 import { useHistoryStore } from '../../../core/stores/historyStore';
 import { getIncomeHistory } from '../api/account';
+import type { IAsterSigner } from '../types/signer';
 
 export type TimeRange = '1d' | '1w';
 
 const PAGE_LIMIT = 1000;
 
 export const useTransactionHistory = (
-  signer: Signer | null,
+  signer: Signer | IAsterSigner | null,
   userAddr: string | null,
   symbol?: string | null,
   timeRange: TimeRange = '1w'
