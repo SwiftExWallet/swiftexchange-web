@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapHyperliquidPositions } from '../hooks/useHyperliquidDataStream';
+import { mapHyperliquidBalances, mapHyperliquidPositions } from '../hooks/useHyperliquidDataStream';
 
 describe('Hyperliquid Position & Balance Mapping (mapHyperliquidPositions)', () => {
   it('prunes closed positions with zero size (szi === "0" or 0)', () => {
@@ -104,5 +104,115 @@ describe('Hyperliquid Position & Balance Mapping (mapHyperliquidPositions)', () 
     expect(mapHyperliquidPositions([])).toEqual([]);
     expect(mapHyperliquidPositions(null as any)).toEqual([]);
     expect(mapHyperliquidPositions(undefined as any)).toEqual([]);
+  });
+});
+
+describe('Hyperliquid Balance Mapping (mapHyperliquidBalances)', () => {
+  it('correctly maps unified account balance where USDC resides in spotClearinghouseState', () => {
+    const clearinghouseState = {
+      marginSummary: {
+        accountValue: '0.0',
+        totalNtlPos: '0.0',
+        totalRawUsd: '0.0',
+        totalMarginUsed: '0.0',
+      },
+      crossMarginSummary: {
+        accountValue: '0.0',
+        totalNtlPos: '0.0',
+        totalRawUsd: '0.0',
+        totalMarginUsed: '0.0',
+      },
+      withdrawable: '0.0',
+      assetPositions: [],
+    };
+
+    const spotState = {
+      balances: [
+        {
+          coin: 'USDC',
+          token: 0,
+          total: '1185.965798',
+          hold: '0.0',
+          entryNtl: '0.0',
+        },
+      ],
+      tokenToAvailableAfterMaintenance: [[0, '1185.965798']],
+    };
+
+    const { balances, summary } = mapHyperliquidBalances(clearinghouseState, spotState);
+
+    expect(balances).toHaveLength(1);
+    expect(balances[0]?.asset).toBe('USDC');
+    expect(balances[0]?.total).toBe('1185.97');
+    expect(balances[0]?.available).toBe('1185.97');
+    expect(balances[0]?.locked).toBe('0.00');
+    expect(balances[0]?.marginBalance).toBe('1185.97');
+    expect(balances[0]?.unrealizedPnl).toBe('0.00');
+
+    expect(summary.totalWalletBalance).toBe('1185.97');
+    expect(summary.totalMarginBalance).toBe('1185.97');
+    expect(summary.availableBalance).toBe('1185.97');
+    expect(summary.totalUnrealizedProfit).toBe('0.00');
+  });
+
+  it('aggregates perpetual margin and spot balances when both contain funds', () => {
+    const clearinghouseState = {
+      marginSummary: {
+        accountValue: '600.0',
+        totalNtlPos: '5000.0',
+        totalRawUsd: '550.0',
+        totalMarginUsed: '250.0',
+      },
+      withdrawable: '350.0',
+    };
+
+    const spotState = {
+      balances: [
+        {
+          coin: 'USDC',
+          token: 0,
+          total: '400.0',
+          hold: '50.0',
+        },
+        {
+          coin: 'PURR',
+          token: 1,
+          total: '1000.0',
+          hold: '0.0',
+        },
+      ],
+    };
+
+    const { balances, summary } = mapHyperliquidBalances(clearinghouseState, spotState);
+
+    expect(balances).toHaveLength(2);
+    const usdc = balances.find(b => b.asset === 'USDC');
+    const purr = balances.find(b => b.asset === 'PURR');
+
+    expect(usdc).toBeDefined();
+    expect(usdc?.total).toBe('950.00');
+    expect(usdc?.available).toBe('700.00');
+    expect(usdc?.locked).toBe('300.00');
+    expect(usdc?.marginBalance).toBe('1000.00');
+    expect(usdc?.unrealizedPnl).toBe('50.00');
+
+    expect(purr).toBeDefined();
+    expect(purr?.total).toBe('1000.0');
+    expect(purr?.available).toBe('1000.0000');
+
+    expect(summary.totalWalletBalance).toBe('950.00');
+    expect(summary.totalMarginBalance).toBe('1000.00');
+    expect(summary.availableBalance).toBe('700.00');
+    expect(summary.totalUnrealizedProfit).toBe('50.00');
+  });
+
+  it('handles null and undefined states safely without crashing', () => {
+    const { balances, summary } = mapHyperliquidBalances(null, null);
+
+    expect(balances).toHaveLength(1);
+    expect(balances[0]?.asset).toBe('USDC');
+    expect(balances[0]?.total).toBe('0.00');
+    expect(balances[0]?.available).toBe('0.00');
+    expect(summary.totalWalletBalance).toBe('0.00');
   });
 });

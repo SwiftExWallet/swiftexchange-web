@@ -278,6 +278,7 @@ export async function restoreAgentWallet(
           cleanupLegacyStorage(activeTestnet);
           return new HyperliquidIsolatedSigner(bridgeAddr);
         }
+        localStorage.removeItem(getAddrKey(activeTestnet));
       }
     } catch {
       void 0;

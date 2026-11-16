@@ -115,9 +115,19 @@ export async function placeHyperliquidOrder(
   let orderTypeObj: any;
 
   if (req.type === 'MARKET') {
-    const curPx =
+    let curPx =
       req.currentPrice || (typeof req.price === 'string' ? parseFloat(req.price) : req.price);
-    // Apply 5% slippage protection for market execution
+    if (!curPx || curPx <= 0 || isNaN(curPx)) {
+      try {
+        const mids: any = await transport.request('info', { type: 'allMids' });
+        const coin = universeItem?.name;
+        if (coin && mids && mids[coin]) {
+          curPx = parseFloat(mids[coin]);
+        }
+      } catch {
+        void 0;
+      }
+    }
     const slipPrice = isBuy ? curPx * 1.05 : curPx * 0.95;
     limitPx = formatHyperliquidPrice(slipPrice, szDecimals);
     orderTypeObj = { limit: { tif: 'FrontendMarket' } };

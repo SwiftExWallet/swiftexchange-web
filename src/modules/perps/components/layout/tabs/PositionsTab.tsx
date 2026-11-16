@@ -4,6 +4,7 @@ import React, { memo, useMemo, useState } from 'react';
 import BigNumber from 'bignumber.js';
 
 import { ConfirmationModal } from '../../../../../components/common/ConfirmationModal';
+import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
@@ -182,10 +183,16 @@ const PositionRow = memo(
       });
     }, [officialLiq, position, leverage, allPositions, balances, isMultiAsset, bracketsBySymbol]);
 
+    const currentExchange = useExchangeManager(s => s.currentExchange);
+    const quoteAsset = currentExchange === 'hyperliquid' ? 'USDC' : 'USDT';
     const tickSize = market?.tickSize;
     const tickDecimals =
       tickSize && String(tickSize).includes('.') ? String(tickSize).split('.')[1].length : 1;
-    const baseSymbol = position.symbol.replace('-USDT', '').replace('USDT', '');
+    const baseSymbol = position.symbol
+      .replace('-USDC', '')
+      .replace('USDC', '')
+      .replace('-USDT', '')
+      .replace('USDT', '');
 
     return (
       <tr className="border-b border-color hover:bg-hover transition-colors">
@@ -205,7 +212,7 @@ const PositionRow = memo(
         >
           <div className="flex flex-col">
             <span className="font-medium">
-              {safeFormatNumber(bnNotional.toNumber(), 2, 2)} USDT
+              {safeFormatNumber(bnNotional.toNumber(), 2, 2)} {quoteAsset}
             </span>
             <span className="text-[10px] text-secondary">
               {absSize} {baseSymbol}
@@ -220,7 +227,9 @@ const PositionRow = memo(
         </td>
         <td className="px-2.5 py-1.5 text-primary font-mono-tabular">
           <div className="flex flex-col">
-            <span>{safeFormatNumber(marginCalc, 2, 2)} USDT</span>
+            <span>
+              {safeFormatNumber(marginCalc, 2, 2)} {quoteAsset}
+            </span>
             <span className="text-[10px] text-secondary">
               ({position.marginType === 'isolated' ? 'Isolated' : 'Cross'})
             </span>
@@ -238,7 +247,7 @@ const PositionRow = memo(
           <div className="flex flex-col">
             <span className="font-medium">
               {pnlVal > 0 ? '+' : ''}
-              {safeFormatNumber(pnlVal, 2, 2)} USDT
+              {safeFormatNumber(pnlVal, 2, 2)} {quoteAsset}
             </span>
             <span className="text-[10px]">
               {roe > 0 ? '+' : ''}
@@ -359,7 +368,7 @@ const PositionRow = memo(
                     className={`font-mono ${pnlVal > 0 ? 'text-success' : pnlVal < 0 ? 'text-danger' : 'text-primary'}`}
                   >
                     {pnlVal > 0 ? '+' : ''}
-                    {pnlVal.toFixed(2)} USDT
+                    {pnlVal.toFixed(2)} {quoteAsset}
                   </span>
                 </div>
               </div>
