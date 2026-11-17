@@ -49,6 +49,9 @@ vi.mock('@stellar/stellar-sdk', () => {
       isValidEd25519PublicKey: (addr: string) => addr.startsWith('G') && addr.length === 56,
       isValidContract: (addr: string) => addr.startsWith('C') && addr.length === 56,
     },
+    NotFoundError: class MockNotFoundError extends Error {
+      status = 404;
+    },
   };
 });
 

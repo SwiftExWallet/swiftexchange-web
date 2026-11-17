@@ -24,6 +24,13 @@ export function normalizeTab(tab: string): StellarHistoryTab {
   return 'all';
 }
 
+export function parseScValFromXdr(raw: string): any {
+  if (typeof StellarSDK.xdr?.ScVal?.fromXdr === 'function') {
+    return StellarSDK.xdr.ScVal.fromXdr(raw, 'base64');
+  }
+  return (StellarSDK.xdr?.ScVal as any).fromXDR(raw, 'base64');
+}
+
 export function parseSorobanOperation(op: any) {
   let contractId = (op as any).contract_id || (op as any).contract || '';
   let functionName = '';
@@ -35,7 +42,7 @@ export function parseSorobanOperation(op: any) {
     try {
       const raw0 = op.parameters[0]?.value || op.parameters[0];
       if (raw0 && typeof raw0 === 'string') {
-        const v0 = StellarSDK.xdr.ScVal.fromXDR(raw0, 'base64');
+        const v0 = parseScValFromXdr(raw0);
         const val0 = StellarSDK.scValToNative(v0);
         if (typeof val0 === 'string') {
           contractId = val0;
@@ -54,7 +61,7 @@ export function parseSorobanOperation(op: any) {
     try {
       const raw1 = op.parameters[1]?.value || op.parameters[1];
       if (raw1 && typeof raw1 === 'string') {
-        const v1 = StellarSDK.xdr.ScVal.fromXDR(raw1, 'base64');
+        const v1 = parseScValFromXdr(raw1);
         const val1 = StellarSDK.scValToNative(v1);
         if (typeof val1 === 'string') {
           functionName = val1;
@@ -74,7 +81,7 @@ export function parseSorobanOperation(op: any) {
       try {
         const raw2 = op.parameters[2]?.value || op.parameters[2];
         if (raw2 && typeof raw2 === 'string') {
-          const v2 = StellarSDK.scValToNative(StellarSDK.xdr.ScVal.fromXDR(raw2, 'base64'));
+          const v2 = StellarSDK.scValToNative(parseScValFromXdr(raw2));
           sorobanFrom = typeof v2 === 'string' ? v2 : (v2 as any)?.toString?.() || '';
         }
       } catch {
@@ -84,7 +91,7 @@ export function parseSorobanOperation(op: any) {
       try {
         const raw3 = op.parameters[3]?.value || op.parameters[3];
         if (raw3 && typeof raw3 === 'string') {
-          const v3 = StellarSDK.scValToNative(StellarSDK.xdr.ScVal.fromXDR(raw3, 'base64'));
+          const v3 = StellarSDK.scValToNative(parseScValFromXdr(raw3));
           sorobanTo = typeof v3 === 'string' ? v3 : (v3 as any)?.toString?.() || '';
         }
       } catch {
@@ -95,7 +102,7 @@ export function parseSorobanOperation(op: any) {
         try {
           const raw4 = op.parameters[4]?.value || op.parameters[4];
           if (raw4 && typeof raw4 === 'string') {
-            const v4 = StellarSDK.scValToNative(StellarSDK.xdr.ScVal.fromXDR(raw4, 'base64'));
+            const v4 = StellarSDK.scValToNative(parseScValFromXdr(raw4));
             if (typeof v4 === 'bigint' || typeof v4 === 'number') {
               sorobanAmount = (Number(v4) / 10_000_000).toFixed(4);
             }

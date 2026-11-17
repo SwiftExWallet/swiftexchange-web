@@ -171,19 +171,24 @@ export function refreshStellarPreconditions(
           `[StellarTransactionService] Refreshing expired TimeBounds maxTime from ${currentMax} to ${freshMax}`
         );
         const minTimeStr = tx.timeBounds.minTime || '0';
-        (tx as any).tx._attributes.cond = StellarSDK.xdr.Preconditions.precondTime(
-          new StellarSDK.xdr.TimeBounds({
-            minTime: StellarSDK.xdr.Uint64.fromString(minTimeStr),
-            maxTime: StellarSDK.xdr.Uint64.fromString(freshMax.toString()),
-          })
-        );
+        const newTimeBounds = new StellarSDK.xdr.TimeBounds({
+          minTime: BigInt(minTimeStr),
+          maxTime: BigInt(freshMax),
+        });
+        const newCond = StellarSDK.xdr.Preconditions.precondTime(newTimeBounds);
+        const txObj = (tx as any)._tx || (tx as any).tx;
+        if (txObj._attributes) {
+          txObj._attributes.cond = newCond;
+        } else {
+          txObj.cond = newCond;
+        }
         mutated = true;
       }
     }
 
     if (mutated) {
       (tx as any)._envelope = undefined;
-      return tx.toXDR();
+      return typeof tx.toXdr === 'function' ? tx.toXdr() : tx.toXDR();
     }
     return xdr;
   } catch (err) {
@@ -299,11 +304,17 @@ export const signAndSubmitTransaction = async (
             console.log(
               `[StellarTransactionService] Mutating XDR sequence from ${txSeq} to ${expectedTxSeq} for ${sourceAddress}`
             );
-            (tx as any).tx._attributes.seqNum = (StellarSDK as any).xdr.SequenceNumber.fromString(
-              expectedTxSeq
-            );
+            const newSeqNum = BigInt(expectedTxSeq);
+            const txObj = (tx as any)._tx || (tx as any).tx;
+            if (txObj._attributes) {
+              txObj._attributes.seqNum = (StellarSDK as any).xdr?.SequenceNumber?.fromString
+                ? (StellarSDK as any).xdr.SequenceNumber.fromString(expectedTxSeq)
+                : newSeqNum;
+            } else {
+              txObj.seqNum = newSeqNum;
+            }
             (tx as any)._envelope = undefined;
-            finalXdr = tx.toXDR();
+            finalXdr = typeof tx.toXdr === 'function' ? tx.toXdr() : tx.toXDR();
             txSeq = expectedTxSeq;
           }
           StellarSequenceTracker.removeKnownSequence(sourceAddress, expectedTxSeq);

@@ -127,7 +127,12 @@ export class StellarBaseService {
 
       return { tokens, subentryCount: response.subentry_count };
     } catch (error: any) {
-      if (error.response?.status === 404) {
+      if (
+        (typeof (StellarSDK as any).NotFoundError === 'function' &&
+          error instanceof (StellarSDK as any).NotFoundError) ||
+        error?.status === 404 ||
+        error.response?.status === 404
+      ) {
         return {
           tokens: [
             {
