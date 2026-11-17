@@ -133,7 +133,12 @@ export default defineConfig(({ command }) => ({
     css: false,
     server: {
       deps: {
-        inline: ['html-encoding-sniffer', '@exodus/bytes'],
+        inline: [
+          'html-encoding-sniffer',
+          '@exodus/bytes',
+          'uint8array-extras',
+          '@stellar/stellar-sdk',
+        ],
         external: [],
       },
     },

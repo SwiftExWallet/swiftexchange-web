@@ -96,7 +96,10 @@ export class OrderBookSwapService extends StellarBaseService {
       txBuilder.setTimeout(options.timeout || 300);
 
       const builtTransaction = txBuilder.build();
-      const xdr = builtTransaction.toXDR();
+      const xdr =
+        typeof builtTransaction.toXdr === 'function'
+          ? builtTransaction.toXdr()
+          : builtTransaction.toXDR();
 
       return {
         id: `large-order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
