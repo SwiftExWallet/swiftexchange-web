@@ -26,6 +26,7 @@ const StellarTradescreen = lazy(
 const StellarPortfolioUI = lazy(
   () => import('@/modules/stellar/components/stellarassets/StellarPortfolioUI')
 );
+const VaultPage = lazy(() => import('@/modules/stellar/vault/VaultPage'));
 const Dashboard = lazy(() => import('@/pages/dashboard'));
 const Profile = lazy(() => import('@/pages/profile'));
 const StatusPage = lazy(() => import('@/pages/status/StatusPage'));
@@ -77,6 +78,18 @@ const router = createBrowserRouter([
             <StellarPortfolioUI />
           </Layout>
         ),
+      },
+      {
+        path: ROUTES.EARN,
+        element: (
+          <Layout>
+            <VaultPage />
+          </Layout>
+        ),
+      },
+      {
+        path: ROUTES.VAULTS,
+        element: <Navigate to={ROUTES.EARN} replace />,
       },
       {
         path: ROUTES.DASHBOARD,
