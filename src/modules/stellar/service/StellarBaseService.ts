@@ -1,19 +1,9 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
-import BigNumber from 'bignumber.js';
 
 import { getChainById } from '../../evm/utils/Chainregistry';
 import type { TokenInfo } from '../types/stellar.types';
-import { SOROSWAP_TESTNET_SUPPORTED_TOKENS, isSoroswapTestnetSupported } from './soroswapService';
 
 const accountCache = new Map<string, { data: StellarSDK.Horizon.AccountResponse; ts: number }>();
-const serverPool = new Map<string, StellarSDK.Horizon.Server>();
-
-export const getStellarExpertTestnetValueUrl = (address: string): string => {
-  if (typeof window === 'undefined') {
-    return `https://api.stellar.expert/explorer/testnet/account/${address}/value`;
-  }
-  return `/api-stellar-expert/explorer/testnet/account/${address}/value`;
-};
 
 export class StellarBaseService {
   protected server: StellarSDK.Horizon.Server;
@@ -21,65 +11,18 @@ export class StellarBaseService {
   protected networkKey: string;
 
   constructor(horizonUrl: string, networkPassphrase: string, networkKey: string) {
-    this.server = StellarBaseService.getOrCreateServer(horizonUrl);
+    const serverOptions: any = {};
+    if (horizonUrl.startsWith('http://')) {
+      serverOptions.allowHttp = true;
+    }
+
+    this.server = new StellarSDK.Horizon.Server(horizonUrl, serverOptions);
     this.networkPassphrase = networkPassphrase;
     this.networkKey = networkKey;
   }
 
-  static getOrCreateServer(horizonUrl: string): StellarSDK.Horizon.Server {
-    let instance = serverPool.get(horizonUrl);
-    if (!instance) {
-      if (horizonUrl.startsWith('http://') && !import.meta.env.VITEST) {
-        throw new Error(`Insecure Horizon URL rejected: ${horizonUrl}. HTTPS is required.`);
-      }
-      instance = new StellarSDK.Horizon.Server(horizonUrl);
-      serverPool.set(horizonUrl, instance);
-    }
-    return instance;
-  }
-
-  static clearServerPool() {
-    serverPool.clear();
-  }
-
-  static calculateSpendableBalance(
-    balance: string | number,
-    subentryCount: number = 0,
-    isNative: boolean = false,
-    sellingLiabilities: string | number = 0
-  ): string {
-    const bal = new BigNumber(balance?.toString() || '0');
-    const liabilities = new BigNumber(sellingLiabilities?.toString() || '0');
-    if (bal.isNaN() || bal.isLessThanOrEqualTo(0)) {
-      return '0.0000000';
-    }
-
-    if (isNative) {
-      const baseReserve = new BigNumber('0.5');
-      const buffer = new BigNumber('0.01');
-      const reserve = new BigNumber(2 + subentryCount).multipliedBy(baseReserve).plus(buffer);
-      const spendable = bal.minus(reserve).minus(liabilities);
-      return BigNumber.max(0, spendable).toFixed(7, BigNumber.ROUND_DOWN);
-    }
-
-    const spendable = bal.minus(liabilities);
-    return BigNumber.max(0, spendable).toFixed(7, BigNumber.ROUND_DOWN);
-  }
-
   static clearAccountCache() {
     accountCache.clear();
-  }
-
-  static invalidateAccountCache(address: string, networkPassphrase?: string) {
-    if (networkPassphrase) {
-      accountCache.delete(`${networkPassphrase}-${address}`);
-    } else {
-      for (const key of accountCache.keys()) {
-        if (key.endsWith(`-${address}`)) {
-          accountCache.delete(key);
-        }
-      }
-    }
   }
 
   async getAccountData(address: string): Promise<{ tokens: TokenInfo[]; subentryCount: number }> {
@@ -127,12 +70,7 @@ export class StellarBaseService {
 
       return { tokens, subentryCount: response.subentry_count };
     } catch (error: any) {
-      if (
-        (typeof (StellarSDK as any).NotFoundError === 'function' &&
-          error instanceof (StellarSDK as any).NotFoundError) ||
-        error?.status === 404 ||
-        error.response?.status === 404
-      ) {
+      if (error.response?.status === 404) {
         return {
           tokens: [
             {
@@ -161,323 +99,88 @@ export class StellarBaseService {
   ): Promise<{ tokens: TokenInfo[]; subentryCount: number }> {
     const isMainnet = this.networkPassphrase.includes('Public Global Stellar Network');
     const chainId = isMainnet ? 'pubnet' : 'testnet';
-    const chainConfig = getChainById(chainId);
+    let chainConfig = getChainById(chainId);
+    if (!chainConfig && !isMainnet) {
+      chainConfig = getChainById('pubnet');
+    }
 
     if (!chainConfig) return { tokens: [], subentryCount: 0 };
 
     let balances: TokenInfo[] = [];
     let subentryCount = 0;
-    if (address && StellarSDK.StrKey.isValidEd25519PublicKey(address)) {
-      try {
-        const accountData = await this.getAccountData(address);
-        balances = accountData.tokens;
-        subentryCount = accountData.subentryCount;
-      } catch (error) {
-        console.warn(error, 'Could not load balances, using zero balances');
-      }
+    try {
+      const accountData = await this.getAccountData(address);
+      balances = accountData.tokens;
+      subentryCount = accountData.subentryCount;
+    } catch (error) {
+      console.warn(error, 'Could not load balances, using zero balances');
     }
 
-    const expertBalances = new Map<string, string>();
-    if (!isMainnet && address && StellarSDK.StrKey.isValidEd25519PublicKey(address)) {
-      try {
-        const res = await fetch(getStellarExpertTestnetValueUrl(address));
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data?.balances)) {
-            for (const b of data.balances) {
-              if (b?.asset && b?.balance !== undefined) {
-                const formatted = new BigNumber(b.balance).dividedBy(1e7).toString();
-                expertBalances.set(b.asset, formatted);
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.warn('Could not load testnet balances from stellar.expert:', error);
-      }
-      if (expertBalances.size > 0) {
-        subentryCount = Math.max(subentryCount, expertBalances.size);
-      }
-    }
-
-    let registryTokens: TokenInfo[] = chainConfig.assets
+    const registryTokens: TokenInfo[] = chainConfig.assets
       .map(a => {
         const isNative =
-          a.type === 'NATIVE' ||
-          a.symbol === 'XLM' ||
-          a.address === 'native' ||
-          (!a.address && !a.contract);
+          a.type === 'NATIVE' || a.symbol === 'XLM' || a.address === 'native' || !a.address;
 
-        let asset: any;
-        const effectiveIssuer = a.issuer || (a.address?.startsWith('G') ? a.address : undefined);
-        const effectiveContract =
-          a.contract || (a.address?.startsWith('C') ? a.address : undefined);
-
-        if (isNative) {
-          asset = StellarSDK.Asset.native();
-        } else if (effectiveIssuer && effectiveIssuer.startsWith('G')) {
+        let asset: StellarSDK.Asset;
+        try {
+          asset = isNative ? StellarSDK.Asset.native() : new StellarSDK.Asset(a.symbol, a.address);
+        } catch {
           try {
-            asset = new StellarSDK.Asset(a.symbol, effectiveIssuer);
+            asset = StellarSDK.Asset.native();
           } catch {
-            asset = {
-              isNative: () => false,
-              getCode: () => a.symbol,
-              getIssuer: () => effectiveIssuer,
-              contractId: () => effectiveContract,
-            };
+            return null as any;
           }
-        } else {
-          asset = {
-            isNative: () => false,
-            getCode: () => a.symbol,
-            getIssuer: () => effectiveContract || a.address || '',
-            contractId: () => effectiveContract || a.address,
-            toString: () => `${a.symbol}:${effectiveContract || a.address || ''}`,
-          };
         }
 
         const balRecord = balances.find(b => this.assetsEqual(b.asset, asset));
 
-        let balance = balRecord?.balance || '0';
-        if (!isMainnet && expertBalances.size > 0) {
-          const expertBal =
-            (effectiveContract && expertBalances.get(effectiveContract)) ||
-            (a.contract && expertBalances.get(a.contract)) ||
-            (a.address && expertBalances.get(a.address)) ||
-            (effectiveIssuer && expertBalances.get(`${a.symbol}-${effectiveIssuer}`)) ||
-            (effectiveIssuer && expertBalances.get(`${a.symbol}:${effectiveIssuer}`)) ||
-            (isNative ? expertBalances.get('XLM') : undefined);
-          if (expertBal !== undefined && (balance === '0' || !balRecord)) {
-            balance = expertBal;
-          }
-        }
-
         return {
           asset,
           code: a.symbol,
-          issuer: isNative ? undefined : effectiveIssuer,
-          balance,
+          issuer: isNative ? undefined : a.address,
+          balance: balRecord?.balance || '0',
           name: a.name,
           icon: a.logoURI,
           decimals: a.decimals,
           isPopular: true,
-          hasTrustline: Boolean(
-            isNative ||
-            !effectiveIssuer ||
-            !effectiveIssuer.startsWith('G') ||
-            (balRecord ? (balRecord.hasTrustline ?? true) : false) ||
-            balance !== '0' ||
-            (effectiveContract && expertBalances.has(effectiveContract)) ||
-            (a.contract && expertBalances.has(a.contract)) ||
-            (a.address && expertBalances.has(a.address)) ||
-            (effectiveIssuer && expertBalances.has(`${a.symbol}-${effectiveIssuer}`)) ||
-            (effectiveIssuer && expertBalances.has(`${a.symbol}:${effectiveIssuer}`))
-          ),
+          hasTrustline: isNative || !!balRecord,
           homeDomain: a.domain || (isNative ? 'stellar.org' : undefined),
           domain: a.domain || (isNative ? 'stellar.org' : undefined),
-          contract: effectiveContract,
         };
       })
       .filter(Boolean);
 
-    if (!isMainnet) {
-      for (const [sym, contractId] of Object.entries(SOROSWAP_TESTNET_SUPPORTED_TOKENS)) {
-        if (sym === 'XLM') continue;
-        const existing = registryTokens.find(
-          rt => rt.code === sym || (rt as any).contract === contractId
-        );
-        const bal = expertBalances.get(contractId) || '0';
-        if (!existing) {
-          registryTokens.push({
-            asset: {
-              isNative: () => false,
-              getCode: () => sym,
-              getIssuer: () => contractId,
-              contractId: () => contractId,
-              toString: () => `${sym}:${contractId}`,
-            } as any,
-            code: sym,
-            balance: bal,
-            name: sym === 'XTAR' ? 'Dogstar' : sym === 'USDC' ? 'USD Coin' : sym,
-            icon:
-              sym === 'XTAR'
-                ? 'https://dogstarcoin.com/logo.png'
-                : 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
-            decimals: 7,
-            isPopular: true,
-            hasTrustline: true,
-            contract: contractId,
-          });
-        } else {
-          (existing as any).contract = contractId;
-          if (bal !== '0' || existing.balance === '0') {
-            existing.balance = bal;
-          }
-          if (
-            existing.hasTrustline ||
-            expertBalances.has(contractId) ||
-            (existing.issuer && expertBalances.has(`${sym}-${existing.issuer}`)) ||
-            balances.some(b => b.code === sym)
-          ) {
-            existing.hasTrustline = true;
-          }
-        }
-      }
+    const otherTokens = balances.filter(
+      b => !registryTokens.some(rt => this.assetsEqual(rt.asset, b.asset))
+    );
 
-      const xlmToken = registryTokens.find(
-        rt => rt.code === 'XLM' || (typeof rt.asset?.isNative === 'function' && rt.asset.isNative())
-      );
-      if (xlmToken && expertBalances.has('XLM')) {
-        xlmToken.balance = expertBalances.get('XLM') || xlmToken.balance;
-      }
-
-      registryTokens = registryTokens.filter(t =>
-        isSoroswapTestnetSupported({
-          symbol: t.code,
-          address: t.contract || t.issuer,
-          contract: t.contract,
-          isNative:
-            (typeof t.asset?.isNative === 'function' && t.asset.isNative()) || t.code === 'XLM',
-        })
-      );
-    }
-
-    const otherTokens = balances.filter(b => {
-      if (!isMainnet) {
-        const existing = registryTokens.find(rt => rt.code.toUpperCase() === b.code.toUpperCase());
-        if (existing) {
-          if ((!existing.balance || existing.balance === '0') && b.balance && b.balance !== '0') {
-            existing.balance = b.balance;
-          }
-          return false;
-        }
-        return isSoroswapTestnetSupported({
-          symbol: b.code,
-          address: b.contract || b.issuer,
-          contract: b.contract,
-          isNative:
-            (typeof b.asset?.isNative === 'function' && b.asset.isNative()) || b.code === 'XLM',
-        });
-      }
-      return !registryTokens.some(rt => this.assetsEqual(rt.asset, b.asset));
-    });
-
-    const allTokens = [...registryTokens, ...otherTokens];
-    const seen = new Set<string>();
-    const deduplicatedTokens: TokenInfo[] = [];
-
-    for (const token of allTokens) {
-      const isNative =
-        token.code === 'XLM' ||
-        (typeof token.asset?.isNative === 'function' && token.asset.isNative());
-      const key = isNative
-        ? 'XLM'
-        : !isMainnet
-          ? token.code.toUpperCase()
-          : `${token.code.toUpperCase()}:${token.issuer || token.contract || ''}`;
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduplicatedTokens.push(token);
-      } else {
-        const existing = deduplicatedTokens.find(t =>
-          isNative
-            ? t.code === 'XLM' || (typeof t.asset?.isNative === 'function' && t.asset.isNative())
-            : !isMainnet
-              ? t.code.toUpperCase() === token.code.toUpperCase()
-              : t.code.toUpperCase() === token.code.toUpperCase() &&
-                (t.issuer === token.issuer || t.contract === token.contract)
-        );
-        if (
-          existing &&
-          (!existing.balance || existing.balance === '0') &&
-          token.balance &&
-          token.balance !== '0'
-        ) {
-          existing.balance = token.balance;
-        }
-      }
-    }
-
-    return { tokens: deduplicatedTokens, subentryCount };
+    return { tokens: [...registryTokens, ...otherTokens], subentryCount };
   }
 
-  protected assetsEqual(a: any, b: any): boolean {
-    if (!a || !b) return false;
-    const aIsNative =
-      typeof a.isNative === 'function' ? a.isNative() : a === 'native' || a === 'XLM';
-    const bIsNative =
-      typeof b.isNative === 'function' ? b.isNative() : b === 'native' || b === 'XLM';
-    if (aIsNative && bIsNative) return true;
-    if (aIsNative || bIsNative) return false;
-    const aCode = typeof a.getCode === 'function' ? a.getCode() : a.code || a.symbol;
-    const bCode = typeof b.getCode === 'function' ? b.getCode() : b.code || b.symbol;
-    const aIssuer =
-      typeof a.getIssuer === 'function' ? a.getIssuer() : a.issuer || a.contract || a.address;
-    const bIssuer =
-      typeof b.getIssuer === 'function' ? b.getIssuer() : b.issuer || b.contract || b.address;
-    return aCode === bCode && aIssuer === bIssuer;
+  protected assetsEqual(a: StellarSDK.Asset, b: StellarSDK.Asset): boolean {
+    if (a.isNative() && b.isNative()) return true;
+    if (a.isNative() || b.isNative()) return false;
+    return a.getCode() === b.getCode() && a.getIssuer() === b.getIssuer();
   }
 
   protected ensureTrustline(
     txBuilder: StellarSDK.TransactionBuilder,
     sourceAccount: StellarSDK.Horizon.AccountResponse,
-    asset: StellarSDK.Asset | any
+    asset: StellarSDK.Asset
   ) {
-    if (!asset) return;
-    const isNative =
-      asset instanceof StellarSDK.Asset
-        ? asset.isNative()
-        : (asset as any) === 'native' ||
-          (asset as any) === 'XLM' ||
-          (asset as any)?.code === 'XLM' ||
-          Boolean((asset as any)?.isNative);
-    if (isNative) return;
-
-    const assetCode =
-      asset instanceof StellarSDK.Asset
-        ? asset.getCode()
-        : (asset as any)?.code || (asset as any)?.symbol || '';
-    const assetIssuer =
-      asset instanceof StellarSDK.Asset
-        ? asset.getIssuer()
-        : (asset as any)?.issuer ||
-          (typeof (asset as any)?.asset?.getIssuer === 'function'
-            ? (asset as any).asset.getIssuer()
-            : undefined) ||
-          (asset as any)?.address;
+    if (asset.isNative()) return;
 
     const hasTrustline = sourceAccount.balances.some(
-      (b: any) =>
+      b =>
         (b.asset_type === 'credit_alphanum4' || b.asset_type === 'credit_alphanum12') &&
-        b.asset_code?.toUpperCase() === assetCode.toUpperCase() &&
-        (!assetIssuer || b.asset_issuer === assetIssuer)
+        b.asset_code === asset.getCode() &&
+        b.asset_issuer === asset.getIssuer()
     );
 
     if (!hasTrustline) {
-      const nativeBalRecord = sourceAccount.balances.find((b: any) => b.asset_type === 'native');
-      const totalXlm = new BigNumber(nativeBalRecord?.balance || '0');
-      const subentryCount = sourceAccount.subentry_count || 0;
-      const liabilities = new BigNumber((nativeBalRecord as any)?.selling_liabilities || '0');
-      const baseReserve = new BigNumber('0.5');
-      const buffer = new BigNumber('0.01');
-      const requiredReserve = new BigNumber(2 + subentryCount + 1)
-        .multipliedBy(baseReserve)
-        .plus(liabilities)
-        .plus(buffer);
-
-      if (totalXlm.isLessThan(requiredReserve)) {
-        throw new Error(
-          `Insufficient XLM balance to establish trustline for ${assetCode}. You need at least ${requiredReserve.toFixed(2)} XLM to cover Stellar minimum reserves (current balance: ${totalXlm.toFixed(2)} XLM).`
-        );
-      }
-
-      const trustAsset =
-        asset instanceof StellarSDK.Asset ? asset : new StellarSDK.Asset(assetCode, assetIssuer);
-
       txBuilder.addOperation(
         StellarSDK.Operation.changeTrust({
-          asset: trustAsset,
+          asset: asset,
         })
       );
     }

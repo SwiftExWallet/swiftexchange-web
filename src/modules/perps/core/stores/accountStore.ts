@@ -1,111 +1,33 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 import type { AccountBalance } from '../models';
 
-export interface AccountSummaryMetrics {
-  totalWalletBalance?: string;
-  totalMarginBalance?: string;
-  availableBalance?: string;
-  totalUnrealizedProfit?: string;
-}
-
 interface AccountStoreState {
   balances: Record<string, AccountBalance>;
-  isLoading: boolean;
   multiAssetsMargin: boolean;
-  totalWalletBalance?: string;
-  totalMarginBalance?: string;
-  availableBalance?: string;
-  totalUnrealizedProfit?: string;
-  setIsLoading: (loading: boolean) => void;
-  setBalances: (balances: AccountBalance[], summary?: AccountSummaryMetrics) => void;
+  setBalances: (balances: AccountBalance[]) => void;
   setMultiAssetsMargin: (isMultiAsset: boolean) => void;
   updateBalance: (balance: AccountBalance) => void;
-  updateBalances: (balances: AccountBalance[], summary?: AccountSummaryMetrics) => void;
   getBalance: (asset: string) => AccountBalance | undefined;
-  clear: () => void;
 }
 
-export const useAccountStore = create<AccountStoreState>()(
-  persist(
-    (set, get) => ({
-      balances: {},
-      isLoading: false,
-      multiAssetsMargin: false,
-      totalWalletBalance: undefined,
-      totalMarginBalance: undefined,
-      availableBalance: undefined,
-      totalUnrealizedProfit: undefined,
-      setIsLoading: isLoading => set({ isLoading }),
-      setBalances: (balances, summary) => {
-        const nextBalances: Record<string, AccountBalance> = {};
-        balances.forEach(b => {
-          nextBalances[b.asset] = b;
-        });
-        set({
-          balances: nextBalances,
-          isLoading: false,
-          ...(summary
-            ? {
-                totalWalletBalance: summary.totalWalletBalance,
-                totalMarginBalance: summary.totalMarginBalance,
-                availableBalance: summary.availableBalance,
-                totalUnrealizedProfit: summary.totalUnrealizedProfit,
-              }
-            : {}),
-        });
+export const useAccountStore = create<AccountStoreState>((set, get) => ({
+  balances: {},
+  multiAssetsMargin: false,
+  setBalances: balances => {
+    const nextBalances: Record<string, AccountBalance> = {};
+    balances.forEach(b => {
+      nextBalances[b.asset] = b;
+    });
+    set({ balances: nextBalances });
+  },
+  setMultiAssetsMargin: isMultiAsset => set({ multiAssetsMargin: isMultiAsset }),
+  updateBalance: balance =>
+    set(state => ({
+      balances: {
+        ...state.balances,
+        [balance.asset]: balance,
       },
-      setMultiAssetsMargin: isMultiAsset => set({ multiAssetsMargin: isMultiAsset }),
-      updateBalance: balance =>
-        set(state => ({
-          balances: {
-            ...state.balances,
-            [balance.asset]: balance,
-          },
-        })),
-      updateBalances: (balances, summary) =>
-        set(state => {
-          const next = { ...state.balances };
-          balances.forEach(b => {
-            next[b.asset] = b;
-          });
-          return {
-            balances: next,
-            ...(summary
-              ? {
-                  ...(summary.totalWalletBalance !== undefined
-                    ? { totalWalletBalance: summary.totalWalletBalance }
-                    : {}),
-                  ...(summary.totalMarginBalance !== undefined
-                    ? { totalMarginBalance: summary.totalMarginBalance }
-                    : {}),
-                  ...(summary.availableBalance !== undefined
-                    ? { availableBalance: summary.availableBalance }
-                    : {}),
-                  ...(summary.totalUnrealizedProfit !== undefined
-                    ? { totalUnrealizedProfit: summary.totalUnrealizedProfit }
-                    : {}),
-                }
-              : {}),
-          };
-        }),
-      getBalance: asset => get().balances[asset],
-      clear: () =>
-        set({
-          balances: {},
-          isLoading: false,
-          totalWalletBalance: undefined,
-          totalMarginBalance: undefined,
-          availableBalance: undefined,
-          totalUnrealizedProfit: undefined,
-        }),
-    }),
-    {
-      name: 'swiftex_perps_account_settings',
-      partialize: state => ({
-        multiAssetsMargin: state.multiAssetsMargin,
-      }),
-    }
-  )
-);
+    })),
+  getBalance: asset => get().balances[asset],
+}));

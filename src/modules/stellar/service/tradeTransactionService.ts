@@ -1,6 +1,5 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
 import type { Horizon } from '@stellar/stellar-sdk';
-import BigNumber from 'bignumber.js';
 
 import { getStellarConfig } from '../../walletconnect/config/chains';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
@@ -37,11 +36,12 @@ export class TradeTransactionService {
     if (cached && now - cached.timestamp < TradeTransactionService.SERVER_CACHE_TTL) {
       this.server = cached.server;
     } else {
-      if (config.horizonUrl.startsWith('http://') && !import.meta.env.VITEST) {
-        throw new Error(`Insecure Horizon URL rejected: ${config.horizonUrl}. HTTPS is required.`);
+      const serverOptions: any = {};
+      if (config.horizonUrl.startsWith('http://')) {
+        serverOptions.allowHttp = true;
       }
 
-      this.server = new StellarSDK.Horizon.Server(config.horizonUrl);
+      this.server = new StellarSDK.Horizon.Server(config.horizonUrl, serverOptions);
       TradeTransactionService.serverCache.set(cacheKey, { server: this.server, timestamp: now });
     }
 
@@ -180,7 +180,7 @@ export class TradeTransactionService {
 
         // Consolidated multi-hop trade
         // Track net flow for each asset
-        const assetFlow = new Map<string, { amount: BigNumber; code: string; issuer?: string }>();
+        const assetFlow = new Map<string, { amount: number; code: string; issuer?: string }>();
 
         groupTrades.forEach(t => {
           const isBaseSource = t.base_account === accountId;
@@ -189,56 +189,46 @@ export class TradeTransactionService {
           // Base asset flow
           const baseKey = `${t.base_asset_code || 'XLM'}:${t.base_asset_issuer || ''}`;
           const currentBase = assetFlow.get(baseKey) || {
-            amount: new BigNumber(0),
+            amount: 0,
             code: t.base_asset_code || 'XLM',
             issuer: t.base_asset_issuer,
           };
           // If user is base_account, they are "Selling" base (negative flow).
           // If user is counter_account, they are "Buying" base from someone else (positive flow).
-          const baseAmt = new BigNumber(t.base_amount || '0');
-          currentBase.amount = isBaseSource
-            ? currentBase.amount.minus(baseAmt)
-            : currentBase.amount.plus(baseAmt);
+          currentBase.amount += isBaseSource
+            ? -parseFloat(t.base_amount)
+            : parseFloat(t.base_amount);
           assetFlow.set(baseKey, currentBase);
 
           // Counter asset flow
           const counterKey = `${t.counter_asset_code || 'XLM'}:${t.counter_asset_issuer || ''}`;
           const currentCounter = assetFlow.get(counterKey) || {
-            amount: new BigNumber(0),
+            amount: 0,
             code: t.counter_asset_code || 'XLM',
             issuer: t.counter_asset_issuer,
           };
-          const counterAmt = new BigNumber(t.counter_amount || '0');
-          currentCounter.amount = isCounterSource
-            ? currentCounter.amount.minus(counterAmt)
-            : currentCounter.amount.plus(counterAmt);
+          currentCounter.amount += isCounterSource
+            ? -parseFloat(t.counter_amount)
+            : parseFloat(t.counter_amount);
           assetFlow.set(counterKey, currentCounter);
         });
 
         // Identify starting and ending assets
-        const flows = Array.from(assetFlow.values()).filter(f => f.amount.abs().gt('0.0000001'));
-        const spent = flows
-          .filter(f => f.amount.lt(0))
-          .sort((a, b) => a.amount.minus(b.amount).toNumber())[0]; // Most negative
-        const received = flows
-          .filter(f => f.amount.gt(0))
-          .sort((a, b) => b.amount.minus(a.amount).toNumber())[0]; // Most positive
+        const flows = Array.from(assetFlow.values()).filter(f => Math.abs(f.amount) > 0.0000001);
+        const spent = flows.filter(f => f.amount < 0).sort((a, b) => a.amount - b.amount)[0]; // Most negative
+        const received = flows.filter(f => f.amount > 0).sort((a, b) => b.amount - a.amount)[0]; // Most positive
 
         if (spent && received) {
           const firstTrade = groupTrades[0];
           const transactionHash = (firstTrade as any)._links?.transaction?.href?.split('/').pop();
-          const absSpent = spent.amount.abs();
-          const price = absSpent.gt(0)
-            ? received.amount.dividedBy(absSpent).toFixed(7, BigNumber.ROUND_DOWN)
-            : '0';
 
           consolidatedTrades.push({
             id: firstTrade.id,
             baseAsset: { code: spent.code, issuer: spent.issuer },
             counterAsset: { code: received.code, issuer: received.issuer },
-            baseAmount: absSpent.toFixed(7, BigNumber.ROUND_DOWN),
-            counterAmount: received.amount.toFixed(7, BigNumber.ROUND_DOWN),
-            price,
+            baseAmount: Math.abs(spent.amount).toString(),
+            counterAmount: received.amount.toString(),
+            price: (received.amount / Math.abs(spent.amount)).toString(),
             ledgerCloseTime: firstTrade.ledger_close_time,
             isBuy: false,
             trade_type: 'path_payment',
@@ -352,7 +342,7 @@ export class TradeTransactionService {
         memo: options.memo,
         timestamp: Date.now(),
         status: 'pending',
-        xdr: typeof builtTx.toXdr === 'function' ? builtTx.toXdr() : builtTx.toXDR(),
+        xdr: builtTx.toXDR(),
         networkPassphrase: this.networkPassphrase,
       };
     } catch (error: any) {
@@ -372,14 +362,7 @@ export class TradeTransactionService {
       throw new Error('Invalid Stellar account ID');
     }
 
-    const newAmountBN = new BigNumber(newAmount || '0');
-    const newPriceBN = new BigNumber(newPrice || '0');
-    if (
-      !newAmountBN.isFinite() ||
-      newAmountBN.lte(0) ||
-      !newPriceBN.isFinite() ||
-      newPriceBN.lte(0)
-    ) {
+    if (parseFloat(newAmount) <= 0 || parseFloat(newPrice) <= 0) {
       throw new Error('Amount and price must be positive');
     }
 
@@ -409,7 +392,7 @@ export class TradeTransactionService {
         memo: options.memo,
         timestamp: Date.now(),
         status: 'pending',
-        xdr: typeof builtTx.toXdr === 'function' ? builtTx.toXdr() : builtTx.toXDR(),
+        xdr: builtTx.toXDR(),
         networkPassphrase: this.networkPassphrase,
       };
     } catch (error: any) {
@@ -501,9 +484,8 @@ export class TradeTransactionService {
 
   async getAllOperations(
     accountId: string,
-    limit: number = 50,
-    cursor?: string,
-    category: 'ALL' | 'PAYMENTS' = 'ALL'
+    limit: number = 20,
+    cursor?: string
   ): Promise<{
     operations: any[];
     nextCursor?: string;
@@ -514,13 +496,9 @@ export class TradeTransactionService {
     }
 
     try {
-      const callBuilder =
-        category === 'PAYMENTS'
-          ? this.server.payments().forAccount(accountId)
-          : this.server.operations().forAccount(accountId);
-
-      const response = await callBuilder
-        .join('transactions')
+      const response = await this.server
+        .operations()
+        .forAccount(accountId)
         .limit(limit)
         .cursor(cursor || '')
         .order('desc')
@@ -586,7 +564,7 @@ export class TradeTransactionService {
         memo: options.memo,
         timestamp: Date.now(),
         status: 'pending',
-        xdr: typeof builtTx.toXdr === 'function' ? builtTx.toXdr() : builtTx.toXDR(),
+        xdr: builtTx.toXDR(),
         networkPassphrase: this.networkPassphrase,
       };
     } catch (error: any) {

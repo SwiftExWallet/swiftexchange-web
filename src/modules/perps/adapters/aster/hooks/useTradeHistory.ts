@@ -3,102 +3,76 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Signer } from 'ethers';
 
 import { useHistoryStore } from '../../../core/stores/historyStore';
-import { useMarketStore } from '../../../core/stores/marketStore';
 import { getUserTrades } from '../api/account';
-import { type ScanProgress, getPersistedHistory, persistHistory } from '../historyScanner';
 import type { AsterUserTrade } from '../types/account';
-import type { TimeRange } from './useOrderHistory';
 
-const PAGE_LIMIT = 100;
+const PAGE_LIMIT = 50;
+const CACHE_TTL = 30000; // 30 seconds
+
+// Module-level global cache that persists across tab switches
+const globalTradeCache: Record<
+  string,
+  { data: AsterUserTrade[]; timestamp: number; hasMore: boolean }
+> = {};
+
+const sortDesc = (items: AsterUserTrade[]) => {
+  return [...items].sort((a, b) => (b.time || 0) - (a.time || 0));
+};
 
 export const useTradeHistory = (
   signer: Signer | null,
   userAddr: string | null,
-  symbol: string | null,
-  timeRange: TimeRange = '1w'
+  symbol: string | null
 ) => {
-  const tradeHistory = useHistoryStore(state => state.tradeHistory);
-  const hasFetched = useHistoryStore(state => state.hasFetchedTradeHistory);
-  const hasMore = useHistoryStore(state => state.hasMoreTradeHistory);
-  const oldestTradeTime = useHistoryStore(state => state.oldestTradeTime);
+  const cacheKey = userAddr ? `${userAddr}_${symbol || 'all'}_trades` : '';
+  const cachedEntry = cacheKey ? globalTradeCache[cacheKey] : undefined;
 
-  const [isLoading, setIsLoading] = useState(() => !hasFetched && !!userAddr && !!signer);
+  const [trades, setTrades] = useState<AsterUserTrade[]>(() => cachedEntry?.data || []);
+  const [isLoading, setIsLoading] = useState(() => !cachedEntry);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
-  const [pausedNotice, setPausedNotice] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(() => (cachedEntry ? cachedEntry.hasMore : true));
 
   const isFetchingMoreRef = useRef(false);
-  const lastUserRef = useRef<string | null>(userAddr);
-
-  useEffect(() => {
-    if (userAddr !== lastUserRef.current) {
-      lastUserRef.current = userAddr;
-      useHistoryStore.getState().clear();
-    }
-  }, [userAddr]);
 
   useEffect(() => {
     if (!signer || !userAddr) {
-      setIsLoading(false);
-      setScanProgress(null);
-      setPausedNotice(null);
-      return;
-    }
-
-    if (useHistoryStore.getState().hasFetchedTradeHistory) {
+      setTrades([]);
+      setHasMore(true);
       setIsLoading(false);
       return;
-    }
-
-    const persisted = getPersistedHistory<AsterUserTrade>(userAddr, 'trades');
-    if (
-      persisted?.data &&
-      persisted.data.length > 0 &&
-      useHistoryStore.getState().tradeHistory.length === 0
-    ) {
-      useHistoryStore.getState().loadPersistedTradeHistory(persisted.data);
     }
 
     let isMounted = true;
-    setIsLoading(true);
-    const abortController = new AbortController();
+    const currentCached = globalTradeCache[cacheKey];
 
-    const rangeMs = 7 * 24 * 60 * 60 * 1000;
-    const minTimestamp = Date.now() - rangeMs;
-    const targetSymbol = (symbol || useMarketStore.getState().selectedSymbol || 'BTCUSDT')
-      .replace(/[^a-zA-Z0-9]/g, '')
-      .toUpperCase();
+    // If cache is fresh, don't show loading and don't spam API
+    if (currentCached && Date.now() - currentCached.timestamp < CACHE_TTL) {
+      setTrades(currentCached.data);
+      setHasMore(currentCached.hasMore);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!currentCached) {
+      setIsLoading(true);
+    }
 
     const fetchHistory = async () => {
       try {
-        const res = await getUserTrades(
-          signer,
-          userAddr,
-          targetSymbol,
-          {
-            startTime: minTimestamp,
-            endTime: Math.floor(Date.now()),
-            limit: PAGE_LIMIT,
-          },
-          abortController.signal
-        );
-
-        if (!isMounted) return;
-
-        const items = Array.isArray(res) ? res : [];
-        const more = items.length >= PAGE_LIMIT;
-        useHistoryStore.getState().setTradeHistory(items, more);
-        persistHistory(userAddr, 'trades', items, Date.now());
-      } catch (err) {
-        if (!abortController.signal.aborted) {
-          console.error('[Aster Trade History] Failed to load trade history:', err);
-        }
-      } finally {
+        const data = await getUserTrades(signer, userAddr, symbol || undefined, {
+          limit: PAGE_LIMIT,
+        });
         if (isMounted) {
-          setIsLoading(false);
-          setScanProgress(null);
-          setPausedNotice(null);
+          const sorted = sortDesc(Array.isArray(data) ? data : []);
+          const more = sorted.length > 0;
+          setTrades(sorted);
+          setHasMore(more);
+          globalTradeCache[cacheKey] = { data: sorted, timestamp: Date.now(), hasMore: more };
         }
+      } catch (err) {
+        console.error('Failed to load trade history:', err);
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
     };
 
@@ -106,66 +80,68 @@ export const useTradeHistory = (
 
     return () => {
       isMounted = false;
-      abortController.abort();
     };
-  }, [signer, userAddr, symbol]);
+  }, [signer, userAddr, symbol, cacheKey]);
 
   const loadMore = useCallback(async () => {
     if (!signer || !userAddr || isLoadingMore || !hasMore || isFetchingMoreRef.current) return;
+    if (trades.length === 0) return;
 
-    const curEnd = (oldestTradeTime || Date.now()) - 1;
-    const rangeMs = 7 * 24 * 60 * 60 * 1000;
-    const minTimestamp = Date.now() - rangeMs;
-
-    if (curEnd <= minTimestamp || curEnd <= 0) {
-      useHistoryStore.getState().appendTradeHistory([], false);
-      return;
-    }
+    const oldestTime = trades[trades.length - 1]?.time;
+    if (!oldestTime) return;
 
     isFetchingMoreRef.current = true;
     setIsLoadingMore(true);
 
     try {
-      const targetSymbol = (symbol || useMarketStore.getState().selectedSymbol || 'BTCUSDT')
-        .replace(/[^a-zA-Z0-9]/g, '')
-        .toUpperCase();
-      const res = await getUserTrades(signer, userAddr, targetSymbol, {
-        startTime: minTimestamp,
-        endTime: Math.floor(curEnd),
+      const nextBatch = await getUserTrades(signer, userAddr, symbol || undefined, {
+        endTime: oldestTime - 1,
         limit: PAGE_LIMIT,
       });
 
-      const nextBatch = Array.isArray(res) ? res : [];
-      const more = nextBatch.length >= PAGE_LIMIT;
-      useHistoryStore.getState().appendTradeHistory(nextBatch, more);
+      const list = Array.isArray(nextBatch) ? nextBatch : [];
+      if (list.length === 0) {
+        setHasMore(false);
+        if (globalTradeCache[cacheKey]) globalTradeCache[cacheKey].hasMore = false;
+      } else {
+        setTrades(prev => {
+          const existingIds = new Set(prev.map(t => String(t.id)));
+          const uniqueNew = list.filter(t => !existingIds.has(String(t.id)));
+          if (uniqueNew.length === 0) {
+            setHasMore(false);
+            if (globalTradeCache[cacheKey]) globalTradeCache[cacheKey].hasMore = false;
+            return prev;
+          }
+          const combined = sortDesc([...prev, ...uniqueNew]);
+          const more = uniqueNew.length > 0;
+          setHasMore(more);
+          globalTradeCache[cacheKey] = { data: combined, timestamp: Date.now(), hasMore: more };
+          return combined;
+        });
+      }
     } catch (err) {
-      console.error('[Aster Trade History] Failed to load more trade history:', err);
+      console.error('Failed to load more trade history:', err);
     } finally {
       setIsLoadingMore(false);
       isFetchingMoreRef.current = false;
     }
-  }, [signer, userAddr, isLoadingMore, hasMore, oldestTradeTime, symbol]);
+  }, [signer, userAddr, symbol, isLoadingMore, hasMore, trades, cacheKey]);
 
-  const filteredTrades = useMemo(() => {
-    let list = tradeHistory;
-    if (symbol && symbol.trim()) {
-      const cleanTarget = symbol.replace('-', '').toUpperCase();
-      list = list.filter(t => (t.symbol || '').replace('-', '').toUpperCase() === cleanTarget);
-    }
-    if (timeRange === '1d') {
-      const minTimestamp = Date.now() - 24 * 60 * 60 * 1000;
-      list = list.filter(t => (t.time || 0) >= minTimestamp);
-    }
-    return list;
-  }, [tradeHistory, symbol, timeRange]);
+  const recentTrades = useHistoryStore(state => state.recentTrades);
 
-  return {
-    trades: filteredTrades,
-    isLoading,
-    isLoadingMore,
-    hasMore,
-    loadMore,
-    scanProgress,
-    pausedNotice,
-  };
+  const mergedTrades = useMemo(() => {
+    const socketTrades = symbol ? recentTrades.filter(t => t.symbol === symbol) : recentTrades;
+    const all = [...socketTrades, ...trades];
+    const seen = new Set();
+    return all
+      .filter(t => {
+        const key = `${t.id}_${t.time}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => (b.time || 0) - (a.time || 0));
+  }, [symbol, recentTrades, trades]);
+
+  return { trades: mergedTrades, isLoading, isLoadingMore, hasMore, loadMore };
 };

@@ -1,25 +1,16 @@
-import { type Signer, getAddress } from 'ethers';
+import type { Signer } from 'ethers';
 
-import { asterHttpClient } from '../client/asterHttpClient';
-import { AsterUserRejectedError } from '../client/errors';
-import { getAsterChainId, getAsterRestUrl } from '../constants';
+import { ASTER_CHAIN_ID, ASTER_REST_URL } from '../constants';
 import { parseAsterError } from './errors';
 
-export function buildSortedQueryString(params: Record<string, string>): string {
-  const keys = Object.keys(params).sort();
-  return keys.map(k => `${k}=${params[k]}`).join('&');
-}
+const EIP712_DOMAIN = {
+  name: 'AsterSignTransaction',
+  version: '1',
+  chainId: ASTER_CHAIN_ID,
+  verifyingContract: '0x0000000000000000000000000000000000000000',
+} as const;
 
-export function getAsterDomain(chainId: number = getAsterChainId()) {
-  return {
-    name: 'AsterSignTransaction',
-    version: '1',
-    chainId,
-    verifyingContract: '0x0000000000000000000000000000000000000000',
-  } as const;
-}
-
-export const EIP712_TYPES = {
+const EIP712_TYPES = {
   Message: [{ name: 'msg', type: 'string' }],
 };
 
@@ -29,11 +20,11 @@ export interface TypedDataPayload {
     Message: { name: string; type: string }[];
   };
   primaryType: 'Message';
-  domain: ReturnType<typeof getAsterDomain>;
+  domain: typeof EIP712_DOMAIN;
   message: { msg: string };
 }
 
-export function buildTypedData(msg: string, chainId: number = getAsterChainId()): TypedDataPayload {
+export function buildTypedData(msg: string): TypedDataPayload {
   return {
     types: {
       EIP712Domain: [
@@ -45,7 +36,7 @@ export function buildTypedData(msg: string, chainId: number = getAsterChainId())
       Message: [{ name: 'msg', type: 'string' }],
     },
     primaryType: 'Message',
-    domain: getAsterDomain(chainId),
+    domain: EIP712_DOMAIN,
     message: { msg },
   };
 }
@@ -54,7 +45,6 @@ export class AsterApiError extends Error {
   readonly code: number;
   readonly msg: string;
   readonly userMessage: string;
-  readonly isRetryable: boolean;
 
   constructor(raw: { code: number; msg: string }) {
     const detail = parseAsterError(raw);
@@ -62,11 +52,10 @@ export class AsterApiError extends Error {
     this.code = raw.code;
     this.msg = raw.msg;
     this.userMessage = detail.userMessage;
-    this.isRetryable = !!detail.isRetryable;
   }
 }
 
-export function throwIfApiError(data: any): void {
+function throwIfApiError(data: any): void {
   if (data && typeof data.code === 'number' && data.code < 0) {
     throw new AsterApiError(data as { code: number; msg: string });
   }
@@ -74,61 +63,25 @@ export function throwIfApiError(data: any): void {
 
 let serverTimeOffset = 0;
 let lastTimeSync = 0;
-let lastGeneratedNonce = 0n;
-let pendingTimeSyncPromise: Promise<number> | null = null;
 
-export function generateMonotonicNonce(serverTimeMs: number): string {
-  const baseMicro = BigInt(Math.floor(serverTimeMs)) * 1000n;
-  if (baseMicro > lastGeneratedNonce) {
-    lastGeneratedNonce = baseMicro;
-  } else {
-    lastGeneratedNonce += 1n;
-  }
-  return lastGeneratedNonce.toString();
-}
-
-export async function getSyncedServerTime(baseUrl?: string): Promise<number> {
+export async function getSyncedServerTime(): Promise<number> {
   const now = Date.now();
   if (now - lastTimeSync < 60000 && lastTimeSync > 0) {
     return now + serverTimeOffset;
   }
-
-  if (pendingTimeSyncPromise) {
-    return pendingTimeSyncPromise;
-  }
-
-  const restUrl = baseUrl || getAsterRestUrl();
-  pendingTimeSyncPromise = (async () => {
-    try {
-      const data = await asterHttpClient.request<any>(`${restUrl}/fapi/v3/time`, {
-        method: 'GET',
-        weight: 1,
-        ttlMs: 60_000,
-        timeoutMs: 2500,
-      });
-      if (data && typeof data.serverTime === 'number') {
-        serverTimeOffset = data.serverTime - Date.now();
-        lastTimeSync = Date.now();
-        return data.serverTime;
-      }
-    } catch {
-      // Quiet fallback to local time without blocking the UI
+  try {
+    const res = await fetch(`${ASTER_REST_URL}/fapi/v3/time`);
+    const data = await res.json();
+    if (data && typeof data.serverTime === 'number') {
+      serverTimeOffset = data.serverTime - Date.now();
       lastTimeSync = Date.now();
-    } finally {
-      pendingTimeSyncPromise = null;
+      return data.serverTime;
     }
-    return Date.now() + serverTimeOffset;
-  })();
-
-  return pendingTimeSyncPromise;
+  } catch (err) {
+    console.warn('[aster] Failed to sync server time, falling back to local time', err);
+  }
+  return Date.now();
 }
-
-const ALLOWED_ASTER_HOSTNAMES = new Set([
-  'fapi.asterdex.com',
-  'fapi.asterdex-testnet.com',
-  'sapi.asterdex.com',
-  'www.asterdex.com',
-]);
 
 export async function signedRequest(
   signer: Signer,
@@ -136,97 +89,43 @@ export async function signedRequest(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   params: Record<string, string> = {},
-  baseUrl?: string,
-  signal?: AbortSignal,
-  weight: number = 1
+  baseUrl: string = ASTER_REST_URL
 ): Promise<any> {
-  if (signal?.aborted) {
-    throw new Error('Request aborted');
-  }
+  const signerAddr = await signer.getAddress();
+  const serverTime = await getSyncedServerTime();
+  const nonce = String(serverTime * 1000);
 
-  if (!signer || !userAddr) {
-    throw new Error('Wallet signer and user address are required for private Aster requests.');
-  }
-
-  const defaultBaseUrl = getAsterRestUrl();
-  let effectiveBaseUrl = defaultBaseUrl;
-  if (baseUrl) {
-    try {
-      const parsed = new URL(baseUrl);
-      if (parsed.protocol !== 'https:') {
-        throw new Error(`Insecure protocol: ${parsed.protocol}`);
-      }
-      if (!ALLOWED_ASTER_HOSTNAMES.has(parsed.hostname)) {
-        throw new Error(`Unauthorized base URL hostname: ${parsed.hostname}`);
-      }
-      effectiveBaseUrl = baseUrl;
-    } catch (err) {
-      throw new Error(
-        `Unauthorized base URL for signed request: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }
-
-  let signerAddr: string;
-  try {
-    signerAddr = await signer.getAddress();
-  } catch (err: any) {
-    if (err?.code === 4001 || /rejected|denied/i.test(err?.message || '')) {
-      throw new AsterUserRejectedError('User rejected address retrieval.');
-    }
-    throw err;
-  }
-
-  const chainId = getAsterChainId();
-  const serverTime = await getSyncedServerTime(effectiveBaseUrl);
-  const nonce = generateMonotonicNonce(serverTime);
-
-  const allParams: Record<string, string> = {
+  const ordered: Record<string, string> = {
+    user: userAddr,
+    signer: signerAddr,
     ...params,
-    user: getAddress(userAddr),
-    signer: getAddress(signerAddr),
     nonce,
-    timestamp: String(serverTime),
-    recvWindow: '5000',
   };
 
-  const sortedQs = buildSortedQueryString(allParams);
-  const typedData = buildTypedData(sortedQs, chainId);
+  const qs = new URLSearchParams(ordered).toString();
+  const typedData = buildTypedData(qs);
 
-  let signature: string;
-  try {
-    signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
-  } catch (err: any) {
-    if (err?.code === 4001 || /rejected|denied|user rejected/i.test(err?.message || '')) {
-      throw new AsterUserRejectedError('User rejected cryptographic signature.');
-    }
-    throw err;
-  }
+  const signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
 
-  const finalQs = `${sortedQs}&signature=${signature}`;
+  const finalQs = `${qs}&signature=${signature}`;
 
   let url: string;
-  let options: import('../client/asterHttpClient').AsterRequestOptions;
+  let fetchOptions: RequestInit;
 
   if (method === 'GET') {
-    url = `${effectiveBaseUrl}${path}?${finalQs}`;
-    options = {
-      method: 'GET',
-      weight,
-      signal,
-    };
+    url = `${baseUrl}${path}?${finalQs}`;
+    fetchOptions = { method: 'GET' };
   } else {
-    url = `${effectiveBaseUrl}${path}`;
-    options = {
+    url = `${baseUrl}${path}`;
+    fetchOptions = {
       method,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: finalQs,
-      weight,
-      signal,
     };
   }
 
-  const data = await asterHttpClient.request(url, options);
+  const res = await fetch(url, fetchOptions);
+  const data = await res.json();
   throwIfApiError(data);
   return data;
 }

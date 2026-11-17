@@ -83,13 +83,12 @@ export interface Position {
   leverage: number;
   marginType: 'cross' | 'isolated';
   isolatedMargin: string;
-  initialMargin?: string;
 }
 
 export interface Order {
   id: string;
   symbol: string;
-  type: string;
+  type: 'limit' | 'market' | 'stop_limit' | 'take_profit';
   side: 'buy' | 'sell';
   price: string;
   size: string;
@@ -97,19 +96,6 @@ export interface Order {
   status: 'new' | 'partially_filled' | 'filled' | 'canceled' | 'rejected';
   reduceOnly: boolean;
   timestamp: number;
-  // Aster & DeFi rich fields
-  rawType?: string;
-  origType?: string;
-  stopPrice?: string;
-  workingType?: string;
-  callbackRate?: string | number;
-  activationPrice?: string | number;
-  cumQuote?: string;
-  avgPrice?: string;
-  leverage?: number;
-  marginType?: 'cross' | 'isolated';
-  hash?: string;
-  timeInForce?: string;
 }
 
 export interface UserTrade {
@@ -132,6 +118,4 @@ export interface AccountBalance {
   locked: string; // Locked in orders
   marginBalance?: string; // Margin balance for futures
   unrealizedPnl?: string; // Unrealized Pnl for futures
-  usdValue?: string; // Calculated or official USD value
-  discountRate?: string; // Optional fee/margin discount rate (e.g. "5%")
 }

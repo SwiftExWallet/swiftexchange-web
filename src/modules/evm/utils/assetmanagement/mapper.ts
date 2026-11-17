@@ -24,9 +24,6 @@ export function mapIChainToChainConfig(chain: IChain): ChainConfig {
           decimals: t.decimals,
           logoURI: t.logoURI,
           isNative: false,
-          contract: t.contract,
-          issuer: t.issuer,
-          domain: t.domain,
         }))
     : [];
 
@@ -44,9 +41,6 @@ export function mapIChainToChainConfig(chain: IChain): ChainConfig {
           decimals: t.decimals,
           logoURI: t.logoURI,
           isNative: false,
-          contract: t.contract,
-          issuer: t.issuer,
-          domain: t.domain,
         }))
     : [];
 

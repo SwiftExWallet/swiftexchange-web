@@ -1,4 +1,3 @@
-import { type PerpNetwork, getHyperliquidConfig } from '../../core/config/networks';
 import type { PerpExchange } from '../../core/interfaces/exchange';
 import type { Market, OrderBook, Ticker } from '../../core/models';
 import { HyperliquidMarkets } from './markets';
@@ -7,18 +6,15 @@ import { HyperliquidSigner } from './signer';
 import { HyperliquidWebSocket } from './websocket';
 
 export class HyperliquidClient implements PerpExchange {
-  public readonly network: PerpNetwork;
   private readonly marketsApi: HyperliquidMarkets;
   private readonly orderBookApi: HyperliquidOrderBook;
   private readonly wsClient: HyperliquidWebSocket;
   public readonly signer: HyperliquidSigner;
 
-  constructor(network: PerpNetwork = 'mainnet') {
-    this.network = network;
-    const config = getHyperliquidConfig(network);
-    this.marketsApi = new HyperliquidMarkets(config.restUrl);
-    this.orderBookApi = new HyperliquidOrderBook(config.restUrl);
-    this.wsClient = new HyperliquidWebSocket(config.wsUrl);
+  constructor() {
+    this.marketsApi = new HyperliquidMarkets();
+    this.orderBookApi = new HyperliquidOrderBook();
+    this.wsClient = new HyperliquidWebSocket();
     this.signer = new HyperliquidSigner();
   }
 
@@ -39,24 +35,20 @@ export class HyperliquidClient implements PerpExchange {
     return this.orderBookApi.getOrderBook(coin);
   }
 
+  /**
+   * Note: The UI doesn't necessarily need the callback anymore if it listens
+   * to perpEventBus.emit(PerpEvent.ORDER_UPDATED), but we keep the callback
+   * parameter for backwards compatibility with the interface.
+   */
   public async subscribeOrderBook(
     symbol: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _callback?: (ob: OrderBook) => void
   ): Promise<void> {
     const coin = this.extractCoinFromSymbol(symbol);
-    // 1. Subscribe to real-time L2 WS stream
+    // Since WebSocketManager manages its own callbacks through the event bus
+    // the UI should ideally subscribe to `perpEventBus` directly.
     this.wsClient.subscribeL2Book(coin);
-
-    // 2. Concurrently fetch instant REST L2 snapshot to eliminate any render delay
-    this.orderBookApi.getOrderBook(coin).catch(err => {
-      console.warn('[HyperliquidClient] HTTP initial L2 snapshot fallback error:', err);
-    });
-  }
-
-  public async unsubscribeOrderBook(symbol: string): Promise<void> {
-    const coin = this.extractCoinFromSymbol(symbol);
-    this.wsClient.unsubscribeL2Book(coin);
   }
 
   public async subscribeTicker(
@@ -66,13 +58,6 @@ export class HyperliquidClient implements PerpExchange {
   ): Promise<void> {
     const coin = this.extractCoinFromSymbol(symbol);
     this.wsClient.subscribeTrades(coin);
-    this.wsClient.subscribeActiveAssetCtx(coin);
-  }
-
-  public async unsubscribeTicker(symbol: string): Promise<void> {
-    const coin = this.extractCoinFromSymbol(symbol);
-    this.wsClient.unsubscribeTrades(coin);
-    this.wsClient.unsubscribeActiveAssetCtx(coin);
   }
 
   public subscribeCandles(coin: string, interval: string): void {

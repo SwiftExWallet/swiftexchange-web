@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { ConfirmationModal } from '../../../../components/common/ConfirmationModal';
 import { useTransactionModalStore } from '../../../../store/transactionModalStore';
 import { ActionGuard } from '../../../commonfeature/components/ActionGuard';
+import { addLocalTransaction } from '../../../evm/service/localTransactionService';
 import * as ChainUrlHelpers from '../../../evm/utils/ChainUrlHelpers';
 import { getAssetsForChain, getChainById } from '../../../evm/utils/Chainregistry';
 import { getStellarConfig } from '../../../walletconnect/config/chains';
@@ -71,9 +72,7 @@ const UnifiedAssets: React.FC<UnifiedAssetsProps> = ({
   const allAssets = useMemo(() => {
     const assetsMap = new Map<string, DisplayAsset>();
     const seenCodes = new Set<string>();
-    const isMainnet = currentNetwork === 'mainnet';
-    const chainId = isMainnet ? 'pubnet' : 'testnet';
-    const stellarChain = getChainById(chainId);
+    const stellarChain = getChainById('pubnet');
 
     balances.forEach((b: any) => {
       const code = b.asset_type === 'native' ? 'XLM' : b.asset_code || 'Unknown';
@@ -95,7 +94,7 @@ const UnifiedAssets: React.FC<UnifiedAssetsProps> = ({
       });
     });
 
-    getAssetsForChain(chainId).forEach(asset => {
+    getAssetsForChain('pubnet').forEach(asset => {
       const code = asset.symbol;
       const issuer = asset.address === 'native' ? '' : asset.address;
       const key = getAssetKey(code, issuer);
@@ -123,7 +122,7 @@ const UnifiedAssets: React.FC<UnifiedAssetsProps> = ({
       if (a.code !== b.code) return a.code.localeCompare(b.code);
       return a.issuer.localeCompare(b.issuer);
     });
-  }, [balances, onlyTrusted, currentNetwork]);
+  }, [balances, onlyTrusted]);
 
   const { displayedAssets, searchLoading } = useAssetSearch({
     allAssets,
@@ -153,6 +152,17 @@ const UnifiedAssets: React.FC<UnifiedAssetsProps> = ({
       const result = await signAndSubmitTrustline(xdr, currentNetwork, networkPassphrase, provider);
 
       if (result.success) {
+        addLocalTransaction({
+          hash: result.transactionHash || '',
+          chainId: 'pubnet',
+          type: 'trustline',
+          timestamp: Date.now(),
+          description: `${action === 'add' ? 'Added' : 'Removed'} trustline for ${asset.code}`,
+          status: 'success',
+          from: stellarAddress,
+          network: currentNetwork,
+        });
+
         useTransactionModalStore.getState().openModal({
           status: 'success',
           type: 'Trustline',

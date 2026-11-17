@@ -1,5 +1,5 @@
 export type TransactionType =
-  'SEND' | 'RECEIVE' | 'TRADE' | 'BRIDGE' | 'TRUST' | 'CLAIMABLE' | 'CONTRACT' | 'OTHER';
+  'SEND' | 'RECEIVE' | 'TRADE' | 'BRIDGE' | 'TRUST' | 'CLAIMABLE' | 'OTHER';
 
 export interface UnifiedTransaction {
   id: string;
@@ -36,9 +36,5 @@ export interface UnifiedTransaction {
   sponsor?: string;
   claimants?: any[];
 
-  memo?: string;
-  protocol?: string;
-  contractId?: string;
-  functionName?: string;
   details?: string;
 }

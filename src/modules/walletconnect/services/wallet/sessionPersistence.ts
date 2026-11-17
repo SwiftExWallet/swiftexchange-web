@@ -1,44 +1,23 @@
-import * as FreighterApi from '@stellar/freighter-api';
-
 import { getStellarConfig } from '../../config/chains';
 import { WALLET_METADATA_MAP } from '../../constants/Wallet';
 import { setupEVMListeners, setupWalletConnectListeners } from './eventListeners';
-import {
-  discoverStellarExtensions,
-  getOrCreateProvider,
-  isSafeWalletRedirectUrl,
-  resolveEvmProvider,
-  wrapProviderRequests,
-} from './providerRegistry';
+import { resolveEvmProvider } from './providerRegistry';
+import { getOrCreateProvider } from './providerRegistry';
 import type { WalletServiceContext, WalletSession, WalletType } from './types';
 
 const SESSION_STORAGE_KEY = 'wallet_sessions';
-const EVM_ADDR_REGEX = /^0x[a-fA-F0-9]{8,64}$/i;
-const STELLAR_ADDR_REGEX = /^[GC][A-Z0-9]{19,64}$/i;
 
 function getSessionMetadata(walletId: string, peerMetadata?: any) {
   const fallback = WALLET_METADATA_MAP[walletId] || WALLET_METADATA_MAP['walletconnect'];
-  const redirect = peerMetadata?.redirect;
-  const isSafe =
-    typeof redirect === 'string'
-      ? isSafeWalletRedirectUrl(redirect)
-      : redirect?.universal
-        ? isSafeWalletRedirectUrl(redirect.universal)
-        : false;
-  const safeRedirect = isSafe ? redirect : undefined;
   return {
     peerName: peerMetadata?.name || fallback?.name || walletId,
     peerIcon: peerMetadata?.icons?.[0] || fallback?.icon || '',
-    peerRedirect: safeRedirect || fallback?.redirects || undefined,
+    peerRedirect: peerMetadata?.redirect || undefined,
   };
 }
 
 export function saveSession(ctx: WalletServiceContext): void {
   try {
-    if (ctx.sessions.size === 0) {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-      return;
-    }
     const data: Record<string, WalletSession> = {};
     ctx.sessions.forEach((session, type) => {
       data[type] = {
@@ -116,10 +95,8 @@ async function restoreSession(
     }
   }
 
-  if (!provider?.session) {
-    ctx.sessions.delete(type);
-    return null;
-  }
+  console.log(provider?.session, '---------- provider session');
+  if (!provider?.session) return null;
 
   const expiry = provider.session?.expiry ?? 0;
   if (Date.now() / 1000 > expiry) {
@@ -130,7 +107,7 @@ async function restoreSession(
       console.error('Disconnect error:', err);
     }
     ctx.providers.delete(providerKey);
-    ctx.sessions.delete(type);
+    clearSessionStorage();
     return null;
   }
 
@@ -151,82 +128,24 @@ async function restoreExtensionSession(
   type: WalletType,
   savedSession: WalletSession
 ): Promise<WalletSession | null> {
+  const win = window as any;
+
   if (type === 'stellar') {
-    // ── Freighter: use official npm package (message-passing, no window injection) ──
-    if (savedSession.walletId === 'freighter') {
-      try {
-        const connResult = await FreighterApi.isConnected();
-        const connected =
-          typeof connResult === 'boolean' ? connResult : !!(connResult as any)?.isConnected;
-        if (!connected) return null;
+    const stellarProviderMap: Record<string, any> = {
+      freighter: win.freighterApi ?? win.freighter,
+      lobstr: win.lobstr,
+    };
 
-        const addrResult = await FreighterApi.getAddress();
-        const publicKey =
-          typeof addrResult === 'string' ? addrResult : (addrResult as any)?.address || '';
-        if (!publicKey || !STELLAR_ADDR_REGEX.test(publicKey)) return null;
-
-        const config = getStellarConfig(ctx.currentNetwork);
-        const meta = getSessionMetadata('freighter');
-        const freighterProvider = {
-          _isFreighter: true,
-          isConnected: FreighterApi.isConnected,
-          isAllowed: FreighterApi.isAllowed,
-          requestAccess: FreighterApi.requestAccess,
-          getAddress: FreighterApi.getAddress,
-          signTransaction: FreighterApi.signTransaction,
-          signMessage: FreighterApi.signMessage,
-          getNetwork: FreighterApi.getNetwork,
-          getNetworkDetails: FreighterApi.getNetworkDetails,
-        };
-        const session: WalletSession = {
-          type: 'stellar',
-          walletId: 'freighter',
-          stellarAddress: publicKey,
-          stellarChainId: config.chainId,
-          peerName: savedSession.peerName || meta.peerName,
-          peerIcon: savedSession.peerIcon || meta.peerIcon,
-          peerRedirect: savedSession.peerRedirect || meta.peerRedirect,
-        };
-        ctx.sessions.set('stellar', session);
-        ctx.providers.set('stellar', freighterProvider);
-        ctx.emitState('stellar', 'connected');
-        return session;
-      } catch (error) {
-        console.warn('[WalletService] Freighter session restore failed:', error);
-        return null;
-      }
-    }
-
-    // ── Other Stellar extensions: window-probe path ──
-    const discovered = discoverStellarExtensions();
-    const matched = discovered.find(e => e.id === savedSession.walletId);
-    const win = window as any;
-    const extensionProvider =
-      matched?.provider || win[savedSession.walletId] || win[`${savedSession.walletId}Api`];
+    const extensionProvider = stellarProviderMap[savedSession.walletId];
     if (!extensionProvider) return null;
 
     try {
       if (typeof extensionProvider.isConnected === 'function') {
-        const connResult = await extensionProvider.isConnected();
-        // Handle both boolean and { isConnected: boolean } response shapes
-        const connected = typeof connResult === 'boolean' ? connResult : !!connResult?.isConnected;
-        if (!connected) return null;
+        const isConnected = await extensionProvider.isConnected();
+        if (!isConnected) return null;
       }
 
-      let publicKey: string = '';
-      if (typeof extensionProvider.getAddress === 'function') {
-        const res = await extensionProvider.getAddress();
-        // Handle { address, error } response shape
-        publicKey = typeof res === 'string' ? res : res?.address || res?.publicKey || '';
-      } else if (typeof extensionProvider.getPublicKey === 'function') {
-        const res = await extensionProvider.getPublicKey();
-        publicKey = typeof res === 'string' ? res : res?.address || res?.publicKey || '';
-      }
-
-      if (!publicKey || !STELLAR_ADDR_REGEX.test(publicKey)) {
-        return null;
-      }
-
+      const publicKey: string = await extensionProvider.getPublicKey();
       const config = getStellarConfig(ctx.currentNetwork);
       const meta = getSessionMetadata(savedSession.walletId);
 
@@ -256,7 +175,7 @@ async function restoreExtensionSession(
       if (!evmProvider) return null;
 
       const accounts: string[] = await evmProvider.request({ method: 'eth_accounts' });
-      if (!accounts?.length || !EVM_ADDR_REGEX.test(accounts[0])) return null;
+      if (!accounts?.length) return null;
 
       const chainIdHex: string = await evmProvider.request({ method: 'eth_chainId' });
       const meta = getSessionMetadata(savedSession.walletId);
@@ -270,7 +189,6 @@ async function restoreExtensionSession(
         peerRedirect: savedSession.peerRedirect || meta.peerRedirect,
       };
 
-      wrapProviderRequests(ctx, evmProvider);
       ctx.sessions.set('evm', session);
       ctx.providers.set('evm', evmProvider);
       setupEVMListeners(ctx, evmProvider);
@@ -295,22 +213,18 @@ export async function refreshSessionFromProvider(
   let stellarAddress: string | undefined;
   let stellarChainId: string | undefined;
 
-  const evmAccount: string | undefined = session?.namespaces?.eip155?.accounts?.[0];
+  const evmAccount: string | undefined = session.namespaces?.eip155?.accounts?.[0];
   if (evmAccount) {
     const [, chainIdStr, addr] = evmAccount.split(':');
-    if (addr && EVM_ADDR_REGEX.test(addr)) {
-      evmAddress = addr;
-      evmChainId = parseInt(chainIdStr, 10);
-    }
+    evmAddress = addr;
+    evmChainId = parseInt(chainIdStr, 10);
   }
 
-  const stellarAccount: string | undefined = session?.namespaces?.stellar?.accounts?.[0];
+  const stellarAccount: string | undefined = session.namespaces?.stellar?.accounts?.[0];
   if (stellarAccount) {
     const [, chainId, addr] = stellarAccount.split(':');
-    if (addr && STELLAR_ADDR_REGEX.test(addr)) {
-      stellarAddress = addr;
-      stellarChainId = chainId;
-    }
+    stellarAddress = addr;
+    stellarChainId = chainId;
   }
 
   const peerMetadata = session?.peer?.metadata;
@@ -320,10 +234,10 @@ export async function refreshSessionFromProvider(
     type: saved.type,
     walletId: saved.walletId,
     connectionMode: saved.connectionMode,
-    evmAddress: evmAddress || saved.evmAddress,
-    evmChainId: evmChainId ?? saved.evmChainId,
-    stellarAddress: stellarAddress || saved.stellarAddress,
-    stellarChainId: stellarChainId || saved.stellarChainId,
+    evmAddress,
+    evmChainId,
+    stellarAddress,
+    stellarChainId,
     peerName: meta.peerName || saved.peerName,
     peerIcon: meta.peerIcon || saved.peerIcon,
     peerRedirect: meta.peerRedirect || saved.peerRedirect,
@@ -334,25 +248,20 @@ export async function refreshSessionFromProvider(
 
 export function clearSessionStorage(): void {
   try {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    const PRESERVE_KEYS = [
+      'swiftex_local_transactions',
+      'theme-storage',
+      'network',
+      'swiftex_pending_skip_txs_v2',
+      'stellar_dydx_bridge_step',
+    ];
+
+    Object.keys(localStorage).forEach(key => {
+      if (!PRESERVE_KEYS.includes(key)) {
+        localStorage.removeItem(key);
+      }
+    });
   } catch (error) {
     console.warn('[WalletService] Session storage clear failed:', error);
   }
-}
-
-export function setupCrossTabSync(ctx: WalletServiceContext): () => void {
-  if (typeof window === 'undefined') return () => {};
-
-  const handleStorageChange = (e: StorageEvent) => {
-    if (e.key !== SESSION_STORAGE_KEY) return;
-    if (!e.newValue) {
-      // Another tab cleared sessions or logged out
-      ctx.sessions.clear();
-      ctx.emitState('evm', 'disconnected');
-      ctx.emitState('stellar', 'disconnected');
-    }
-  };
-
-  window.addEventListener('storage', handleStorageChange);
-  return () => window.removeEventListener('storage', handleStorageChange);
 }

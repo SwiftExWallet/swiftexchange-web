@@ -1,27 +1,19 @@
-import type { PerpNetwork } from '../../core/config/networks';
 import type { PerpExchange } from '../../core/interfaces/exchange';
 import type { Candle, Market, OrderBook, Ticker } from '../../core/models';
 import { type AssetCtx, useTickerStore } from '../../core/stores/tickerStore';
-import { asterHttpClient } from './client/asterHttpClient';
-import { ASTER_ENDPOINTS, getAsterRestUrl } from './constants';
+import { ASTER_ENDPOINTS, ASTER_REST_URL } from './constants';
 import { AsterMapper } from './mapper';
 import { AsterWebSocket } from './websocket';
 
 export class AsterClient implements PerpExchange {
   private wsClient: AsterWebSocket;
-  public readonly network: PerpNetwork;
 
-  constructor(network: PerpNetwork = 'mainnet') {
-    this.network = network;
-    this.wsClient = AsterWebSocket.getInstance(network);
-  }
-
-  private get restUrl(): string {
-    return getAsterRestUrl(this.network);
+  constructor() {
+    this.wsClient = AsterWebSocket.getInstance();
   }
 
   public async connect(): Promise<void> {
-    await this.wsClient.connect(this.network);
+    await this.wsClient.connect();
   }
 
   public async disconnect(): Promise<void> {
@@ -29,34 +21,12 @@ export class AsterClient implements PerpExchange {
   }
 
   public async getMarkets(): Promise<Market[]> {
-    let infoData: any = null;
-    let tickerData: any = null;
+    const [infoResponse, tickerResponse] = await Promise.all([
+      fetch(`${ASTER_REST_URL}${ASTER_ENDPOINTS.EXCHANGE_INFO}`),
+      fetch(`${ASTER_REST_URL}${ASTER_ENDPOINTS.TICKER_24HR}`),
+    ]);
 
-    try {
-      infoData = await asterHttpClient.request<any>(
-        `${this.restUrl}${ASTER_ENDPOINTS.EXCHANGE_INFO}`,
-        {
-          method: 'GET',
-          weight: 10,
-          ttlMs: 300_000,
-        }
-      );
-    } catch (err) {
-      console.warn('[AsterClient] getMarkets exchangeInfo failed:', err);
-    }
-
-    try {
-      tickerData = await asterHttpClient.request<any>(
-        `${this.restUrl}${ASTER_ENDPOINTS.TICKER_24HR}`,
-        {
-          method: 'GET',
-          weight: 40,
-          ttlMs: 3_000,
-        }
-      );
-    } catch (err) {
-      console.warn('[AsterClient] getMarkets ticker24hr failed:', err);
-    }
+    const [infoData, tickerData] = await Promise.all([infoResponse.json(), tickerResponse.json()]);
 
     if (!infoData || !infoData.symbols) return [];
 
@@ -65,9 +35,7 @@ export class AsterClient implements PerpExchange {
       const contexts: Record<string, AssetCtx> = {};
       for (const t of tickerData) {
         const symbol = t.symbol.replace('USDT', '-USDT');
-        const mapped = AsterMapper.mapTicker(t);
-        contexts[symbol] = mapped;
-        contexts[t.symbol] = mapped;
+        contexts[symbol] = AsterMapper.mapTicker(t);
       }
       useTickerStore.getState().setMultipleAssetCtxs(contexts);
     }
@@ -80,14 +48,10 @@ export class AsterClient implements PerpExchange {
   public async getOrderBook(symbol: string): Promise<OrderBook> {
     const coin = this.extractCoinFromSymbol(symbol);
     const asterSymbol = `${coin}USDT`;
-    const data = await asterHttpClient.request<any>(
-      `${this.restUrl}${ASTER_ENDPOINTS.DEPTH}?symbol=${asterSymbol}&limit=50`,
-      {
-        method: 'GET',
-        weight: 5,
-        ttlMs: 1000,
-      }
+    const response = await fetch(
+      `${ASTER_REST_URL}${ASTER_ENDPOINTS.DEPTH}?symbol=${asterSymbol}&limit=100`
     );
+    const data = await response.json();
 
     return AsterMapper.mapOrderBook(symbol, data);
   }
@@ -101,11 +65,6 @@ export class AsterClient implements PerpExchange {
     this.wsClient.subscribeOrderBook(coin);
   }
 
-  public async unsubscribeOrderBook(symbol: string): Promise<void> {
-    const coin = this.extractCoinFromSymbol(symbol);
-    this.wsClient.unsubscribeOrderBook(coin);
-  }
-
   public async subscribeTicker(
     symbol: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -113,11 +72,6 @@ export class AsterClient implements PerpExchange {
   ): Promise<void> {
     const coin = this.extractCoinFromSymbol(symbol);
     this.wsClient.subscribeTrades(coin);
-  }
-
-  public async unsubscribeTicker(symbol: string): Promise<void> {
-    const coin = this.extractCoinFromSymbol(symbol);
-    this.wsClient.unsubscribeTrades(coin);
   }
 
   public subscribeCandles(coin: string, interval: string): void {
@@ -134,30 +88,105 @@ export class AsterClient implements PerpExchange {
     startTime: number,
     endTime: number
   ): Promise<Candle[]> {
-    const cleanCoin = this.extractCoinFromSymbol(coin);
-    const asterSymbol = `${cleanCoin}USDT`;
-    const url = `${this.restUrl}${ASTER_ENDPOINTS.KLINES}?symbol=${asterSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=500`;
-
-    const data = await asterHttpClient.request<any>(url, {
-      method: 'GET',
-      weight: 5,
-      ttlMs: 5000,
-    });
+    const asterSymbol = `${coin}USDT`;
+    const url = `${ASTER_REST_URL}${ASTER_ENDPOINTS.KLINES}?symbol=${asterSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=500`;
+    const response = await fetch(url);
+    const data = await response.json();
 
     if (!Array.isArray(data)) {
       return [];
     }
 
-    const uiSymbol = `${cleanCoin}-USDT`;
+    const uiSymbol = `${coin}-USDT`;
     return data.map((k: any) => AsterMapper.mapCandle(uiSymbol, interval, k));
   }
 
+  private async signedFetch(
+    endpoint: string,
+    params: Record<string, string> = {},
+    method = 'GET'
+  ): Promise<any> {
+    const query = new URLSearchParams(params);
+    query.append('timestamp', Date.now().toString());
+    query.append('signature', 'DUMMY_SIGNATURE');
+
+    const url = `${ASTER_REST_URL}${endpoint}?${query.toString()}`;
+    const response = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        // 'X-MBX-APIKEY': '...', // Will be added with user's listenKey or public key
+      },
+    });
+    return response.json();
+  }
+
+  public async getPositions(): Promise<import('../../core/models').Position[]> {
+    try {
+      const data = await this.signedFetch(ASTER_ENDPOINTS.POSITION_RISK);
+      if (Array.isArray(data)) {
+        return data.filter(p => parseFloat(p.positionAmt) !== 0).map(AsterMapper.mapPosition);
+      }
+      return [];
+    } catch (e) {
+      console.error('Failed to fetch positions', e);
+      return [];
+    }
+  }
+
+  public async getOpenOrders(): Promise<import('../../core/models').Order[]> {
+    try {
+      const data = await this.signedFetch(ASTER_ENDPOINTS.OPEN_ORDERS);
+      if (Array.isArray(data)) {
+        return data.map(AsterMapper.mapOrder);
+      }
+      return [];
+    } catch (e) {
+      console.error('Failed to fetch open orders', e);
+      return [];
+    }
+  }
+
+  public async getTradeHistory(): Promise<import('../../core/models').UserTrade[]> {
+    try {
+      const data = await this.signedFetch(ASTER_ENDPOINTS.USER_TRADES);
+      if (Array.isArray(data)) {
+        return data.map(AsterMapper.mapUserTrade);
+      }
+      return [];
+    } catch (e) {
+      console.error('Failed to fetch trade history', e);
+      return [];
+    }
+  }
+
+  public async getBalances(): Promise<import('../../core/models').AccountBalance[]> {
+    try {
+      const data = await this.signedFetch(ASTER_ENDPOINTS.BALANCE);
+      if (Array.isArray(data)) {
+        return data.map(AsterMapper.mapAccountBalance);
+      }
+      return [];
+    } catch (e) {
+      console.error('Failed to fetch balances', e);
+      return [];
+    }
+  }
+
+  //Trade Execution
+
+  public async placeOrder(order: any): Promise<any> {
+    console.log('placeOrder requested', order);
+    return null;
+  }
+
+  public async cancelOrder(orderId: string, symbol: string): Promise<any> {
+    console.log('cancelOrder requested', { orderId, symbol });
+    return null;
+  }
+
   private extractCoinFromSymbol(symbol: string): string {
-    return (
-      symbol
-        .replace(/[-_]/g, '')
-        .toUpperCase()
-        .replace(/(USDT|USDC)+$/g, '') || symbol
-    );
+    // "BTC-USDC" -> "BTC"
+    return symbol.split('-')[0] || symbol;
   }
 }

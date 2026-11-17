@@ -24,43 +24,13 @@ export default defineConfig(({ command }) => ({
         target: 'https://folioapi.swiftexwallet.com',
         changeOrigin: true,
       },
-      '/api-stellar-expert': {
-        target: 'https://api.stellar.expert',
-        changeOrigin: true,
-        rewrite: path => path.replace(/^\/api-stellar-expert/, ''),
-        headers: {
-          Referer: 'https://stellar.expert',
-          Origin: 'https://stellar.expert',
-        },
-      },
-    },
-  },
-  preview: {
-    port: 8081,
-    proxy: {
-      '/pnl': {
-        target: 'https://folioapi.swiftexwallet.com',
-        changeOrigin: true,
-      },
-      '/api-stellar-expert': {
-        target: 'https://api.stellar.expert',
-        changeOrigin: true,
-        rewrite: path => path.replace(/^\/api-stellar-expert/, ''),
-        headers: {
-          Referer: 'https://stellar.expert',
-          Origin: 'https://stellar.expert',
-        },
-      },
     },
   },
 
   plugins: [
     react(),
     tailwindcss(),
-    command === 'build' &&
-      removeConsole({
-        externalValue: ['Stop!', 'Self-XSS', 'intended for developers'],
-      }),
+    command === 'build' && removeConsole(),
     nodePolyfills({
       globals: { Buffer: true, global: true },
       protocolImports: true,
@@ -133,12 +103,7 @@ export default defineConfig(({ command }) => ({
     css: false,
     server: {
       deps: {
-        inline: [
-          'html-encoding-sniffer',
-          '@exodus/bytes',
-          'uint8array-extras',
-          '@stellar/stellar-sdk',
-        ],
+        inline: ['html-encoding-sniffer', '@exodus/bytes'],
         external: [],
       },
     },

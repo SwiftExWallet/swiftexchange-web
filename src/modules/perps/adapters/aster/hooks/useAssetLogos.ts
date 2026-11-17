@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 
-import { asterHttpClient } from '../client/asterHttpClient';
 import { ASTER_BAPI_URL } from '../constants';
 
 const ASSET_LOGO_CACHE_KEY = 'aster_asset_logos';
@@ -34,13 +33,10 @@ export const useAssetLogos = () => {
         }
 
         // Fetch if not cached or expired
-        const json = await asterHttpClient.request<any>(
-          `${ASTER_BAPI_URL}/asset/ae/all-asset-logo`,
-          {
-            method: 'POST',
-            ttlMs: CACHE_EXPIRY,
-          }
-        );
+        const response = await fetch(`${ASTER_BAPI_URL}/asset/ae/all-asset-logo`, {
+          method: 'POST',
+        });
+        const json = await response.json();
 
         if (json.success && Array.isArray(json.data)) {
           const logoMap: Record<string, string> = {};

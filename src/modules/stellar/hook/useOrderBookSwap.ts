@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import * as StellarSDK from '@stellar/stellar-sdk';
-import BigNumber from 'bignumber.js';
 
 import { getStellarConfig } from '../../walletconnect/config/chains';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
-import { StellarBaseService } from '../service/StellarBaseService';
 import {
   BinanceBridgeService,
   getBinanceSymbol,
@@ -37,7 +35,6 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
   const [service, setService] = useState<OrderBookSwapService | null>(null);
   const [isBuy, setIsBuyState] = useState(true);
   const hasSetDefaultPairRef = useRef(false);
-  const lastPairRef = useRef<string>('');
   const [fromToken, setFromToken] = useState<TokenInfo | null>(null);
   const [toToken, setToToken] = useState<TokenInfo | null>(null);
   const [amount, setAmount] = useState<string>('');
@@ -253,42 +250,6 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
     let closeStream: (() => void) | null = null;
     let isMounted = true;
     let pollingInterval: NodeJS.Timeout | null = null;
-    let throttleTimeout: NodeJS.Timeout | null = null;
-    let lastBookUpdate = 0;
-    let pendingBook: any = null;
-
-    const handleThrottledUpdate = (updatedBook: any) => {
-      if (!isMounted) return;
-      pendingBook = updatedBook;
-      const now = Date.now();
-      const THROTTLE_MS = 250;
-
-      const flush = () => {
-        if (pendingBook && isMounted) {
-          setOrderBook(pendingBook);
-          const k = getCacheKey(fromToken, toToken, isBuy);
-          if (k) globalOrderBookCache.set(k, pendingBook);
-          lastBookUpdate = Date.now();
-          pendingBook = null;
-        }
-      };
-
-      if (now - lastBookUpdate >= THROTTLE_MS) {
-        if (throttleTimeout) {
-          clearTimeout(throttleTimeout);
-          throttleTimeout = null;
-        }
-        flush();
-      } else if (!throttleTimeout) {
-        throttleTimeout = setTimeout(
-          () => {
-            throttleTimeout = null;
-            flush();
-          },
-          THROTTLE_MS - (now - lastBookUpdate)
-        );
-      }
-    };
 
     const initOrderBook = async () => {
       const key = getCacheKey(fromToken, toToken, isBuy);
@@ -309,13 +270,7 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
           setOrderBook(book);
           if (key) globalOrderBookCache.set(key, book);
 
-          const currentPairKey = `${base}-${counter}`;
-          const isNewPair = lastPairRef.current !== currentPairKey;
-          if (isNewPair) {
-            lastPairRef.current = currentPairKey;
-          }
-
-          if (isNewPair || !price) {
+          if (!price) {
             const bestPrice = isBuy
               ? book.asks.length > 0
                 ? book.asks[0].price
@@ -331,7 +286,13 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
           const stream = BinanceBridgeService.streamOrderBook(
             symbol,
             isFlipped,
-            handleThrottledUpdate,
+            (updatedBook: any) => {
+              if (isMounted) {
+                setOrderBook(updatedBook);
+                const k = getCacheKey(fromToken, toToken, isBuy);
+                if (k) globalOrderBookCache.set(k, updatedBook);
+              }
+            },
             (err: any) => {
               console.error('[useOrderBookSwap] Binance stream error:', err);
             }
@@ -359,7 +320,13 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
           const stream = service.streamOrderBook(
             fromToken.asset,
             toToken.asset,
-            handleThrottledUpdate,
+            (updatedBook: any) => {
+              if (isMounted) {
+                setOrderBook(updatedBook);
+                const k = getCacheKey(fromToken, toToken, isBuy);
+                if (k) globalOrderBookCache.set(k, updatedBook);
+              }
+            },
             (err: any) => {
               console.error('[useOrderBookSwap] Stream error, falling back to polling:', err);
               if (isMounted && !pollingInterval) {
@@ -368,7 +335,9 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
                     .getOrderBook(fromToken.asset!, toToken.asset!, 20)
                     .then(book => {
                       if (isMounted) {
-                        handleThrottledUpdate(book);
+                        setOrderBook(book);
+                        const k = getCacheKey(fromToken, toToken, isBuy);
+                        if (k) globalOrderBookCache.set(k, book);
                       }
                     })
                     .catch(e => console.error('[useOrderBookSwap] Polling error:', e));
@@ -399,9 +368,6 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
 
     return () => {
       isMounted = false;
-      if (throttleTimeout) {
-        clearTimeout(throttleTimeout);
-      }
       if (closeStream) {
         closeStream();
       }
@@ -421,26 +387,13 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
 
   // Calculate quote
   useEffect(() => {
-    if (!service || !fromToken?.asset || !toToken?.asset) {
+    if (!service || !amount || !price || !fromToken?.asset || !toToken?.asset) {
       setTotal('0');
       setQuote(null);
       return;
     }
 
-    const numAmountBN = new BigNumber(amount || '0');
-    const numPriceBN = new BigNumber(price || '0');
-
-    if (
-      !numAmountBN.isFinite() ||
-      !numPriceBN.isFinite() ||
-      numAmountBN.lte(0) ||
-      numPriceBN.lte(0)
-    ) {
-      setTotal('0');
-      setQuote(null);
-      return;
-    }
-
+    setIsLoading(true);
     try {
       const newTotal = service.calculateTotal(amount, price);
       setTotal(newTotal);
@@ -457,56 +410,51 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
       setError(null);
     } catch (err) {
       console.error('Failed to calculate quote:', err);
+      setError('Failed to calculate order quote');
+    } finally {
+      setIsLoading(false);
     }
   }, [amount, price, fromToken, toToken, slippageTolerance, service]);
 
   const setAmountPercentage = useCallback(
     (percentage: number) => {
-      const activePayingToken = isBuy ? toToken : fromToken;
-      if (!activePayingToken?.balance) {
-        setError(`No ${activePayingToken?.code || ''} balance available`);
+      if (!fromToken?.balance) {
+        setError('No balance available for selected token');
         return;
       }
 
-      const isNative = activePayingToken.code === 'XLM' || activePayingToken.asset?.isNative();
-      const spendableStr = StellarBaseService.calculateSpendableBalance(
-        activePayingToken.balance || '0',
-        subentryCount,
-        isNative
-      );
-      const availableBalanceBN = new BigNumber(spendableStr || '0');
-      const allocatedPayingBN = availableBalanceBN.times(percentage).dividedBy(100);
-
-      if (isBuy) {
-        const priceBN = new BigNumber(price || '0');
-        if (!priceBN.isFinite() || priceBN.lte(0)) {
-          setError('Please enter a valid price first');
-          return;
-        }
-        const baseAmountBN = allocatedPayingBN.dividedBy(priceBN);
-        setAmount(baseAmountBN.toFixed(7, BigNumber.ROUND_DOWN));
-      } else {
-        setAmount(allocatedPayingBN.toFixed(7, BigNumber.ROUND_DOWN));
-      }
-      setError(null);
+      const balance = parseFloat(fromToken.balance);
+      const reserve = fromToken.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
+      const availableBalance = Math.max(0, balance - reserve);
+      const newAmount = ((availableBalance * percentage) / 100).toFixed(7);
+      setAmount(newAmount);
     },
-    [isBuy, fromToken, toToken, subentryCount, price]
+    [fromToken]
   );
 
   const setMaxAmount = useCallback(() => {
-    setAmountPercentage(100);
-  }, [setAmountPercentage]);
+    if (!fromToken?.balance) {
+      setError('No balance available for selected token');
+      return;
+    }
 
-  const setIsBuy = useCallback((val?: boolean | ((prev: boolean) => boolean)) => {
-    setIsBuyState(prev => {
-      const next = typeof val === 'function' ? val(prev) : typeof val === 'boolean' ? val : !prev;
-      return next;
-    });
+    const balance = parseFloat(fromToken.balance);
+    const reserve = fromToken.code === 'XLM' ? 1 + subentryCount * 0.5 + 0.05 : 0;
+    const maxAmount = Math.max(0, balance - reserve);
+    setAmount(maxAmount.toFixed(7));
+  }, [fromToken, subentryCount]);
+
+  const toggleOrderType = useCallback(() => {
+    setIsBuyState(prev => !prev);
+    const temp = fromToken;
+    setFromToken(toToken);
+    setToToken(temp);
     setAmount('');
+    setPrice('');
     setTotal('');
     setQuote(null);
     setError(null);
-  }, []);
+  }, [fromToken, toToken]);
 
   const buildTransaction = useCallback(
     async (options: LargeOrderOptions = {}): Promise<LargeOrderTransaction> => {
@@ -515,23 +463,14 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
       if (!quote) throw new Error('No quote available');
       if (!fromToken || !toToken) throw new Error('Please select both tokens');
 
-      const payingToken = isBuy ? toToken : fromToken;
-      const requiredBN = new BigNumber(isBuy ? quote.total : quote.amount);
-      const isPayingNative = payingToken.code === 'XLM' || payingToken.asset?.isNative() || false;
-      const spendableBN = new BigNumber(
-        StellarBaseService.calculateSpendableBalance(
-          payingToken.balance || '0',
-          subentryCount,
-          isPayingNative
-        )
-      );
+      const requiredAmount = isBuy ? parseFloat(quote.total) : parseFloat(quote.amount);
+      const availableBalance = parseFloat(fromToken.balance || '0');
 
-      if (requiredBN.gt(spendableBN)) {
+      if (requiredAmount > availableBalance) {
         throw new Error(
-          `Insufficient ${payingToken.code} spendable balance. Required: ${requiredBN.toFixed(
-            7,
-            BigNumber.ROUND_DOWN
-          )}, Spendable: ${spendableBN.toFixed(7, BigNumber.ROUND_DOWN)}`
+          `Insufficient ${fromToken.code} balance. Required: ${requiredAmount.toFixed(
+            7
+          )}, Available: ${availableBalance.toFixed(7)}`
         );
       }
 
@@ -575,33 +514,25 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
 
         setFromToken(prev => {
           if (!prev || !quote) return prev;
-          const usedBN = new BigNumber(isBuy ? quote.total || '0' : quote.amount || '0');
-          const prevBalBN = new BigNumber(prev.balance || '0');
-          const newBalBN = BigNumber.max(0, prevBalBN.minus(usedBN));
-          return { ...prev, balance: newBalBN.toFixed(7, BigNumber.ROUND_DOWN) };
+          const usedAmount = isBuy
+            ? parseFloat(quote.total || '0')
+            : parseFloat(quote.amount || '0');
+          const newBalance = Math.max(0, parseFloat(prev.balance || '0') - usedAmount);
+          return { ...prev, balance: newBalance.toFixed(7) };
         });
 
         setToToken(prev => {
           if (!prev || !quote) return prev;
-          const recBN = new BigNumber(isBuy ? quote.amount || '0' : quote.total || '0');
-          const prevBalBN = new BigNumber(prev.balance || '0');
-          const newBalBN = prevBalBN.plus(recBN);
-          return { ...prev, balance: newBalBN.toFixed(7, BigNumber.ROUND_DOWN) };
+          const receivedAmount = isBuy
+            ? parseFloat(quote.amount || '0')
+            : parseFloat(quote.total || '0');
+          const newBalance = parseFloat(prev.balance || '0') + receivedAmount;
+          return { ...prev, balance: newBalance.toFixed(7) };
         });
 
         setTimeout(() => fetchBalances(true), 8000);
 
-        window.dispatchEvent(
-          new CustomEvent('stellar:order-placed', {
-            detail: {
-              quote: transaction.quote || quote,
-              isBuy,
-              txHash,
-              fromToken,
-              toToken,
-            },
-          })
-        );
+        window.dispatchEvent(new CustomEvent('stellar:order-placed'));
 
         return txHash;
       } catch (err) {
@@ -616,7 +547,7 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
         setIsLoading(false);
       }
     },
-    [service, fetchBalances, quote, isBuy, fromToken, toToken]
+    [service, fetchBalances]
   );
 
   const refreshOrderBook = useCallback(async () => {
@@ -654,27 +585,6 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
     setTransaction(null);
   }, []);
 
-  const payingToken = isBuy ? toToken : fromToken;
-  const isPayingNative = payingToken
-    ? payingToken.code === 'XLM' || payingToken.asset?.isNative() || false
-    : false;
-  const spendableBalance = payingToken
-    ? StellarBaseService.calculateSpendableBalance(
-        payingToken.balance || '0',
-        subentryCount,
-        isPayingNative
-      )
-    : '0';
-
-  const requiredAmountBN = new BigNumber(isBuy ? total || '0' : amount || '0');
-  const spendableBalanceBN = new BigNumber(spendableBalance || '0');
-  const isInsufficientBalance = Boolean(
-    payingToken &&
-    requiredAmountBN.isFinite() &&
-    requiredAmountBN.gt(0) &&
-    requiredAmountBN.gt(spendableBalanceBN)
-  );
-
   return {
     isBuy,
     fromToken,
@@ -685,18 +595,15 @@ export function useLargeOrder({ userAddress }: UseLargeOrderProps) {
     quote,
     isLoading,
     error,
-    isInsufficientBalance,
-    spendableBalance,
     slippageTolerance,
     availableTokens,
     subentryCount,
     orderBook,
-    setIsBuy,
+    setIsBuy: toggleOrderType,
     setFromToken,
     setToToken,
     setAmount,
     setPrice,
-    setTotal,
     setSlippageTolerance,
     setAmountPercentage,
     setMaxAmount,

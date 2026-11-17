@@ -62,15 +62,14 @@ const TransactionReview = React.memo<TransactionReviewProps>(function Transactio
   if (!currentAsset || !recipientAddress || !amount) return null;
 
   return (
-    <div className="space-y-4 w-full overflow-hidden animate-fadeIn">
-      <div className="relative overflow-hidden bg-gradient-to-r from-brand-primary/10 via-brand-primary/5 to-transparent rounded-2xl border border-brand-primary/20 p-4 backdrop-blur-md shadow-lg shadow-brand-primary/5">
-        <div className="absolute -right-8 -top-8 w-24 h-24 bg-brand-primary/10 rounded-full blur-2xl pointer-events-none" />
+    <div className="space-y-4 w-full overflow-hidden">
+      <div className="bg-brand-primary/5 rounded-xl border border-brand-primary/10 p-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-brand-primary/20 flex items-center justify-center border border-brand-primary/30 shadow-inner">
-            <Info className="w-5 h-5 text-brand-primary animate-pulse" />
+          <div className="w-10 h-10 rounded-full bg-brand-primary/10 flex items-center justify-center">
+            <Info className="w-5 h-5 text-brand-primary" />
           </div>
           <div>
-            <h3 className="font-bold text-text-primary text-sm tracking-wide">Review Details</h3>
+            <h3 className="font-bold text-text-primary text-sm">Review Details</h3>
             <p className="text-text-secondary text-[11px] font-medium opacity-80">
               Confirm your transaction details before signing.
             </p>
@@ -78,19 +77,18 @@ const TransactionReview = React.memo<TransactionReviewProps>(function Transactio
         </div>
       </div>
 
-      <div className="bg-bg-tertiary/80 rounded-2xl overflow-hidden border border-divider/40 backdrop-blur-xl shadow-xl">
+      <div className="bg-bg-tertiary rounded-xl overflow-hidden ">
         <div className="p-4 space-y-5">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wider font-extrabold text-text-muted flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-brand-primary animate-ping inline-block" />
-                Live Route
+              <span className="text-[10px] uppercase tracking-wider font-bold text-text-muted">
+                Route
               </span>
             </div>
 
             <div className="relative space-y-2">
-              <div className="flex items-center gap-3 bg-bg-secondary/70 p-3 rounded-xl border border-divider/30 hover:border-brand-primary/30 transition-colors">
-                <div className="w-8 h-8 rounded-lg bg-bg-primary flex items-center justify-center border border-divider/40">
+              <div className="flex items-center gap-3 bg-bg-secondary/50 p-3 rounded-lg">
+                <div className="w-8 h-8 rounded-full bg-bg-primary flex items-center justify-center">
                   <Wallet size={14} className="text-text-muted" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -103,10 +101,10 @@ const TransactionReview = React.memo<TransactionReviewProps>(function Transactio
                 </div>
               </div>
 
-              <div className="absolute left-6 top-1/2 -translate-y-1/2 w-px h-4 bg-gradient-to-b from-brand-primary/40 to-brand-primary" />
+              <div className="absolute left-6 top-1/2 -translate-y-1/2 w-px h-4 bg-divider/10" />
 
-              <div className="flex items-center gap-3 bg-bg-secondary/70 p-3 rounded-xl border border-divider/30 hover:border-brand-primary/30 transition-colors">
-                <div className="w-8 h-8 rounded-lg bg-brand-primary/20 flex items-center justify-center border border-brand-primary/40">
+              <div className="flex items-center gap-3 bg-bg-secondary/50 p-3 rounded-lg">
+                <div className="w-8 h-8 rounded-full bg-brand-primary/10 flex items-center justify-center">
                   <ChevronRight size={14} className="text-brand-primary" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -120,25 +118,25 @@ const TransactionReview = React.memo<TransactionReviewProps>(function Transactio
           </div>
 
           <div className="space-y-3">
-            <div className="flex items-center justify-between border-t border-divider/20 pt-4">
-              <span className="text-[10px] uppercase tracking-wider font-extrabold text-text-muted">
-                Transaction Breakdown
+            <div className="flex items-center justify-between border-t border-divider/5 pt-4">
+              <span className="text-[10px] uppercase tracking-wider font-bold text-text-muted">
+                Transaction Details
               </span>
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center gap-3 bg-bg-secondary/70 p-3.5 rounded-xl border border-divider/30">
-                <div className="w-9 h-9 rounded-xl bg-brand-primary/20 flex items-center justify-center shrink-0 border border-brand-primary/30">
-                  <span className="text-[11px] font-black text-brand-primary">
+              <div className="flex items-center gap-3 bg-bg-secondary/50 p-3 rounded-lg">
+                <div className="w-8 h-8 rounded-full bg-brand-primary/10 flex items-center justify-center shrink-0">
+                  <span className="text-[10px] font-black text-brand-primary">
                     {currentAsset.symbol.slice(0, 2).toUpperCase()}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-[10px] font-bold text-text-muted leading-none mb-1">
-                    Sending Amount
+                    Amount
                   </div>
                   <div
-                    className="text-base font-black text-text-primary truncate tracking-tight"
+                    className="text-sm font-black text-text-primary truncate"
                     title={`${amount} ${currentAsset.symbol}`}
                   >
                     {amount} {currentAsset.symbol}
@@ -146,8 +144,8 @@ const TransactionReview = React.memo<TransactionReviewProps>(function Transactio
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 bg-bg-secondary/70 p-3 rounded-xl border border-divider/30">
-                <div className="w-8 h-8 rounded-lg bg-bg-primary flex items-center justify-center shrink-0 overflow-hidden border border-divider/40">
+              <div className="flex items-center gap-3 bg-bg-secondary/50 p-3 rounded-lg">
+                <div className="w-8 h-8 rounded-full bg-bg-primary flex items-center justify-center shrink-0 overflow-hidden">
                   {currentChainLogo ? (
                     <img src={currentChainLogo} alt="" className="w-4 h-4 rounded-full" />
                   ) : (
@@ -165,8 +163,8 @@ const TransactionReview = React.memo<TransactionReviewProps>(function Transactio
               </div>
 
               {memo && currentAsset.type === 'stellar' && (
-                <div className="flex items-center gap-3 bg-bg-secondary/70 p-3 rounded-xl border border-divider/30">
-                  <div className="w-8 h-8 rounded-lg bg-bg-primary flex items-center justify-center shrink-0 border border-divider/40">
+                <div className="flex items-center gap-3 bg-bg-secondary/50 p-3 rounded-lg">
+                  <div className="w-8 h-8 rounded-full bg-bg-primary flex items-center justify-center shrink-0">
                     <Info size={14} className="text-text-muted" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -381,23 +379,23 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
         {currentAsset?.type === 'stellar' && <StellarActivationBanner />}
 
         {senderAddress && (
-          <div className="relative overflow-hidden bg-bg-tertiary/90 border border-divider/40 rounded-2xl p-4 backdrop-blur-xl shadow-lg transition-all hover:border-brand-primary/20">
+          <div className="bg-bg-tertiary rounded-xl p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-bg-secondary flex items-center justify-center border border-divider/40 shadow-inner">
+                <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center border border-divider/50">
                   <Wallet size={18} className="text-text-muted" />
                 </div>
                 <div>
-                  <div className="text-[10px] font-extrabold text-text-muted uppercase tracking-wider mb-0.5">
+                  <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-0.5">
                     Active Account
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <code className="text-xs font-mono text-text-primary opacity-90 font-bold">
+                    <code className="text-xs font-mono text-text-primary opacity-80">
                       {senderAddress.slice(0, 6)}...{senderAddress.slice(-4)}
                     </code>
                     <button
                       onClick={handleCopySender}
-                      className="text-text-muted hover:text-brand-primary transition-colors p-1 rounded-md hover:bg-brand-primary/10"
+                      className="text-text-muted hover:text-brand-primary transition-colors"
                     >
                       <Copy size={12} />
                     </button>
@@ -406,7 +404,7 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
               </div>
               <div className="text-right">
                 <div className="flex items-center justify-end gap-1.5 mb-1">
-                  <span className="text-[10px] font-extrabold text-text-muted uppercase tracking-wider leading-none mt-0.5">
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider leading-none mt-0.5">
                     Available
                   </span>
                   <button
@@ -435,12 +433,12 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
         )}
 
         <div className="space-y-2">
-          <label className="block text-[11px] font-extrabold text-text-muted uppercase tracking-wider px-1">
+          <label className="block text-[11px] font-bold text-text-muted uppercase tracking-wider px-1">
             Select Asset & Network
           </label>
           <button
             onClick={() => openAssetSelector('SEND')}
-            className="group relative w-full bg-bg-tertiary/90 hover:bg-bg-tertiary border border-divider/40 hover:border-brand-primary/30 rounded-2xl p-4 transition-all duration-200 active:scale-[0.99] text-left backdrop-blur-xl shadow-lg hover:shadow-brand-primary/5"
+            className="group relative w-full bg-bg-tertiary hover:bg-bg-hover rounded-xl p-4 transition-colors active:scale-[0.99] text-left"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -449,10 +447,10 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
                     <img
                       src={currentAsset.logo}
                       alt=""
-                      className="w-12 h-12 rounded-2xl shadow-md border border-divider/50 object-cover"
+                      className="w-12 h-12 rounded-full shadow-md border-2 border-bg-secondary"
                     />
                   ) : (
-                    <div className="w-12 h-12 rounded-2xl bg-bg-secondary flex items-center justify-center text-sm font-bold text-text-secondary border border-divider">
+                    <div className="w-12 h-12 rounded-full bg-bg-tertiary flex items-center justify-center text-sm font-bold text-text-secondary border border-divider">
                       {currentAsset?.symbol.slice(0, 2)}
                     </div>
                   )}
@@ -466,29 +464,30 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
                   <div className="font-black text-lg text-text-primary leading-none mb-1">
                     {currentAsset?.symbol || 'Select Asset'}
                   </div>
-                  <div className="text-[10px] text-brand-primary font-black uppercase tracking-widest bg-brand-primary/10 border border-brand-primary/20 px-2 py-0.5 rounded-lg inline-block">
+                  <div className="text-[10px] text-brand-primary font-black uppercase tracking-widest bg-brand-primary/10 px-1.5 py-0.5 rounded-md inline-block">
                     {currentAsset?.network || 'All'}
                   </div>
                 </div>
               </div>
               <ChevronRight
                 size={18}
-                className="text-text-muted group-hover:text-brand-primary transition-colors group-hover:translate-x-0.5"
+                className="text-text-muted group-hover:text-brand-primary transition-colors"
               />
             </div>
           </button>
         </div>
 
         <div className="grid grid-cols-1 gap-3">
-          <div className="group relative bg-bg-tertiary/90 border border-divider/40 focus-within:border-brand-primary/50 rounded-2xl overflow-hidden backdrop-blur-xl transition-all duration-200 shadow-md">
+          <div className="group relative bg-bg-tertiary rounded-xl overflow-hidden">
+            <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl bg-brand-primary opacity-0 group-focus-within:opacity-100 transition-opacity" />
             <div className="p-4">
               <label
                 htmlFor="recipientAddress"
-                className="block text-[10px] font-extrabold text-text-muted uppercase tracking-wider mb-2"
+                className="block text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2"
               >
                 Recipient Address
               </label>
-              <div className="bg-bg-secondary/70 rounded-xl px-3 h-14 flex items-center border border-divider/20 focus-within:border-brand-primary/40 transition-colors">
+              <div className="bg-bg-secondary rounded-lg px-3 h-14 flex items-center">
                 <input
                   ref={recipientRef}
                   type="text"
@@ -509,24 +508,25 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
             </div>
           </div>
 
-          <div className="group relative bg-bg-tertiary/90 border border-divider/40 focus-within:border-brand-primary/50 rounded-2xl overflow-hidden backdrop-blur-xl transition-all duration-200 shadow-md">
+          <div className="group relative bg-bg-tertiary rounded-xl overflow-hidden">
+            <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl bg-brand-primary opacity-0 group-focus-within:opacity-100 transition-opacity" />
             <div className="p-4">
               <div className="flex justify-between items-center mb-2">
                 <label
                   htmlFor="amount"
-                  className="text-[10px] font-extrabold text-text-muted uppercase tracking-wider"
+                  className="text-[10px] font-bold text-text-muted uppercase tracking-wider"
                 >
                   Amount
                 </label>
                 <button
                   type="button"
                   onClick={handleMaxClick}
-                  className="text-[10px] font-black text-brand-primary uppercase hover:opacity-75 transition-opacity px-2 py-0.5 rounded-md bg-brand-primary/10 border border-brand-primary/20"
+                  className="text-[10px] font-black text-brand-primary uppercase hover:opacity-70 transition-opacity"
                 >
                   Use Max
                 </button>
               </div>
-              <div className="bg-bg-secondary/70 rounded-xl px-3 h-14 flex items-center border border-divider/20 focus-within:border-brand-primary/40 transition-colors">
+              <div className="bg-bg-secondary rounded-lg px-3 h-14 flex items-center">
                 <input
                   ref={amountRef}
                   type="text"
@@ -541,7 +541,7 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
                   value={amount}
                   onChange={handleAmountChange}
                 />
-                <span className="text-xs font-black text-text-muted ml-2 shrink-0 bg-bg-tertiary px-2 py-1 rounded-md border border-divider/30">
+                <span className="text-xs font-bold text-text-muted ml-2 shrink-0">
                   {currentAsset?.symbol}
                 </span>
               </div>
@@ -550,15 +550,16 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
         </div>
 
         {currentAsset?.type === 'stellar' && (
-          <div className="group relative bg-bg-tertiary/90 border border-divider/40 focus-within:border-brand-primary/50 rounded-2xl overflow-hidden backdrop-blur-xl transition-all duration-200 shadow-md">
+          <div className="group relative bg-bg-tertiary rounded-xl overflow-hidden">
+            <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl bg-brand-primary opacity-0 group-focus-within:opacity-100 transition-opacity" />
             <div className="p-4">
               <label
                 htmlFor="memo"
-                className="block text-[10px] font-extrabold text-text-muted uppercase tracking-wider mb-2"
+                className="block text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2"
               >
-                Memo <span className="text-[8px] font-normal lowercase opacity-70">(Optional)</span>
+                Memo <span className="text-[8px] font-normal lowercase">(Optional)</span>
               </label>
-              <div className="bg-bg-secondary/70 rounded-xl px-3 h-14 flex items-center border border-divider/20 focus-within:border-brand-primary/40 transition-colors">
+              <div className="bg-bg-secondary rounded-lg px-3 h-14 flex items-center">
                 <input
                   type="text"
                   id="memo"
@@ -573,22 +574,22 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
         )}
 
         {parseFloat(amount) > 0 && currentAsset && (
-          <div className="bg-bg-tertiary/90 rounded-2xl p-4 border border-divider/40 backdrop-blur-xl shadow-lg">
+          <div className="bg-bg-tertiary rounded-xl p-4 border border-divider/60">
             <div className="space-y-3">
               <div className="flex justify-between items-center text-xs">
                 <span className="text-text-secondary font-medium">Estimated Fee</span>
                 <div className="flex items-center gap-1.5 font-bold text-text-primary">
                   {isEstimatingFees ? (
-                    <Loader2 size={10} className="animate-spin opacity-50 text-brand-primary" />
+                    <Loader2 size={10} className="animate-spin opacity-50" />
                   ) : (
                     `${estimatedFees?.totalCost || currentAsset.baseFee} ${currentAsset.symbol}`
                   )}
                 </div>
               </div>
-              <div className="h-px bg-divider/15" />
+              <div className="h-px bg-divider/10" />
               <div className="flex justify-between items-center">
                 <span className="text-sm font-bold text-text-primary">Total to Send</span>
-                <span className="text-lg font-black text-brand-primary tracking-tight">
+                <span className="text-lg font-black text-brand-primary">
                   {formatAmount(totalAmount, currentAsset.decimals)} {currentAsset.symbol}
                 </span>
               </div>
@@ -597,8 +598,8 @@ const SendAssets: React.FC<SendCryptoProps> = ({ onBack }) => {
         )}
 
         {formError && formError !== 'Connect wallet' && (
-          <div className="bg-danger/10 border border-danger/20 rounded-2xl p-3.5 flex gap-3 items-center backdrop-blur-md">
-            <AlertCircle size={14} className="text-danger shrink-0 animate-pulse" />
+          <div className="bg-danger/5 border border-danger/10 rounded-xl p-3.5 flex gap-3 items-center">
+            <AlertCircle size={14} className="text-danger shrink-0" />
             <p className="text-[11px] font-bold text-danger leading-tight">{formError}</p>
           </div>
         )}

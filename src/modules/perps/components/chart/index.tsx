@@ -1,4 +1,3 @@
-import { X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -14,18 +13,20 @@ import { useThemeStore } from '../../../../store/themeStore';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useCandles } from '../../hooks/useCandles';
 import { ChartHeader } from './components/ChartHeader';
-import { ChartScaleControls, type ScaleMode } from './components/ChartScaleControls';
-import { DrawingStyleBar, DrawingToolbar } from './components/DrawingToolbar';
+import { DrawingStyleBar, DrawingToolbar, ScaleModeToggle } from './components/DrawingToolbar';
 import { IndicatorSettingsModal } from './components/IndicatorSettingsModal';
 import { Legend } from './components/Legend';
-import { HistoryLoadingOverlay, MarketTransitionOverlay } from './components/LoadingOverlay';
+import {
+  HistoryLoadingOverlay,
+  MarketTransitionOverlay,
+  Watermark,
+} from './components/LoadingOverlay';
 import { hydrateDrawing } from './constants/drawingClassMap';
 import { useChartData } from './hooks/useChartData';
 import { useChartDrawings } from './hooks/useChartDrawings';
 import { useChartIndicators } from './hooks/useChartIndicators';
 import { useChartInstance } from './hooks/useChartInstance';
 import { useChartSettings } from './hooks/useChartSettings';
-import { useChartTradeLines } from './hooks/useChartTradeLines';
 import { useIsMobile } from './hooks/useIsMobile';
 import type { LegendData } from './types';
 import { normalizeCandles } from './utils/candles';
@@ -68,16 +69,13 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
   const [activeDrawTool, setActiveDrawTool] = useState<string | null>(null);
   const [legend, setLegend] = useState<LegendData | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [showDrawingToolbar, setShowDrawingToolbar] = useState(false);
-  const [scaleMode, setScaleMode] = useState<ScaleMode>('normal');
-  const [priceSource, setPriceSource] = useState<'last' | 'mark'>('last');
+  const [showDrawingToolbar, setShowDrawingToolbar] = useState(true);
   const [showIndicatorPills, setShowIndicatorPills] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
   const [activeDrawingColor, setActiveDrawingColor] = useState('#3b82f6');
   const [activeDrawingWidth, setActiveDrawingWidth] = useState(2);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
-  const [dismissedError, setDismissedError] = useState<string | null>(null);
 
   // Hooks
   const {
@@ -119,11 +117,6 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
     selectedMarket,
     timeframe
   );
-
-  useChartTradeLines({
-    series: seriesRef.current,
-    market: selectedMarket,
-  });
 
   useEffect(() => {
     if (!isLoading && !hasInitiallyLoaded) {
@@ -657,19 +650,7 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
   const handleToggleCrosshair = useCallback(() => setShowCrosshair(v => !v), [setShowCrosshair]);
   const handleToggleFullscreen = useCallback(() => setIsFullscreen(prev => !prev), []);
   const handleToggleIndicatorPills = useCallback(() => setShowIndicatorPills(v => !v), []);
-  const handleScaleModeChange = useCallback(
-    (mode: ScaleMode) => {
-      setScaleMode(mode);
-      const chart = chartRef.current;
-      if (!chart) return;
-      let lwcMode = PriceScaleMode.Normal;
-      if (mode === 'logarithmic') lwcMode = PriceScaleMode.Logarithmic;
-      else if (mode === 'percentage') lwcMode = PriceScaleMode.Percentage;
-      chart.priceScale('right').applyOptions({ mode: lwcMode });
-      setIsLogScale(mode === 'logarithmic');
-    },
-    [chartRef, setIsLogScale]
-  );
+  const handleToggleLogScale = useCallback(() => setIsLogScale(v => !v), [setIsLogScale]);
 
   const handleRemoveIndicator = useCallback(
     (instanceId: string) => {
@@ -726,14 +707,13 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
         isMobile={isMobile}
         activeChartTab={activeChartTab}
         onChartTabChange={onChartTabChange}
-        priceSource={priceSource}
-        onPriceSourceChange={setPriceSource}
       />
 
       <div
         className="flex-1 bg-secondary relative overflow-hidden min-h-[200px]"
         style={{ touchAction: 'none' }}
       >
+        <Watermark market={selectedMarket} isMobile={isMobile} isDark={isDark} />
         <HistoryLoadingOverlay isFetchingMore={isFetchingMore} />
         <DrawingToolbar
           show={showDrawingToolbar}
@@ -769,11 +749,7 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
           onWidthChange={handleDrawingWidthChange}
           onDeleteSelected={deleteSelectedDrawing}
         />
-        <ChartScaleControls
-          scaleMode={scaleMode}
-          onScaleModeChange={handleScaleModeChange}
-          isMobile={isMobile}
-        />
+        <ScaleModeToggle isLog={isLogScale} onToggle={handleToggleLogScale} />
 
         {editingInstanceId && (
           <IndicatorSettingsModal
@@ -785,15 +761,9 @@ export default function TradingChart({ activeChartTab, onChartTabChange }: Tradi
           />
         )}
 
-        {error && candles.length === 0 && dismissedError !== error && (
-          <div className="absolute top-14 left-2 right-2 sm:mx-4 p-2 sm:p-3 bg-red-500/10 border border-red-500/30 rounded-lg z-10 backdrop-blur-sm flex items-center justify-between">
+        {error && (
+          <div className="absolute top-14 left-2 right-2 sm:mx-4 p-2 sm:p-3 bg-red-500/10 border border-red-500/30 rounded-lg z-10 backdrop-blur-sm">
             <p className="text-xs sm:text-sm text-red-400 font-medium">{error}</p>
-            <button
-              onClick={() => setDismissedError(error)}
-              className="text-red-400/80 hover:text-red-300 p-1 rounded transition-colors"
-            >
-              <X size={14} />
-            </button>
           </div>
         )}
 

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { sendCustomNotification } from '../../../../service/notificationService';
-import { StellarBaseService } from '../../service/StellarBaseService';
 import { StellarSequenceTracker } from '../StellarSequenceTracker';
 import { signAndSubmitTransaction } from '../transactionService';
 
@@ -11,8 +10,7 @@ const { MockTransaction, MockHorizonServer, mockLoadAccount } = vi.hoisted(() =>
   class MockTransaction {
     source: string;
     sequence: string;
-    tx: { _attributes?: { seqNum: any }; seqNum?: any };
-    _tx: { _attributes?: { seqNum: any }; seqNum?: any };
+    tx: { _attributes: { seqNum: any } };
     _envelope: any;
     passphrase: string;
     xdrString: string;
@@ -26,17 +24,11 @@ const { MockTransaction, MockHorizonServer, mockLoadAccount } = vi.hoisted(() =>
         _attributes: {
           seqNum: { toString: () => this.sequence },
         },
-        seqNum: { toString: () => this.sequence },
       };
-      this._tx = this.tx;
     }
 
     toXDR() {
-      return `mutated_${this.tx._attributes?.seqNum?.toString() || this.tx.seqNum?.toString() || this.sequence}`;
-    }
-
-    toXdr() {
-      return this.toXDR();
+      return `mutated_${this.tx._attributes.seqNum?.toString() || this.sequence}`;
     }
 
     hash() {
@@ -62,10 +54,6 @@ vi.mock('@stellar/stellar-sdk', () => ({
   Horizon: {
     Server: MockHorizonServer,
   },
-  Networks: {
-    PUBLIC: 'Public Global Stellar Network ; September 2015',
-    TESTNET: 'Test SDF Network ; September 2015',
-  },
   xdr: {
     SequenceNumber: {
       fromString: (seq: string) => ({
@@ -79,20 +67,14 @@ vi.mock('../../../../service/notificationService', () => ({
   sendCustomNotification: vi.fn().mockResolvedValue({ success: true }),
 }));
 
-vi.mock('../../../walletconnect/config/chains', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../../walletconnect/config/chains')>();
-  return {
-    ...actual,
-    IS_MAINNET_ENABLED: true,
-    IS_TESTNET_ENABLED: true,
-    getStellarConfig: vi.fn((network: string) => ({
-      network: network === 'public' || network === 'mainnet' ? 'PUBLIC' : 'TESTNET',
-      networkPassphrase: 'Test SDF Network ; September 2015',
-      horizonUrl: 'https://horizon-testnet.stellar.org',
-      chainId: 'testnet',
-    })),
-  };
-});
+vi.mock('../../../walletconnect/config/chains', () => ({
+  getStellarConfig: vi.fn((network: string) => ({
+    network: network === 'public' || network === 'mainnet' ? 'PUBLIC' : 'TESTNET',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+    horizonUrl: 'https://horizon-testnet.stellar.org',
+    chainId: 'testnet',
+  })),
+}));
 
 describe('transactionService', () => {
   const testAddress = 'GB1234567890SOURCEADDRESS';
@@ -130,7 +112,7 @@ describe('transactionService', () => {
 
       expect(mockProvider.signTransaction).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ network: 'TESTNET' })
+        expect.objectContaining({ network: 'testnet' })
       );
       expect(global.fetch).toHaveBeenCalledWith(
         'https://horizon-testnet.stellar.org/transactions',
@@ -379,38 +361,6 @@ describe('transactionService', () => {
       expect(result.success).toBe(false);
       expect(rollbackSpy).toHaveBeenCalledWith(testAddress, '99');
       expect(resetSpy).toHaveBeenCalledWith(testAddress);
-    });
-
-    it('properly propagates tx_bad_seq from Horizon submission failure and resets tracker and cache', async () => {
-      const resetSpy = vi.spyOn(StellarSequenceTracker, 'reset');
-      const rollbackSpy = vi.spyOn(StellarSequenceTracker, 'rollbackSequence');
-      const invalidateCacheSpy = vi.spyOn(StellarBaseService, 'invalidateAccountCache');
-
-      const mockProvider = {
-        signTransaction: vi.fn().mockResolvedValue('SIGNED_XDR'),
-      };
-
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        json: async () => ({
-          extras: {
-            result_codes: {
-              transaction: 'tx_bad_seq',
-            },
-          },
-        }),
-      });
-
-      const result = await signAndSubmitTransaction({
-        ...defaultParams,
-        provider: mockProvider,
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('tx_bad_seq');
-      expect(rollbackSpy).toHaveBeenCalledWith(testAddress, '99');
-      expect(resetSpy).toHaveBeenCalledWith(testAddress);
-      expect(invalidateCacheSpy).toHaveBeenCalledWith(testAddress);
     });
 
     it('fails gracefully when no provider is given', async () => {

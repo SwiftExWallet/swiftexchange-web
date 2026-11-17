@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useOrderbookStore } from '../../core/stores/orderbookStore';
-import { safeFormatNumber } from '../../utils/precision';
 
 interface DepthPoint {
   price: number;
@@ -172,10 +171,9 @@ const DepthChart: React.FC<DepthChartProps> = ({ activeChartTab, onChartTabChang
 
       const numTicks = canvasSize.width < 500 ? 1 : 3;
       const formatPrice = (price: number) => {
-        if (!Number.isFinite(price) || price <= 0) return '--';
-        if (price >= 1000) return safeFormatNumber(price, 0, 1, '--');
-        if (price >= 1) return safeFormatNumber(price, 2, 2, '--');
-        return safeFormatNumber(price, 2, 4, '--');
+        if (price >= 1000) return price.toLocaleString(undefined, { maximumFractionDigits: 1 });
+        if (price >= 1) return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
+        return price.toLocaleString(undefined, { maximumFractionDigits: 4 });
       };
 
       for (let i = 1; i <= numTicks; i++) {
@@ -342,7 +340,7 @@ const DepthChart: React.FC<DepthChartProps> = ({ activeChartTab, onChartTabChang
     if (tooltipRef.current && closest) {
       const tt = tooltipRef.current;
       tt.style.display = 'block';
-      tt.innerHTML = `<div class="flex gap-4"><div><span class="text-muted">Price: </span><span style="color:${closest.isBid ? 'var(--color-success)' : 'var(--color-danger)'}">${safeFormatNumber(closest.price, 2, 2)}</span></div><div><span class="text-muted">Total: </span><span class="text-primary">${Number.isFinite(closest.total) ? closest.total.toFixed(4) : '--'} ${base}</span></div></div>`;
+      tt.innerHTML = `<div class="flex gap-4"><div><span class="text-muted">Price: </span><span style="color:${closest.isBid ? 'var(--color-success)' : 'var(--color-danger)'}">${closest.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div><div><span class="text-muted">Total: </span><span class="text-primary">${closest.total.toFixed(4)} ${base}</span></div></div>`;
     }
   };
 

@@ -29,10 +29,16 @@ export function useProfilePortfolio() {
   );
   const grandTotal = useMemo(() => evmTotal + stellarTotal, [evmTotal, stellarTotal]);
 
-  // Determine active cards - always provide Total, EVM, and Stellar for consistent dashboard structure
-  const activeTabs = useMemo<PortfolioTab[]>(() => {
-    return ['total', 'evm', 'stellar'];
-  }, []);
+  // Determine active cards based on connected wallets
+  const activeTabs = useMemo(() => {
+    const tabs: PortfolioTab[] = [];
+    if (isAnyWalletConnected) {
+      tabs.push('total');
+      tabs.push('evm');
+      tabs.push('stellar');
+    }
+    return tabs;
+  }, [isAnyWalletConnected]);
 
   // State for active card selection - defaults to 'total'
   const [activeTab, setActiveTab] = useState<PortfolioTab>('total');
@@ -58,17 +64,14 @@ export function useProfilePortfolio() {
     const currentTabAssets =
       activeTab === 'total' ? assets : activeTab === 'evm' ? evmAssets : stellarAssets;
 
-    const chainsMap = new Map<string, { id: string | number; name: string }>();
+    const chainsMap = new Map<string | number, string>();
     currentTabAssets.forEach(asset => {
       if (asset.chainId !== undefined && asset.chainName) {
-        const key = String(asset.chainId).toLowerCase();
-        if (!chainsMap.has(key)) {
-          chainsMap.set(key, { id: asset.chainId, name: asset.chainName });
-        }
+        chainsMap.set(asset.chainId, asset.chainName);
       }
     });
 
-    return Array.from(chainsMap.values());
+    return Array.from(chainsMap.entries()).map(([id, name]) => ({ id, name }));
   }, [activeTab, assets, evmAssets, stellarAssets]);
 
   // Filter assets based on activeTab, selected chain, and search query
@@ -79,10 +82,8 @@ export function useProfilePortfolio() {
     else if (activeTab === 'stellar') baseAssets = stellarAssets;
 
     return baseAssets.filter(asset => {
-      // Chain filter matching with safe normalization across number/string
-      const matchesChain =
-        selectedChainFilter === 'all' ||
-        String(asset.chainId).toLowerCase() === String(selectedChainFilter).toLowerCase();
+      // Chain filter matching
+      const matchesChain = selectedChainFilter === 'all' || asset.chainId === selectedChainFilter;
 
       // Search matching (symbol or name)
       const matchesSearch =

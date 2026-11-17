@@ -1,5 +1,4 @@
-import { asterHttpClient } from '../client/asterHttpClient';
-import { ASTER_ENDPOINTS, getAsterRestUrl } from '../constants';
+import { ASTER_ENDPOINTS, ASTER_REST_URL } from '../constants';
 
 export interface AggTradeData {
   a: number; // Aggregate tradeId
@@ -11,36 +10,11 @@ export interface AggTradeData {
   m: boolean; // Was the buyer the maker?
 }
 
-export interface AsterTradeData {
-  id: number;
-  price: string;
-  qty: string;
-  quoteQty: string;
-  time: number;
-  isBuyerMaker: boolean;
-}
-
-export async function getRecentTrades(
-  symbol: string,
-  limit: number = 50
-): Promise<AsterTradeData[]> {
-  const cleanSymbol = symbol.replace('-', '').replace('/', '');
-  const url = `${getAsterRestUrl()}${ASTER_ENDPOINTS.TRADES}?symbol=${cleanSymbol}&limit=${limit}`;
-
-  return asterHttpClient.request<AsterTradeData[]>(url, {
-    method: 'GET',
-    weight: 1,
-    ttlMs: 1000,
-  });
-}
-
 export async function getAggTrades(symbol: string, limit: number = 80): Promise<AggTradeData[]> {
-  const cleanSymbol = symbol.replace('-', '').replace('/', '');
-  const url = `${getAsterRestUrl()}${ASTER_ENDPOINTS.AGG_TRADES}?symbol=${cleanSymbol}&limit=${limit}`;
-
-  return asterHttpClient.request<AggTradeData[]>(url, {
-    method: 'GET',
-    weight: 1,
-    ttlMs: 1000,
-  });
+  const url = `${ASTER_REST_URL}${ASTER_ENDPOINTS.AGG_TRADES}?symbol=${symbol}&limit=${limit}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch agg trades: ${response.statusText}`);
+  }
+  return response.json();
 }

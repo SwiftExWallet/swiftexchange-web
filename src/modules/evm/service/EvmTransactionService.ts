@@ -1,5 +1,5 @@
 import { fetchApiResponseFromProxy } from '../../../service/apiService';
-import { CHAIN_REGISTRY, type NetworkType } from '../utils/Chainregistry';
+import { type NetworkType, CHAIN_REGISTRY } from '../utils/Chainregistry';
 
 export type ChainType = number | string;
 
@@ -45,34 +45,26 @@ export const getEvmTransactionHistory = async (
   sentPageKey?: string,
   receivedPageKey?: string
 ): Promise<TransactionHistoryResponse> => {
-  const chain = CHAIN_REGISTRY.find(c => c.chainId === chainId && c.networkType === network);
+  const chain = CHAIN_REGISTRY.find(
+    (c) => c.chainId === chainId && c.networkType === network
+  );
 
   if (!chain) {
     throw new Error(`Unsupported chain: chainId=${chainId} network=${network}`);
   }
   const endpoint = `/transaction-history`;
-  const rawChainSymbol = (
-    chain.symbol ||
-    chain.slug ||
-    chain.nativeCurrency.symbol ||
-    ''
-  ).toLowerCase();
-  const chainIdentifier = rawChainSymbol === 'bnb' ? 'bsc' : rawChainSymbol;
+  const symbol = chain.nativeCurrency.symbol.toLowerCase();
   const body: any = {
     walletAddress: address,
-    chain: chainIdentifier,
+    chain: symbol === 'bnb' ? 'bsc' : symbol,
   };
 
   if (sentPageKey) body.sentPageKey = sentPageKey;
   if (receivedPageKey) body.receivedPageKey = receivedPageKey;
 
-  const response = await fetchApiResponseFromProxy<TransactionHistoryResponse>(
-    endpoint,
-    'POST',
-    body
-  );
+  const response = await fetchApiResponseFromProxy<TransactionHistoryResponse>(endpoint, 'POST', body);
 
-  const data: TransactionItem[] = (response.data.data ?? []).map(tx => ({
+  const data: TransactionItem[] = (response.data.data ?? []).map((tx) => ({
     ...tx,
     chainId,
   }));

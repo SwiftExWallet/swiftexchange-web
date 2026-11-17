@@ -123,19 +123,10 @@ export interface SwapOrdersResponse {
 // Chain alias mapping
 const CHAIN_ALIAS_MAP: Record<string, string> = {
   BNB: 'BSC',
-  STELLAR: 'STR',
-  SOROBAN: 'SRB',
-  PUBNET: 'STR',
-  TESTNET: 'STR',
-  POLYGON: 'POL',
-  ARBITRUM: 'ARB',
-  OPTIMISM: 'OPT',
-  AVALANCHE: 'AVAX',
 };
 
 // Normalize chain name
 function normalizeChain(chain: string): string {
-  if (!chain) return chain;
   return CHAIN_ALIAS_MAP[chain.toUpperCase()] ?? chain;
 }
 
@@ -167,43 +158,19 @@ export async function storeSwapOrder(
   payload: StoreSwapOrderRequest
 ): Promise<StoreSwapOrderResponse> {
   try {
-    // Whitelist only valid fields defined in backend StoreSwapOrderDto
-    const ALLOWED_KEYS = new Set([
-      'quoteId',
-      'txHash',
-      'provider',
-      'walletAddress',
-      'fromChain',
-      'toChain',
-      'fromToken',
-      'toToken',
-      'amountIn',
-      'amountOut',
-      'txType',
-      'status',
-      'encryptedFusionSecrets',
-      'memo',
-      'usdValue',
-    ]);
+    // Normalize chain names
+    const normalizedPayload: StoreSwapOrderRequest = {
+      ...payload,
 
-    const sanitizedPayload: any = {};
-    for (const [key, val] of Object.entries(payload)) {
-      if (ALLOWED_KEYS.has(key) && val !== undefined && val !== null && val !== '') {
-        sanitizedPayload[key] = val;
-      }
-    }
+      fromChain: normalizeChain(payload.fromChain),
 
-    if (sanitizedPayload.fromChain) {
-      sanitizedPayload.fromChain = normalizeChain(sanitizedPayload.fromChain);
-    }
-    if (sanitizedPayload.toChain) {
-      sanitizedPayload.toChain = normalizeChain(sanitizedPayload.toChain);
-    }
+      toChain: normalizeChain(payload.toChain),
+    };
 
     const res = await fetchApiResponseFromProxy<any>(
       '/swapOrders/store',
       'POST',
-      sanitizedPayload,
+      normalizedPayload,
       1, // retries
       true // keepalive
     );

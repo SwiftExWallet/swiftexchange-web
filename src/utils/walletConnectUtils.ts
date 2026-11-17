@@ -1,4 +1,3 @@
-import { parseRawChainId, switchOrAddChain } from '../modules/evm/utils/evmChainUtils';
 import { WALLET_METADATA_MAP } from '../modules/walletconnect/constants/Wallet';
 import { useGlobalTxStore } from '../modules/walletconnect/store/globalTxStore';
 import { sendCustomNotification } from '../service/notificationService';
@@ -10,8 +9,7 @@ export function isMobileDevice(): boolean {
   const isIPadOS =
     typeof navigator.platform === 'string' &&
     navigator.platform === 'MacIntel' &&
-    (navigator.maxTouchPoints || 0) > 1 &&
-    !/Macintosh/i.test(ua);
+    (navigator.maxTouchPoints || 0) > 1;
   return isMobileUA || isIPadOS;
 }
 
@@ -22,62 +20,13 @@ export function isInAppBrowser(): boolean {
 }
 
 /**
- * Formats a native deep link according to the wallet's URL scheme specification.
- */
-export function buildNativeDeepLink(nativeScheme: string, uri: string): string {
-  if (!nativeScheme || !uri) return '';
-  const encodedUri = encodeURIComponent(uri);
-
-  // If scheme already has a path (e.g., 'freighterwallet://wc-redirect' or 'swiftEx://app.swiftexchange.io')
-  if (nativeScheme.includes('://') && nativeScheme.split('://')[1]?.length > 0) {
-    const afterScheme = nativeScheme.split('://')[1];
-    if (afterScheme.includes('?')) {
-      return `${nativeScheme}&uri=${encodedUri}`;
-    }
-    // Freighter uses direct query param after wc-redirect
-    if (nativeScheme.includes('wc-redirect')) {
-      return `${nativeScheme}?uri=${encodedUri}`;
-    }
-    const separator = nativeScheme.endsWith('/') ? '' : '/';
-    return `${nativeScheme}${separator}wc?uri=${encodedUri}`;
-  }
-
-  // Pure protocol schemes (e.g. 'metamask://', 'trust://', 'lobstr://', 'hotwallet://')
-  const base = nativeScheme.endsWith('://') ? nativeScheme : `${nativeScheme}://`;
-  return `${base}wc?uri=${encodedUri}`;
-}
-
-/**
- * Formats a universal link according to the wallet's URL specification.
- */
-export function buildUniversalDeepLink(universalUrl: string, uri: string): string {
-  if (!universalUrl || !uri) return '';
-  const encodedUri = encodeURIComponent(uri);
-
-  // Handle URL that already has query parameters
-  if (universalUrl.includes('?')) {
-    return `${universalUrl}&uri=${encodedUri}`;
-  }
-
-  // Handle paths that already include target endpoint (e.g., '/uni/wc', '/link', '/wc')
-  if (
-    universalUrl.endsWith('/uni/wc') ||
-    universalUrl.endsWith('/link') ||
-    universalUrl.endsWith('/wc')
-  ) {
-    return `${universalUrl}?uri=${encodedUri}`;
-  }
-
-  // Handle base domain (e.g., 'https://metamask.app.link' -> 'https://metamask.app.link/wc?uri=...')
-  const cleanBase = universalUrl.replace(/\/+$/, '');
-  return `${cleanBase}/wc?uri=${encodedUri}`;
-}
-
-/**
  * Returns formatted Universal Link or Native Deep Link for a given wallet ID and WC pairing URI.
- * By default, prefers native custom schemes on mobile devices to prevent intermediate website bounces.
  */
-export function formatWalletDeepLink(walletId: string, uri: string, preferNative = false): string {
+export function formatWalletDeepLink(
+  walletId: string,
+  uri: string,
+  preferUniversal = true
+): string {
   if (!uri) return '';
 
   const meta = WALLET_METADATA_MAP[walletId];
@@ -86,17 +35,29 @@ export function formatWalletDeepLink(walletId: string, uri: string, preferNative
   }
 
   const { native, universal } = meta.redirects;
+  const encodedUri = encodeURIComponent(uri);
 
-  if (preferNative && native) {
-    return buildNativeDeepLink(native, uri);
-  }
-
-  if (universal) {
-    return buildUniversalDeepLink(universal, uri);
+  if (preferUniversal && universal) {
+    const separator = universal.includes('?')
+      ? '&'
+      : universal.endsWith('/wc') || universal.endsWith('/')
+        ? '?'
+        : '/wc?';
+    return `${universal}${separator}uri=${encodedUri}`;
   }
 
   if (native) {
-    return buildNativeDeepLink(native, uri);
+    const separator = native.endsWith('://') ? '' : native.endsWith('/') ? '' : '/';
+    return `${native}${separator}wc?uri=${encodedUri}`;
+  }
+
+  if (universal) {
+    const separator = universal.includes('?')
+      ? '&'
+      : universal.endsWith('/wc') || universal.endsWith('/')
+        ? '?'
+        : '/wc?';
+    return `${universal}${separator}uri=${encodedUri}`;
   }
 
   return uri;
@@ -112,21 +73,26 @@ export function getWalletRedirectUrls(
   if (!uri) return { formattedUrl: '' };
 
   const meta = WALLET_METADATA_MAP[walletId];
-  if (!meta?.redirects) {
-    return { formattedUrl: uri };
+  const encodedUri = encodeURIComponent(uri);
+
+  let universalUrl: string | undefined;
+  let nativeUrl: string | undefined;
+
+  if (meta?.redirects?.universal) {
+    const u = meta.redirects.universal;
+    const separator = u.includes('?') ? '&' : u.endsWith('/wc') || u.endsWith('/') ? '?' : '/wc?';
+    universalUrl = `${u}${separator}uri=${encodedUri}`;
   }
 
-  const universalUrl = meta.redirects.universal
-    ? buildUniversalDeepLink(meta.redirects.universal, uri)
-    : undefined;
+  if (meta?.redirects?.native) {
+    const n = meta.redirects.native;
+    const separator = n.endsWith('://') ? '' : n.endsWith('/') ? '' : '/';
+    nativeUrl = `${n}${separator}wc?uri=${encodedUri}`;
+  }
 
-  const nativeUrl = meta.redirects.native
-    ? buildNativeDeepLink(meta.redirects.native, uri)
-    : undefined;
-
-  // On mobile devices, prioritize native direct custom schemes (metamask://, trust://, etc.)
-  // to avoid intermediate browser splash pages or redirect blocking.
-  const formattedUrl = nativeUrl || universalUrl || uri;
+  const isIOS =
+    typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  const formattedUrl = isIOS ? universalUrl || nativeUrl || uri : universalUrl || nativeUrl || uri;
 
   return {
     universal: universalUrl,
@@ -136,7 +102,7 @@ export function getWalletRedirectUrls(
 }
 
 /**
- * Directly navigates to the mobile wallet using native deep link (preferred) or universal link.
+ * Directly navigates to the mobile wallet using universal link / deep link.
  * Direct synchronous navigation avoids iOS Safari popup/redirect blocking.
  */
 export function openMobileWallet(walletId: string, uri: string): void {
@@ -245,27 +211,6 @@ export async function sendEVMTransaction(
   const fallbackId = Date.now();
   useGlobalTxStore.getState().setPending({ id: fallbackId, topic: 'injected', type: 'send' });
   try {
-    if (typeof provider.request === 'function' && numericChainId) {
-      try {
-        const rawChainId = await provider.request({ method: 'eth_chainId' });
-        const activeChainId = parseRawChainId(rawChainId);
-        if (activeChainId && activeChainId !== numericChainId) {
-          await switchOrAddChain(provider, numericChainId);
-          const postRaw = await provider.request({ method: 'eth_chainId' });
-          const postChainId = parseRawChainId(postRaw);
-          if (postChainId && postChainId !== numericChainId) {
-            throw new Error(
-              `Wallet network mismatch: active network (${postChainId}) does not match required network (${numericChainId}). Transaction aborted for safety.`
-            );
-          }
-        }
-      } catch (err: any) {
-        if (err?.message?.includes('Wallet network mismatch')) {
-          throw err;
-        }
-      }
-    }
-
     await notifyWalletSignRequest(txParams.to);
     const result = await provider.request({
       method: 'eth_sendTransaction',
