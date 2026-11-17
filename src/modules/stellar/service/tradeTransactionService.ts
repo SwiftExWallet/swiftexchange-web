@@ -352,7 +352,7 @@ export class TradeTransactionService {
         memo: options.memo,
         timestamp: Date.now(),
         status: 'pending',
-        xdr: builtTx.toXDR(),
+        xdr: typeof builtTx.toXdr === 'function' ? builtTx.toXdr() : builtTx.toXDR(),
         networkPassphrase: this.networkPassphrase,
       };
     } catch (error: any) {
@@ -409,7 +409,7 @@ export class TradeTransactionService {
         memo: options.memo,
         timestamp: Date.now(),
         status: 'pending',
-        xdr: builtTx.toXDR(),
+        xdr: typeof builtTx.toXdr === 'function' ? builtTx.toXdr() : builtTx.toXDR(),
         networkPassphrase: this.networkPassphrase,
       };
     } catch (error: any) {
@@ -586,7 +586,7 @@ export class TradeTransactionService {
         memo: options.memo,
         timestamp: Date.now(),
         status: 'pending',
-        xdr: builtTx.toXDR(),
+        xdr: typeof builtTx.toXdr === 'function' ? builtTx.toXdr() : builtTx.toXDR(),
         networkPassphrase: this.networkPassphrase,
       };
     } catch (error: any) {

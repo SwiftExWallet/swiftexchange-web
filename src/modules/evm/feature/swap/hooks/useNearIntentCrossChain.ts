@@ -206,7 +206,8 @@ export const useNearIntentCrossChain = ({
           }
 
           const transaction = txBuilder.setTimeout(300).build();
-          const xdr = transaction.toXDR();
+          const xdr =
+            typeof transaction.toXdr === 'function' ? transaction.toXdr() : transaction.toXDR();
 
           const result = await signAndSubmitTransaction({
             xdr,

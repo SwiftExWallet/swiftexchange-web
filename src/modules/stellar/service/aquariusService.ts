@@ -369,7 +369,10 @@ export class AquariusService {
     const tokenInScVal = new StellarSDK.Address(tokenInContractId).toScVal();
     const amountInScVal = StellarSDK.nativeToScVal(BigInt(amountInSmallest), { type: 'u128' });
     const minOutScVal = StellarSDK.nativeToScVal(BigInt(minOutSmallest), { type: 'u128' });
-    const swapChainScVal = StellarSDK.xdr.ScVal.fromXDR(quote.swapChainXdr, 'base64');
+    const swapChainScVal =
+      typeof StellarSDK.xdr?.ScVal?.fromXdr === 'function'
+        ? StellarSDK.xdr.ScVal.fromXdr(quote.swapChainXdr, 'base64')
+        : (StellarSDK.xdr.ScVal as any).fromXDR(quote.swapChainXdr, 'base64');
 
     const op = routerContract.call(
       'swap_chained',
@@ -418,7 +421,7 @@ export class AquariusService {
     const assembledTx = StellarSDK.rpc.assembleTransaction(rawTx, simResponse).build();
 
     return {
-      xdr: assembledTx.toXDR(),
+      xdr: typeof assembledTx.toXdr === 'function' ? assembledTx.toXdr() : assembledTx.toXDR(),
       transaction: assembledTx,
       isAquarius: true,
     };

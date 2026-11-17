@@ -40,6 +40,7 @@ vi.mock('@stellar/stellar-sdk', () => {
   const mockSetTimeout = vi.fn().mockReturnThis();
   const mockBuild = vi.fn().mockReturnValue({
     toXDR: () => 'mock_xdr',
+    toXdr: () => 'mock_xdr',
   });
 
   class MockTransactionBuilder {

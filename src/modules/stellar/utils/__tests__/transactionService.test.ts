@@ -11,7 +11,8 @@ const { MockTransaction, MockHorizonServer, mockLoadAccount } = vi.hoisted(() =>
   class MockTransaction {
     source: string;
     sequence: string;
-    tx: { _attributes: { seqNum: any } };
+    tx: { _attributes?: { seqNum: any }; seqNum?: any };
+    _tx: { _attributes?: { seqNum: any }; seqNum?: any };
     _envelope: any;
     passphrase: string;
     xdrString: string;
@@ -25,11 +26,17 @@ const { MockTransaction, MockHorizonServer, mockLoadAccount } = vi.hoisted(() =>
         _attributes: {
           seqNum: { toString: () => this.sequence },
         },
+        seqNum: { toString: () => this.sequence },
       };
+      this._tx = this.tx;
     }
 
     toXDR() {
-      return `mutated_${this.tx._attributes.seqNum?.toString() || this.sequence}`;
+      return `mutated_${this.tx._attributes?.seqNum?.toString() || this.tx.seqNum?.toString() || this.sequence}`;
+    }
+
+    toXdr() {
+      return this.toXDR();
     }
 
     hash() {
