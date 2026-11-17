@@ -4,7 +4,6 @@ import { Horizon } from '@stellar/stellar-sdk';
 
 import * as ChainUrlHelpers from '../../evm/utils/ChainUrlHelpers';
 import { getAssetBySymbol, getChainById } from '../../evm/utils/Chainregistry';
-import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
 
 interface DisplayAsset {
   code: string;
@@ -116,10 +115,6 @@ export const useAssetSearch = ({
   const [searchLoading, setSearchLoading] = useState(false);
   const safeAssetsRef = useRef<DisplayAsset[]>([]);
 
-  const currentNetwork = useWalletStore(state => state.network);
-  const isMainnet = currentNetwork === 'mainnet';
-  const chainId = isMainnet ? 'pubnet' : 'testnet';
-
   useEffect(() => {
     if (allAssets.length === 0) return;
 
@@ -135,18 +130,12 @@ export const useAssetSearch = ({
   }, [allAssets]);
 
   useEffect(() => {
-    let isCancelled = false;
-
     const fetchAssets = async () => {
       const safeAssets = safeAssetsRef.current.length > 0 ? safeAssetsRef.current : allAssets;
 
       if (!searchTerm) {
-        if (!isCancelled) {
-          setDisplayedAssets(
-            safeAssets.filter(a => !isUnsafe(a.issuer, a.balance)).map(enrichAsset)
-          );
-          setSearchLoading(false);
-        }
+        setDisplayedAssets(safeAssets.filter(a => !isUnsafe(a.issuer, a.balance)).map(enrichAsset));
+        setSearchLoading(false);
         return;
       }
 
@@ -162,16 +151,12 @@ export const useAssetSearch = ({
         .map(enrichAsset);
 
       if (!server || query.length < MIN_SEARCH_LENGTH) {
-        if (!isCancelled) {
-          setDisplayedAssets(filteredLocal);
-          setSearchLoading(false);
-        }
+        setDisplayedAssets(filteredLocal);
+        setSearchLoading(false);
         return;
       }
 
-      if (!isCancelled) {
-        setSearchLoading(true);
-      }
+      setSearchLoading(true);
 
       try {
         const res = await server
@@ -180,15 +165,11 @@ export const useAssetSearch = ({
           .limit(GLOBAL_SEARCH_LIMIT)
           .call();
 
-        if (isCancelled) return;
-
         const issuers = Array.from(
           new Set(res.records.map((r: any) => r.asset_issuer).filter(Boolean))
         ) as string[];
 
         await checkIssuersAgainstDirectory(issuers);
-
-        if (isCancelled) return;
 
         const globalResults: DisplayAsset[] = res.records
           .map((r: any) => {
@@ -205,10 +186,10 @@ export const useAssetSearch = ({
               type: r.asset_type,
               balance: '0.0000000',
               isTrusted: false,
-              name: cachedName || getAssetBySymbol(chainId, r.asset_code)?.name || r.asset_code,
+              name: cachedName || getAssetBySymbol('pubnet', r.asset_code)?.name || r.asset_code,
               iconUrl: ChainUrlHelpers.getTokenIcon(
                 r.asset_code,
-                getChainById(chainId),
+                getChainById('pubnet'),
                 r.asset_issuer
               ),
               domain: r.home_domain || cachedDomain,
@@ -221,28 +202,19 @@ export const useAssetSearch = ({
               !allAssets.some((l: DisplayAsset) => l.code === g.code && l.issuer === g.issuer)
           );
 
-        if (!isCancelled) {
-          setDisplayedAssets([...filteredLocal, ...globalResults]);
-        }
+        setDisplayedAssets([...filteredLocal, ...globalResults]);
       } catch (e) {
         console.error('Global search failed:', e);
-        if (!isCancelled) {
-          setDisplayedAssets(filteredLocal);
-        }
+        setDisplayedAssets(filteredLocal);
       } finally {
-        if (!isCancelled) {
-          setSearchLoading(false);
-        }
+        setSearchLoading(false);
       }
     };
 
     setSearchLoading(true);
     const timeoutId = setTimeout(fetchAssets, SEARCH_DEBOUNCE_MS);
-    return () => {
-      isCancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [searchTerm, allAssets, server, chainId]);
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, allAssets, server]);
 
   return { displayedAssets, searchLoading };
 };

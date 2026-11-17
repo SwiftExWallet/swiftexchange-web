@@ -5,8 +5,10 @@ import { ethers } from 'ethers';
 import { notifyWalletSignRequest } from '../../../../../utils/walletConnectUtils';
 import { WalletType } from '../../../../walletconnect/constants/Wallet';
 import { usePortfolioStore } from '../../../../walletconnect/store/portfolioStore';
+import { useWalletStore } from '../../../../walletconnect/store/walletConnectStore';
 import { simulateSwapTransaction } from '../../../service/evmSimulationService';
 import { storeSwapOrder } from '../../../service/evmTransactionStatusService';
+import { addLocalTransaction } from '../../../service/localTransactionService';
 import {
   type TokenInfo,
   fetchSingleTokenBalance,
@@ -22,7 +24,6 @@ import { prepareSwapTransaction } from '../services/evmSwapService';
 import { build1InchFusionOrder, submit1InchFusionOrder } from '../services/fusionOrderService';
 import type { FusionQuote, SwapQuote } from '../types/swap.types';
 import { toPlainString } from '../utils/swapAmountUtils';
-import { matchesAddress } from '../utils/swapAssetUtils';
 import { parseSwapError } from '../utils/swapErrorHandler';
 
 export { toPlainString };
@@ -142,9 +143,11 @@ export const useEvmSwap = ({
       const tokensWithBalances = tokens.map(token => {
         const storeAsset = storeAssets.find(
           a =>
-            String(a.chainId) === String(chainId) &&
-            a.symbol?.toUpperCase() === token.symbol?.toUpperCase() &&
-            (token.isNative ? a.isNative : matchesAddress(a, token.address))
+            a.chainId === chainId &&
+            a.symbol === token.symbol &&
+            (token.isNative
+              ? a.isNative
+              : (a.address || '').toLowerCase() === (token.address || '').toLowerCase())
         );
         return {
           ...token,
@@ -221,12 +224,14 @@ export const useEvmSwap = ({
 
             const storeAsset = storeAssets.find(
               a =>
-                String(a.chainId) === String(chainId) &&
-                a.symbol?.toUpperCase() === token.symbol?.toUpperCase() &&
-                (token.isNative ? a.isNative : matchesAddress(a, token.address))
+                a.chainId === chainId &&
+                a.symbol === token.symbol &&
+                (token.isNative
+                  ? a.isNative
+                  : (a.address || '').toLowerCase() === (token.address || '').toLowerCase())
             );
 
-            if (storeAsset && storeAsset.balance !== null && storeAsset.balance !== undefined) {
+            if (storeAsset && storeAsset.balance !== null) {
               bal = toPlainString(storeAsset.balance);
               if (bal !== '0') return { address: token.address, balance: bal };
             }
@@ -242,26 +247,6 @@ export const useEvmSwap = ({
                   token.decimals
                 )
               );
-
-              if (bal && bal !== '0') {
-                // Keep portfolioStore in sync with newly fetched RPC balance
-                const numChainId = Number(chainId);
-                usePortfolioStore.getState().updateAsset({
-                  id: `evm-${numChainId}-${token.address}`,
-                  symbol: token.symbol,
-                  name: token.name,
-                  image: token.logoURI || '',
-                  balance: parseFloat(bal),
-                  current_price: 0,
-                  price_change_percentage_24h: 0,
-                  chainId: numChainId,
-                  chainName: config.name,
-                  chainType: 'evm',
-                  address: token.address,
-                  decimals: token.decimals,
-                  isNative: token.isNative,
-                });
-              }
             } catch (err) {
               console.error(`Final RPC fallback failed for ${token.symbol}:`, err);
             }
@@ -277,11 +262,7 @@ export const useEvmSwap = ({
           let hasChanges = false;
 
           updates.forEach(({ address, balance }) => {
-            const index = newAssets.findIndex(
-              a =>
-                matchesAddress(a, address) ||
-                (a.address && a.address.toLowerCase() === address.toLowerCase())
-            );
+            const index = newAssets.findIndex(a => a.address === address);
             if (index !== -1 && newAssets[index].balance !== balance) {
               newAssets[index] = { ...newAssets[index], balance };
               hasChanges = true;
@@ -348,18 +329,31 @@ export const useEvmSwap = ({
             );
           },
           swapHash => {
-            storeSwapOrder({
-              txHash: swapHash,
-              walletAddress: senderAddress,
-              provider: quote.provider || 'UNISWAP',
-              fromChain: getChainById(chainId)?.symbol || '',
-              fromToken: sellAsset.symbol,
-              toChain: getChainById(buyAsset.chainId || chainId)?.symbol || '',
-              toToken: buyAsset.symbol,
-              amountIn: sellAmount,
-              amountOut: quote.outputAmount,
-              txType: 'Swap',
-            } as any).catch(err => console.error('Failed to store swap order on backend:', err));
+            if (quote.provider === 'ONEINCH' || quote.provider === 'UNISWAP') {
+              storeSwapOrder({
+                txHash: swapHash,
+                walletAddress: senderAddress,
+                provider: quote.provider,
+                fromChain: getChainById(chainId)?.symbol || '',
+                fromToken: sellAsset.symbol,
+                toChain: getChainById(buyAsset.chainId || chainId)?.symbol || '',
+                toToken: buyAsset.symbol,
+                amountIn: sellAmount,
+                amountOut: quote.outputAmount,
+                txType: 'Swap',
+              } as any).catch(err => console.error('Failed to store swap order on backend:', err));
+            } else if (chainId !== 'pubnet' && chainId !== 'testnet' && chainId !== 'stellar') {
+              addLocalTransaction({
+                hash: swapHash,
+                chainId,
+                type: 'swap',
+                timestamp: Date.now(),
+                description: `Swap ${sellAsset.symbol} → ${buyAsset.symbol}`,
+                status: 'pending',
+                from: senderAddress,
+                network: useWalletStore.getState().network,
+              });
+            }
           },
           () => {
             onBeforeSign?.();
@@ -369,13 +363,10 @@ export const useEvmSwap = ({
         );
 
         if (activeSwapId.current === swapId) {
+          activeSwapId.current = null;
           updateState({ txHash: hash, loading: false });
         }
 
-        // Cancel any previously pending balance-update before scheduling a new one.
-        // Without this, a rapid second swap (or strict-mode double-mount) can fire
-        // the old callback with the wrong sellAsset reference.
-        if (balanceUpdateTimeoutRef.current) clearTimeout(balanceUpdateTimeoutRef.current);
         balanceUpdateTimeoutRef.current = setTimeout(() => {
           if (isMounted.current) {
             updateTokenBalances(sellAsset);
@@ -386,13 +377,13 @@ export const useEvmSwap = ({
       } catch (err: any) {
         const errorMsg = parseSwapError(err);
         if (activeSwapId.current === swapId) {
+          activeSwapId.current = null;
           updateState({ error: errorMsg, loading: false, txHash: null });
         }
         throw new Error(errorMsg);
       } finally {
-        isSubmittingRef.current = false;
         if (activeSwapId.current === swapId) {
-          activeSwapId.current = null;
+          isSubmittingRef.current = false;
         }
       }
     },
@@ -491,11 +482,10 @@ export const useEvmSwap = ({
         }
 
         if (activeSwapId.current === swapId) {
+          activeSwapId.current = null;
           updateState({ txHash: hash, loading: false });
         }
 
-        // Cancel any previously pending balance-update before scheduling a new one.
-        if (balanceUpdateTimeoutRef.current) clearTimeout(balanceUpdateTimeoutRef.current);
         balanceUpdateTimeoutRef.current = setTimeout(() => {
           if (isMounted.current) {
             updateTokenBalances(sellAsset);
@@ -506,13 +496,13 @@ export const useEvmSwap = ({
       } catch (err: any) {
         const errorMsg = parseSwapError(err);
         if (activeSwapId.current === swapId) {
+          activeSwapId.current = null;
           updateState({ error: errorMsg, loading: false, txHash: null });
         }
         throw new Error(errorMsg);
       } finally {
-        isSubmittingRef.current = false;
         if (activeSwapId.current === swapId) {
-          activeSwapId.current = null;
+          isSubmittingRef.current = false;
         }
       }
     },
@@ -521,7 +511,6 @@ export const useEvmSwap = ({
 
   const reset = useCallback(() => {
     activeSwapId.current = null;
-    isSubmittingRef.current = false;
     latestQuoteRequestId.current++;
     quoteAbortController.current?.abort();
 

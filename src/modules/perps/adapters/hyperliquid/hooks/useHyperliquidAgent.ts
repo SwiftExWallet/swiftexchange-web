@@ -13,7 +13,6 @@ import {
 } from '../../../../walletconnect/services/hyperliquidAgentKeyManager';
 import { walletService } from '../../../../walletconnect/services/walletService';
 import { useWalletStore } from '../../../../walletconnect/store/walletConnectStore';
-import { useExchangeManager } from '../../../core/ExchangeManager';
 
 export type DeriveState = 'idle' | 'signing' | 'ready' | 'error';
 
@@ -33,8 +32,8 @@ interface HyperliquidAgentStoreState {
 
 export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set, get) => ({
   hyperliquidSigner: null,
-  agentAddress: null,
-  deriveState: 'idle',
+  agentAddress: getStoredAgentAddress(),
+  deriveState: hasStoredAgentKey() ? 'ready' : 'idle',
   error: null,
   isRestoring: false,
 
@@ -49,21 +48,19 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
   setError: error => set({ error }),
 
   restoreKey: async () => {
-    const isTestnet = useWalletStore.getState().network === 'testnet';
-    if (!hasStoredAgentKey(isTestnet)) {
+    if (!hasStoredAgentKey()) {
       set({ hyperliquidSigner: null, agentAddress: null, deriveState: 'idle' });
       return null;
     }
 
     const current = get().hyperliquidSigner;
-    const currentStoredAddr = getStoredAgentAddress(isTestnet);
-    if (current && get().agentAddress === currentStoredAddr) return current;
+    if (current) return current;
 
     if (get().isRestoring) return null;
 
     set({ isRestoring: true });
     try {
-      const wallet = await restoreAgentWallet(isTestnet);
+      const wallet = await restoreAgentWallet();
       if (wallet) {
         set({
           hyperliquidSigner: wallet,
@@ -77,7 +74,7 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
     } catch (e) {
       console.error('[HyperliquidAgentStore] Failed to restore agent wallet:', e);
     }
-    set({ isRestoring: false, hyperliquidSigner: null, agentAddress: null, deriveState: 'idle' });
+    set({ isRestoring: false });
     return null;
   },
 
@@ -95,9 +92,8 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
         (typeof window !== 'undefined' ? (window as any).ethereum : null);
       if (!provider) throw new Error('EVM provider not available');
 
-      const isTestnet = useWalletStore.getState().network === 'testnet';
-      const result = await deriveHyperliquidAgentKey(userAddr, provider, isTestnet);
-      await encryptAndStoreAgentKey(result.wallet.privateKey, isTestnet);
+      const result = await deriveHyperliquidAgentKey(userAddr, provider);
+      await encryptAndStoreAgentKey(result.wallet.privateKey);
 
       set({
         hyperliquidSigner: result.wallet,
@@ -114,8 +110,7 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
   },
 
   purge: () => {
-    const isTestnet = useWalletStore.getState().network === 'testnet';
-    purgeAgentKey(isTestnet);
+    purgeAgentKey();
     set({
       hyperliquidSigner: null,
       agentAddress: null,
@@ -138,11 +133,8 @@ export interface UseHyperliquidAgentResult {
 }
 
 export function useHyperliquidAgent(): UseHyperliquidAgentResult {
-  const currentExchange = useExchangeManager(s => s.currentExchange);
   const evmWallet = useWalletStore(state => state.connectedWallets.evm);
   const userAddr = evmWallet?.address ?? null;
-  const network = useWalletStore(state => state.network);
-  const isTestnet = network === 'testnet';
 
   const hyperliquidSigner = useHyperliquidAgentStore(s => s.hyperliquidSigner);
   const agentAddress = useHyperliquidAgentStore(s => s.agentAddress);
@@ -155,20 +147,22 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
 
   useEffect(() => {
     if (userAddr) {
-      restoreKey();
+      if (!hyperliquidSigner && hasStoredAgentKey()) {
+        restoreKey();
+      }
     } else {
       if (hyperliquidSigner) {
         purgeStore();
       }
     }
-  }, [userAddr, network, currentExchange, restoreKey, purgeStore]);
+  }, [userAddr, hyperliquidSigner, restoreKey, purgeStore]);
 
   const deriveAgentKey = useCallback(async () => {
     if (!userAddr) throw new Error('EVM wallet not connected');
     await deriveAgentKeyStore(userAddr);
   }, [userAddr, deriveAgentKeyStore]);
 
-  const isReady = (deriveState === 'ready' || hasStoredAgentKey(isTestnet)) && !!hyperliquidSigner;
+  const isReady = (deriveState === 'ready' || hasStoredAgentKey()) && !!hyperliquidSigner;
 
   return {
     hyperliquidSigner,

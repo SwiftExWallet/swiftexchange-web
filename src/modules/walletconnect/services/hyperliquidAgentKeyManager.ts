@@ -2,20 +2,11 @@ import { HttpTransport } from '@nktkas/hyperliquid';
 import { approveAgent } from '@nktkas/hyperliquid/api/exchange';
 import { BrowserProvider, Wallet } from 'ethers';
 
-import { useWalletStore } from '../store/walletConnectStore';
 import { destroyAESKey, generateAndStoreAESKey, retrieveAESKey } from './keyVaultIndexedDB';
 
-const BLOB_KEY_PREFIX = '_sx_hl_agentkey';
-const ADDR_KEY_PREFIX = '_sx_hl_agentaddr';
+const BLOB_KEY = '_sx_hl_agentkey';
+const ADDR_KEY = '_sx_hl_agentaddr';
 const AGENT_NAME = 'SwiftExDesktop';
-
-function getBlobKey(isTestnet: boolean = false) {
-  return `${BLOB_KEY_PREFIX}_${isTestnet ? 'testnet' : 'mainnet'}`;
-}
-
-function getAddrKey(isTestnet: boolean = false) {
-  return `${ADDR_KEY_PREFIX}_${isTestnet ? 'testnet' : 'mainnet'}`;
-}
 
 function toBase64(buf: Uint8Array): string {
   let b = '';
@@ -69,16 +60,18 @@ export interface HyperliquidAgentKey {
 export async function deriveHyperliquidAgentKey(
   evmAddress: string,
   provider: any,
-  isTestnet?: boolean
+  isTestnet: boolean = false
 ): Promise<HyperliquidAgentKey> {
-  const activeTestnet =
-    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
   const browserProvider = new BrowserProvider(provider);
   const signer = await browserProvider.getSigner(evmAddress);
 
   const agentWallet = new Wallet(Wallet.createRandom().privateKey);
 
-  const transport = new HttpTransport({ isTestnet: activeTestnet });
+  console.groupCollapsed('[hyperliquid] deriveHyperliquidAgentKey');
+  console.log('evmAddress (signer):', evmAddress);
+  console.log('agentWallet.address:', agentWallet.address);
+
+  const transport = new HttpTransport({ isTestnet });
 
   try {
     await approveAgent(
@@ -105,16 +98,9 @@ export async function deriveHyperliquidAgentKey(
   };
 }
 
-const HL_AES_KEY_ID = '_k_hl';
-
-export async function encryptAndStoreAgentKey(
-  privKeyHex: string,
-  isTestnet?: boolean
-): Promise<string> {
-  const activeTestnet =
-    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
-  let aesKey = await retrieveAESKey(HL_AES_KEY_ID);
-  if (!aesKey) aesKey = await generateAndStoreAESKey(HL_AES_KEY_ID);
+export async function encryptAndStoreAgentKey(privKeyHex: string): Promise<string> {
+  let aesKey = await retrieveAESKey();
+  if (!aesKey) aesKey = await generateAndStoreAESKey();
 
   const agentWallet = new Wallet(privKeyHex);
   const encoder = new TextEncoder();
@@ -123,22 +109,19 @@ export async function encryptAndStoreAgentKey(
   const blob = await encryptBytes(keyBytes, aesKey);
   keyBytes.fill(0);
 
-  localStorage.setItem(getBlobKey(activeTestnet), JSON.stringify(blob));
-  localStorage.setItem(getAddrKey(activeTestnet), agentWallet.address);
+  localStorage.setItem(BLOB_KEY, JSON.stringify(blob));
+  localStorage.setItem(ADDR_KEY, agentWallet.address);
 
   return agentWallet.address;
 }
 
-export async function restoreAgentWallet(isTestnet?: boolean): Promise<Wallet | null> {
-  const activeTestnet =
-    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
-  const raw =
-    localStorage.getItem(getBlobKey(activeTestnet)) ||
-    (!activeTestnet ? localStorage.getItem(BLOB_KEY_PREFIX) : null);
+export async function restoreAgentWallet(): Promise<Wallet | null> {
+  const raw = localStorage.getItem(BLOB_KEY);
   if (!raw) return null;
 
-  const aesKey = await retrieveAESKey(HL_AES_KEY_ID);
+  const aesKey = await retrieveAESKey();
   if (!aesKey) {
+    purgeAgentKey();
     return null;
   }
 
@@ -146,7 +129,7 @@ export async function restoreAgentWallet(isTestnet?: boolean): Promise<Wallet | 
   try {
     parsed = JSON.parse(raw);
   } catch {
-    purgeAgentKey(activeTestnet);
+    purgeAgentKey();
     return null;
   }
 
@@ -156,46 +139,27 @@ export async function restoreAgentWallet(isTestnet?: boolean): Promise<Wallet | 
     const privKeyHex = new TextDecoder().decode(keyBytes);
     keyBytes.fill(0);
     return new Wallet(privKeyHex);
-  } catch (err) {
-    console.warn('[HyperliquidAgentKeyManager] Decryption attempt failed:', err);
+  } catch {
     if (keyBytes) keyBytes.fill(0);
+    purgeAgentKey();
     return null;
   }
 }
 
-export function getStoredAgentAddress(isTestnet?: boolean): string | null {
-  const activeTestnet =
-    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
-  return (
-    localStorage.getItem(getAddrKey(activeTestnet)) ||
-    (!activeTestnet ? localStorage.getItem(ADDR_KEY_PREFIX) : null)
-  );
+export function getStoredAgentAddress(): string | null {
+  return localStorage.getItem(ADDR_KEY);
 }
 
-export function hasStoredAgentKey(isTestnet?: boolean): boolean {
-  const activeTestnet =
-    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
-  return !!(
-    localStorage.getItem(getBlobKey(activeTestnet)) ||
-    (!activeTestnet && localStorage.getItem(BLOB_KEY_PREFIX))
-  );
+export function hasStoredAgentKey(): boolean {
+  return !!localStorage.getItem(BLOB_KEY);
 }
 
-export function purgeAgentKey(isTestnet?: boolean): void {
-  if (isTestnet !== undefined) {
-    localStorage.removeItem(getBlobKey(isTestnet));
-    localStorage.removeItem(getAddrKey(isTestnet));
-  } else {
-    localStorage.removeItem(getBlobKey(false));
-    localStorage.removeItem(getAddrKey(false));
-    localStorage.removeItem(getBlobKey(true));
-    localStorage.removeItem(getAddrKey(true));
-    localStorage.removeItem(BLOB_KEY_PREFIX);
-    localStorage.removeItem(ADDR_KEY_PREFIX);
-  }
+export function purgeAgentKey(): void {
+  localStorage.removeItem(BLOB_KEY);
+  localStorage.removeItem(ADDR_KEY);
 }
 
-export async function purgeAgentKeyAndAes(isTestnet?: boolean): Promise<void> {
-  purgeAgentKey(isTestnet);
-  await destroyAESKey(HL_AES_KEY_ID);
+export async function purgeAgentKeyAndAes(): Promise<void> {
+  purgeAgentKey();
+  await destroyAESKey();
 }

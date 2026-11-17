@@ -1,18 +1,13 @@
 import { HttpTransport } from '@nktkas/hyperliquid';
 import { historicalOrders, openOrders, userFillsByTime } from '@nktkas/hyperliquid/api/info';
 
-import { useExchangeManager } from '../../../core/ExchangeManager';
 import type { AsterUserTrade } from '../../aster/types/account';
 import type { AsterOrderResponse } from '../../aster/types/orders';
 
-const getTransport = () => {
-  const isTestnet = useExchangeManager.getState().currentNetwork === 'testnet';
-  return new HttpTransport({ isTestnet });
-};
+const transport = new HttpTransport(); // Connects to mainnet API
 
 export const getHyperliquidOpenOrders = async (userAddr: string): Promise<AsterOrderResponse[]> => {
   try {
-    const transport = getTransport();
     const data = await openOrders({ transport }, { user: userAddr as `0x${string}` });
     return data.map((o: any) => ({
       orderId: o.oid,
@@ -48,7 +43,6 @@ export const getHyperliquidHistoricalOrders = async (
   options?: { endTime?: number; limit?: number }
 ): Promise<AsterOrderResponse[]> => {
   try {
-    const transport = getTransport();
     const data = await historicalOrders({ transport }, { user: userAddr as `0x${string}` });
 
     let filtered = data;
@@ -94,7 +88,7 @@ export const getHyperliquidHistoricalOrders = async (
     if (options?.limit) {
       mapped = mapped.slice(0, options.limit);
     }
-    return mapped as unknown as AsterOrderResponse[];
+    return mapped;
   } catch (err) {
     console.error('getHyperliquidHistoricalOrders error', err);
     return [];
@@ -106,7 +100,6 @@ export const getHyperliquidUserFills = async (
   options?: { endTime?: number; limit?: number }
 ): Promise<AsterUserTrade[]> => {
   try {
-    const transport = getTransport();
     // We use a generic startTime since hyperliquid requires it, 1 year back
     const startTime = Date.now() - 365 * 24 * 60 * 60 * 1000;
     const data = await userFillsByTime(

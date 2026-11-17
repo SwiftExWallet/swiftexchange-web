@@ -1,16 +1,29 @@
-import BigNumber from 'bignumber.js';
 import { ethers } from 'ethers';
 
 import { getBridgeNativeFee } from './swapFeeUtils';
 
 export function toPlainString(val: string | number | null | undefined): string {
-  if (val === null || val === undefined || val === '') return '0';
+  if (val === null || val === undefined) return '0';
+  const num = typeof val === 'number' ? val : Number.parseFloat(val);
+  if (Number.isNaN(num)) return '0';
+
+  const str = String(val);
+  if (!str.includes('e') && !str.includes('E')) {
+    return str;
+  }
+
+  const match = new RegExp(/[eE]([-+]?\d+)/).exec(str);
+  if (!match) return str;
+
+  const exp = Math.abs(Number.parseInt(match[1], 10));
+  const digits = Math.min(100, Math.max(20, exp));
   try {
-    const bn = new BigNumber(val);
-    if (!bn.isFinite()) return '0';
-    return bn.toFixed();
+    return num
+      .toFixed(digits)
+      .replace(/(\.\d*?)0+$/, '$1')
+      .replace(/\.$/, '');
   } catch {
-    return '0';
+    return str;
   }
 }
 
@@ -62,12 +75,7 @@ export function getGasBuffer(
       const [whole, frac = ''] = plainFee.split('.');
       let fracKept = frac.slice(0, decimals);
       if (frac.length > decimals) {
-        const incremented = (BigInt(fracKept || '0') + 1n).toString();
-        // Ensure string length does not exceed decimals
-        fracKept =
-          incremented.length > decimals
-            ? incremented.slice(0, decimals)
-            : incremented.padStart(decimals, '0');
+        fracKept = (BigInt(fracKept || '0') + 1n).toString().padStart(fracKept.length, '0');
       }
       const cleanFee = fracKept ? `${whole}.${fracKept}` : whole;
 
@@ -135,9 +143,10 @@ export function calculateMaxSwapAmount(params: CalculateMaxAmountParams): string
       bridgeNativeFee ? { fee: { native: bridgeNativeFee } } : null
     );
     if (parsedBridgeFee > 0) {
-      const feeDecimals = selectedSellAsset?.decimals ?? decimals ?? 18;
-      const safeDigits = Math.min(18, feeDecimals);
-      const bridgeFeeWei = ethers.parseUnits(parsedBridgeFee.toFixed(safeDigits), feeDecimals);
+      const bridgeFeeWei = ethers.parseUnits(
+        parsedBridgeFee.toFixed(18),
+        selectedSellAsset.decimals
+      );
       gasRequiredBN += bridgeFeeWei;
     }
 

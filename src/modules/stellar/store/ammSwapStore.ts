@@ -22,7 +22,6 @@ interface SwapHistory {
 
 interface AmmSwapStore extends SwapHistory {
   defaultSlippage: number;
-  isDynamicSlippage: boolean;
   expertMode: boolean;
   selectedChartPair: ChartPair | null;
   preSelectedToken: PreSelectedToken | null;
@@ -32,7 +31,6 @@ interface AmmSwapStore extends SwapHistory {
   addFavorite: (token: TokenInfo) => void;
   removeFavorite: (tokenCode: string) => void;
   setDefaultSlippage: (slippage: number) => void;
-  setIsDynamicSlippage: (enabled: boolean) => void;
   setExpertMode: (enabled: boolean) => void;
   setSelectedChartPair: (pair: ChartPair | null) => void;
   setPreSelectedToken: (token: PreSelectedToken | null) => void;
@@ -45,7 +43,6 @@ export const useAmmSwapStore = create<AmmSwapStore>()(
       transactions: [],
       favorites: [],
       defaultSlippage: 1,
-      isDynamicSlippage: false,
       expertMode: false,
       selectedChartPair: {
         base: 'XLM',
@@ -80,8 +77,6 @@ export const useAmmSwapStore = create<AmmSwapStore>()(
         })),
 
       setDefaultSlippage: slippage => set({ defaultSlippage: slippage }),
-
-      setIsDynamicSlippage: enabled => set({ isDynamicSlippage: enabled }),
 
       setExpertMode: enabled => set({ expertMode: enabled }),
 

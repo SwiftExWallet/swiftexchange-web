@@ -1,33 +1,21 @@
-import * as FreighterApi from '@stellar/freighter-api';
 import { Core } from '@walletconnect/core';
 import UniversalProviderType from '@walletconnect/universal-provider';
 
 import { WALLETCONNECT_METADATA, WALLETCONNECT_PROJECT_ID } from '../../config/chains';
-import { WALLET_METADATA_MAP } from '../../constants/Wallet';
 import { extractErrorMessage, isUserRejection } from '../../utils/walletErrorHandler';
-import type { DiscoveredExtension, WalletServiceContext, WalletType } from './types';
-
-let freighterInstalledCached = false;
-if (typeof window !== 'undefined') {
-  FreighterApi.isConnected()
-    .then(res => {
-      freighterInstalledCached = typeof res === 'boolean' ? res : !!(res as any)?.isConnected;
-    })
-    .catch(() => {});
-}
+import type { WalletServiceContext, WalletType } from './types';
 
 // ---------------------------------------------------------------------------
 // EIP-6963 rdns → walletId mapping
 // ---------------------------------------------------------------------------
 
 const EIP6963_RDNS_MAP: Record<string, string[]> = {
-  metamask: ['io.metamask', 'io.metamask.flask', 'io.metamask.mobile'],
-  trust: ['com.trustwallet.app', 'com.trustwallet', 'com.trustwallet.wallet'],
+  metamask: ['io.metamask'],
+  trust: ['com.trustwallet.app'],
   phantom: ['app.phantom'],
   rabby: ['io.rabby'],
   coinbase: ['com.coinbase.wallet'],
   rainbow: ['me.rainbow'],
-  hotwallet: ['org.hot-labs'],
 };
 
 // Reverse map: rdns → walletId
@@ -38,116 +26,51 @@ for (const [walletId, rdnsList] of Object.entries(EIP6963_RDNS_MAP)) {
   }
 }
 
-function isGenuineMetaMask(provider: any): boolean {
-  if (!provider?.isMetaMask) return false;
-  return !(
-    provider.isTrust ||
-    provider.isTrustWallet ||
-    provider.isRabby ||
-    provider.isPhantom ||
-    provider.isCoinbaseWallet ||
-    provider.isBraveWallet ||
-    provider.isOKExWallet ||
-    provider.isOkxWallet ||
-    provider.isBitKeep ||
-    provider.isTokenPocket ||
-    provider.isEnkrypt ||
-    provider.isApex ||
-    provider.isHotWallet
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Safe redirect protocol allowlist to prevent open redirect / javascript: URI execution (SEC-01)
-const ALLOWED_REDIRECT_SCHEMES = new Set([
-  'metamask',
-  'trust',
-  'phantom',
-  'rainbow',
-  'swiftex',
-  'freighterwallet',
-  'lobstr',
-  'hotwallet',
-  'cbwallet',
-  'zerion',
-  'rabby',
-  'okx',
-  'backpack',
-]);
-
-export function isSafeWalletRedirectUrl(url: string): boolean {
-  if (!url || typeof url !== 'string') return false;
-  const trimmed = url.trim().toLowerCase();
-  if (
-    trimmed.startsWith('javascript:') ||
-    trimmed.startsWith('data:') ||
-    trimmed.startsWith('vbscript:')
-  ) {
-    return false;
-  }
-  if (trimmed.startsWith('https://') || trimmed.startsWith('http://localhost')) {
-    return true;
-  }
-  const match = trimmed.match(/^([a-z0-9+.-]+):\/\//);
-  if (match && match[1]) {
-    return ALLOWED_REDIRECT_SCHEMES.has(match[1]);
-  }
-  return false;
-}
-
+// EIP-6963 listener setup
 // ---------------------------------------------------------------------------
+
 export function setupEIP6963Listener(ctx: WalletServiceContext): void {
   if (typeof window === 'undefined') return;
   window.addEventListener('eip6963:announceProvider', (event: any) => {
     const detail = event.detail;
+    console.log('eip6963:announceProvider', detail);
     if (detail?.info?.rdns && detail.provider) {
-      ctx.eip6963Providers.set(detail.info.rdns, detail);
-      ctx.discoveredExtensions.set(detail.info.rdns, {
-        id: detail.info.rdns,
-        name: detail.info.name || detail.info.rdns,
-        icon: detail.info.icon || '',
-        type: 'evm',
-        rdns: detail.info.rdns,
-        isInstalled: true,
-        provider: detail.provider,
-      });
+      ctx.eip6963Providers.set(detail.info.rdns, detail.provider);
     }
   });
   window.dispatchEvent(new Event('eip6963:requestProvider'));
 }
 
-function tryFindEvmProvider(ctx: WalletServiceContext, walletId: string): any | null {
+export async function resolveEvmProvider(
+  ctx: WalletServiceContext,
+  walletId: string
+): Promise<any | null> {
   const win = window as any;
 
-  if (ctx.eip6963Providers.has(walletId)) {
-    const detail = ctx.eip6963Providers.get(walletId);
-    return detail?.provider ?? (detail as any);
+  // re-dispatch EIP-6963 discovery and wait briefly for late injectors
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+    await new Promise(r => setTimeout(r, 50));
   }
 
-  for (const [rdns, detail] of ctx.eip6963Providers.entries()) {
-    if (
-      rdns.toLowerCase().includes(walletId.toLowerCase()) ||
-      detail?.info?.name?.toLowerCase().includes(walletId.toLowerCase())
-    ) {
-      return detail?.provider ?? (detail as any);
-    }
-  }
-
+  // Check EIP-6963 first
   if (walletId in EIP6963_RDNS_MAP) {
     for (const rdns of EIP6963_RDNS_MAP[walletId]) {
       if (ctx.eip6963Providers.has(rdns)) {
-        const detail = ctx.eip6963Providers.get(rdns);
-        return detail?.provider ?? (detail as any);
+        return ctx.eip6963Providers.get(rdns);
       }
     }
   }
 
+  // EIP-5749: window.ethereum.providers[] multi-injection array
   const injectedProviders: any[] | undefined = win.ethereum?.providers;
   if (Array.isArray(injectedProviders)) {
     const found = findInProvidersArray(injectedProviders, walletId);
     if (found) return found;
   }
 
+  // dedicated globals exposed outside window.ethereum
   switch (walletId) {
     case 'trust':
       if (win.trustwallet) return win.trustwallet;
@@ -155,15 +78,20 @@ function tryFindEvmProvider(ctx: WalletServiceContext, walletId: string): any | 
     case 'phantom':
       if (win.phantom?.ethereum) return win.phantom.ethereum;
       break;
-    case 'swiftex':
-      if (win.swiftex?.ethereum || win.swiftex) return win.swiftex?.ethereum || win.swiftex;
-      break;
   }
+
+  //single-injection flags (only when providers[] isn't present)
 
   if (!Array.isArray(injectedProviders) && win.ethereum) {
     switch (walletId) {
       case 'metamask':
-        if (isGenuineMetaMask(win.ethereum)) return win.ethereum;
+        if (
+          win.ethereum.isMetaMask &&
+          !win.ethereum.isTrust &&
+          !win.ethereum.isRabby &&
+          !win.ethereum.isPhantom
+        )
+          return win.ethereum;
         break;
       case 'trust':
         if (win.ethereum.isTrust || win.ethereum.isTrustWallet) return win.ethereum;
@@ -178,14 +106,7 @@ function tryFindEvmProvider(ctx: WalletServiceContext, walletId: string): any | 
         if (win.ethereum.isRainbow) return win.ethereum;
         break;
       case 'phantom':
-        if (win.phantom?.ethereum || win.ethereum.isPhantom)
-          return win.phantom?.ethereum || win.ethereum;
-        break;
-      case 'hotwallet':
-        if (win.ethereum.isHotWallet) return win.ethereum;
-        break;
-      case 'swiftex':
-        if (win.ethereum.isSwiftEx) return win.ethereum;
+        if (win.ethereum.isPhantom) return win.ethereum;
         break;
     }
   }
@@ -193,30 +114,17 @@ function tryFindEvmProvider(ctx: WalletServiceContext, walletId: string): any | 
   return null;
 }
 
-export async function resolveEvmProvider(
-  ctx: WalletServiceContext,
-  walletId: string
-): Promise<any | null> {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('eip6963:requestProvider'));
-  }
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const provider = tryFindEvmProvider(ctx, walletId);
-    if (provider) return provider;
-    if (attempt < 2 && typeof window !== 'undefined') {
-      await new Promise(r => setTimeout(r, 100));
-      window.dispatchEvent(new Event('eip6963:requestProvider'));
-    }
-  }
-
-  return null;
-}
-
+/**
+ * Scans the EIP-5749 providers[] array with spoofer-aware flag checks.
+ */
 function findInProvidersArray(providers: any[], walletId: string): any | null {
   switch (walletId) {
     case 'metamask':
-      return providers.find(p => isGenuineMetaMask(p)) ?? null;
+      return (
+        providers.find(
+          p => p.isMetaMask && !p.isTrust && !p.isTrustWallet && !p.isRabby && !p.isPhantom
+        ) ?? null
+      );
     case 'trust':
       return providers.find(p => p.isTrust || p.isTrustWallet) ?? null;
     case 'coinbase':
@@ -227,10 +135,6 @@ function findInProvidersArray(providers: any[], walletId: string): any | null {
       return providers.find(p => p.isRainbow) ?? null;
     case 'phantom':
       return providers.find(p => p.isPhantom) ?? null;
-    case 'hotwallet':
-      return providers.find(p => p.isHotWallet) ?? null;
-    case 'swiftex':
-      return providers.find(p => p.isSwiftEx) ?? null;
     default:
       return null;
   }
@@ -241,53 +145,23 @@ function findInProvidersArray(providers: any[], walletId: string): any | null {
 // ---------------------------------------------------------------------------
 
 export function isExtensionInstalled(ctx: WalletServiceContext, walletId: string): boolean {
-  if (walletId === 'walletconnect') return false;
+  if (walletId === 'walletconnect' || walletId === 'swiftex') return false;
   const win = window as any;
 
-  // Dynamic EIP-6963 check
-  if (ctx.eip6963Providers.has(walletId)) return true;
-  for (const [rdns, detail] of ctx.eip6963Providers.entries()) {
-    if (
-      rdns.toLowerCase().includes(walletId.toLowerCase()) ||
-      detail?.info?.name?.toLowerCase().includes(walletId.toLowerCase())
-    ) {
-      return true;
-    }
-  }
-
+  // Check EIP-6963 synchronously
   if (walletId in EIP6963_RDNS_MAP) {
     if (EIP6963_RDNS_MAP[walletId].some(rdns => ctx.eip6963Providers.has(rdns))) return true;
   }
 
-  // Stellar dynamic capability check
-  const stellarCandidate =
-    win[walletId] || (walletId === 'freighter' ? win.freighterApi : undefined);
-  if (
-    stellarCandidate &&
-    (typeof stellarCandidate.getPublicKey === 'function' ||
-      typeof stellarCandidate.getAddress === 'function' ||
-      typeof stellarCandidate.requestAccess === 'function' ||
-      typeof stellarCandidate.isAllowed === 'function' ||
-      typeof stellarCandidate.isConnected === 'function' ||
-      typeof stellarCandidate.signTransaction === 'function' ||
-      typeof stellarCandidate.sign === 'function')
-  ) {
-    return true;
-  }
-
-  if (walletId === 'freighter')
-    return freighterInstalledCached || !!(win.freighterApi || win.freighter);
+  // Stellar wallets
+  if (walletId === 'freighter') return !!(win.freighterApi || win.freighter);
   if (walletId === 'lobstr') return !!win.lobstr;
-  if (walletId === 'swiftex') return !!(win.swiftex || win.ethereum?.isSwiftEx);
 
+  // EVM flags
   const win_ = win;
   switch (walletId) {
-    case 'metamask': {
-      if (Array.isArray(win_.ethereum?.providers)) {
-        return !!findInProvidersArray(win_.ethereum.providers, 'metamask');
-      }
-      return isGenuineMetaMask(win_.ethereum);
-    }
+    case 'metamask':
+      return !!win_.ethereum?.isMetaMask;
     case 'trust':
       return !!(win_.trustwallet || win_.ethereum?.isTrust || win_.ethereum?.isTrustWallet);
     case 'coinbase':
@@ -298,8 +172,6 @@ export function isExtensionInstalled(ctx: WalletServiceContext, walletId: string
       return !!win_.ethereum?.isRabby;
     case 'rainbow':
       return !!win_.ethereum?.isRainbow;
-    case 'hotwallet':
-      return !!win_.ethereum?.isHotWallet;
   }
   return false;
 }
@@ -308,82 +180,23 @@ export function getInstalledWallets(ctx: WalletServiceContext): string[] {
   const win = window as any;
   const installed = new Set<string>();
 
+  // EIP-6963 discovered wallets (authoritative)
   for (const [rdns] of ctx.eip6963Providers.entries()) {
-    const walletId = RDNS_TO_WALLET_ID[rdns] || rdns;
+    const walletId = RDNS_TO_WALLET_ID[rdns];
     if (walletId) installed.add(walletId);
   }
 
-  if (Array.isArray(win.ethereum?.providers)) {
-    if (findInProvidersArray(win.ethereum.providers, 'metamask')) installed.add('metamask');
-  } else if (isGenuineMetaMask(win.ethereum)) {
-    installed.add('metamask');
-  }
-
-  if (win.ethereum?.isTrust || win.ethereum?.isTrustWallet || win.trustwallet)
-    installed.add('trust');
+  if (win.ethereum?.isMetaMask) installed.add('metamask');
+  if (win.ethereum?.isTrust || win.trustwallet) installed.add('trust');
   if (win.ethereum?.isCoinbaseWallet) installed.add('coinbase');
   if (win.phantom?.ethereum || win.ethereum?.isPhantom) installed.add('phantom');
   if (win.ethereum?.isRabby) installed.add('rabby');
   if (win.ethereum?.isRainbow) installed.add('rainbow');
-  if (win.ethereum?.isHotWallet) installed.add('hotwallet');
-  if (freighterInstalledCached || win.freighter || win.freighterApi) installed.add('freighter');
+  if (win.freighter || win.freighterApi) installed.add('freighter');
   if (win.lobstr) installed.add('lobstr');
-  if (win.xbull) installed.add('xbull');
-  if (win.albedo) installed.add('albedo');
-  if (win.rabet) installed.add('rabet');
   if (win.ethereum?.isSwiftEx || win.swiftex) installed.add('swiftex');
 
   return Array.from(installed);
-}
-
-/**
- * Dynamically discovers any injected Stellar extension on `window`
- * based on standard capability methods (getPublicKey / signTransaction).
- */
-export function discoverStellarExtensions(): DiscoveredExtension[] {
-  if (typeof window === 'undefined') return [];
-  const win = window as any;
-  const candidates: Array<{ id: string; name: string; key: string }> = [
-    { id: 'freighter', name: 'Freighter', key: 'freighterApi' },
-    { id: 'freighter', name: 'Freighter', key: 'freighter' },
-    { id: 'lobstr', name: 'LOBSTR', key: 'lobstr' },
-    { id: 'xbull', name: 'xBull Wallet', key: 'xbull' },
-    { id: 'albedo', name: 'Albedo', key: 'albedo' },
-    { id: 'rabet', name: 'Rabet', key: 'rabet' },
-    { id: 'hana', name: 'Hana Wallet', key: 'hana' },
-    { id: 'swiftex', name: 'SwiftEx Wallet', key: 'swiftexStellar' },
-  ];
-
-  const found: DiscoveredExtension[] = [];
-  const seen = new Set<string>();
-
-  for (const item of candidates) {
-    const prov = win[item.key];
-    if (
-      prov &&
-      !seen.has(item.id) &&
-      (typeof prov.getPublicKey === 'function' ||
-        typeof prov.getAddress === 'function' ||
-        typeof prov.requestAccess === 'function' ||
-        typeof prov.isAllowed === 'function' ||
-        typeof prov.isConnected === 'function' ||
-        typeof prov.signTransaction === 'function' ||
-        typeof prov.sign === 'function')
-    ) {
-      seen.add(item.id);
-      const meta = WALLET_METADATA_MAP[item.id];
-      found.push({
-        id: item.id,
-        name: meta?.name || item.name,
-        icon: meta?.icon || '',
-        type: 'stellar',
-        isInstalled: true,
-        provider: prov,
-      });
-    }
-  }
-
-  return found;
 }
 
 // ---------------------------------------------------------------------------
@@ -394,9 +207,10 @@ async function loadUniversalProvider(): Promise<typeof UniversalProviderType> {
   return UniversalProviderType;
 }
 
-const pendingProviderInits = new Map<string, Promise<any>>();
-
 export async function getOrCreateProvider(ctx: WalletServiceContext, key: string): Promise<any> {
+  const debugProviderId = crypto.randomUUID();
+  console.log('[WC] PROVIDER INIT', { key, providerInstanceId: debugProviderId });
+
   const existing = ctx.providers.get(key);
   if (existing && (existing as any).__providerKey === key) {
     if (existing.session) {
@@ -423,72 +237,42 @@ export async function getOrCreateProvider(ctx: WalletServiceContext, key: string
     }
   }
 
-  if (pendingProviderInits.has(key)) {
-    return pendingProviderInits.get(key);
-  }
+  const ProviderClass = await loadUniversalProvider();
 
-  const initPromise = (async () => {
-    try {
-      const ProviderClass = await loadUniversalProvider();
+  const core = new Core({
+    projectId: WALLETCONNECT_PROJECT_ID,
+    customStoragePrefix: `swiftex_${key}`,
+  });
 
-      const core = new Core({
-        projectId: WALLETCONNECT_PROJECT_ID,
-        customStoragePrefix: `swiftex_${key}`,
-      });
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Provider init timeout')), 20000)
+  );
 
-      let timeoutId: any;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Provider init timeout')), 20000);
-      });
+  const provider = await Promise.race([
+    ProviderClass.init({
+      projectId: WALLETCONNECT_PROJECT_ID,
+      metadata: {
+        ...WALLETCONNECT_METADATA,
+        name: `${WALLETCONNECT_METADATA.name} (${key})`,
+      },
+      core,
+    }),
+    timeoutPromise,
+  ]);
 
-      try {
-        const provider = await Promise.race([
-          ProviderClass.init({
-            projectId: WALLETCONNECT_PROJECT_ID,
-            metadata: {
-              ...WALLETCONNECT_METADATA,
-              name: `${WALLETCONNECT_METADATA.name} (${key})`,
-            },
-            core,
-          }),
-          timeoutPromise,
-        ]);
+  wrapProviderRequests(ctx, provider);
 
-        wrapProviderRequests(ctx, provider);
+  console.log('[WC] provider created', debugProviderId);
+  (provider as any).__debugProviderId = debugProviderId;
+  (provider as any).__providerKey = key;
 
-        const debugProviderId = crypto.randomUUID();
-        (provider as any).__debugProviderId = debugProviderId;
-        (provider as any).__providerKey = key;
-
-        ctx.providers.set(key, provider);
-        return provider;
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    } finally {
-      pendingProviderInits.delete(key);
-    }
-  })();
-
-  pendingProviderInits.set(key, initPromise);
-  return initPromise;
+  ctx.providers.set(key, provider);
+  return provider;
 }
 
 // ---------------------------------------------------------------------------
 // Request wrapping (signing intercept + redirect + in-flight guard)
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Chain-related RPC methods that trigger wallet approval popups
-// ---------------------------------------------------------------------------
-const CHAIN_APPROVAL_METHODS = [
-  'wallet_switchEthereumChain',
-  'wallet_addEthereumChain',
-  'wallet_watchAsset',
-  'wallet_requestPermissions',
-  'wallet_getPermissions',
-  'eth_requestAccounts',
-];
 
 export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): void {
   if (!provider) return;
@@ -498,76 +282,9 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
     const originalRequest = target.request;
 
     target.request = async function (this: any, ...args: any[]) {
-      let method = typeof args[0] === 'string' ? args[0] : args[0]?.method;
-      let params = typeof args[0] === 'string' ? args[1] : args[0]?.params;
-
-      // Handle WalletConnect client.request format: { topic, chainId, request: { id, method, params } }
-      if (!method && args[0]?.request?.method) {
-        method = args[0].request.method;
-        params = args[0].request.params;
-      }
-
-      const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
-
-      // ─── Chain Approval / Switch Requests ───────────────────────────────────
-      if (CHAIN_APPROVAL_METHODS.includes(method)) {
-        if (method === 'wallet_switchEthereumChain') {
-          const chainIdHex = params?.[0]?.chainId ?? params?.[0] ?? 'unknown';
-          const chainIdDec = chainIdHex !== 'unknown' ? parseInt(chainIdHex, 16) : 'unknown';
-          console.group(
-            `%c[ChainRequest:${networkTag}] 🔗 wallet_switchEthereumChain`,
-            'color: #f59e0b; font-weight: bold;'
-          );
-          console.log('  Chain ID (hex)    :', chainIdHex);
-          console.log('  Chain ID (decimal):', chainIdDec);
-          console.log('  Full params       :', params);
-          console.groupEnd();
-        } else if (method === 'wallet_addEthereumChain') {
-          const chainParams = params?.[0] ?? {};
-          const chainIdHex = chainParams.chainId ?? 'unknown';
-          const chainIdDec = chainIdHex !== 'unknown' ? parseInt(chainIdHex, 16) : 'unknown';
-          console.group(
-            `%c[ChainRequest:${networkTag}] ➕ wallet_addEthereumChain`,
-            'color: #10b981; font-weight: bold;'
-          );
-          console.log('  Chain ID (hex)    :', chainIdHex);
-          console.log('  Chain ID (decimal):', chainIdDec);
-          console.log('  Chain Name        :', chainParams.chainName ?? 'unknown');
-          console.log('  RPC URLs          :', chainParams.rpcUrls ?? []);
-          console.log('  Native Currency   :', chainParams.nativeCurrency ?? {});
-          console.log('  Block Explorer    :', chainParams.blockExplorerUrls ?? []);
-          console.log('  Full params       :', chainParams);
-          console.groupEnd();
-        } else {
-          console.group(
-            `%c[ChainRequest:${networkTag}] 📋 ${method}`,
-            'color: #818cf8; font-weight: bold;'
-          );
-          console.log('  Params:', params);
-          console.groupEnd();
-        }
-
-        try {
-          const result = await originalRequest.apply(this, args);
-          console.info(`[ChainRequest:${networkTag}] ✓ '${method}' approved by wallet`);
-          return result;
-        } catch (error: any) {
-          if (isUserRejection(error)) {
-            console.warn(`[ChainRequest:${networkTag}] ✕ User rejected '${method}'`);
-          } else {
-            console.error(
-              `[ChainRequest:${networkTag}] ✕ Error during '${method}':`,
-              extractErrorMessage(error)
-            );
-          }
-          throw error;
-        }
-      }
-
-      // ─── Signing Requests ────────────────────────────────────────────────────
+      const method = args[0]?.method;
       const SIGNING_METHODS = [
         'eth_sendTransaction',
-        'eth_signTransaction',
         'eth_signTypedData_v4',
         'eth_signTypedData',
         'personal_sign',
@@ -581,25 +298,6 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           signingType = 'stellar';
         } else {
           signingType = 'evm';
-        }
-
-        const activeSession = ctx.sessions.get(signingType);
-        const chainIdentifier =
-          signingType === 'evm'
-            ? activeSession?.evmChainId
-              ? `EVM Chain ${activeSession.evmChainId}`
-              : 'EVM'
-            : activeSession?.stellarChainId
-              ? `Stellar (${activeSession.stellarChainId})`
-              : 'Stellar';
-
-        console.info(
-          `[WalletRequest:${networkTag}] ➔ Dispatching '${method}' on ${chainIdentifier} (${activeSession?.walletId || 'wallet'})`
-        );
-
-        if (this.__parentCalling) {
-          this.__parentCalling = false;
-          return originalRequest.apply(this, args);
         }
 
         if (ctx.isSignRequestInFlight.get(signingType)) {
@@ -627,71 +325,39 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
                 ? redirect.native || redirect.universal
                 : redirect.universal || redirect.native;
 
-              if (href && isSafeWalletRedirectUrl(href)) {
-                console.info(`[WalletRequest:${networkTag}] Directing mobile wallet to: ${href}`);
+              if (href) {
+                console.log('[WalletService] Opening wallet for signing', method, '::', href);
                 try {
                   window.open(href, '_blank', 'noopener');
                 } catch {
                   window.location.href = href;
                 }
-              } else if (href) {
-                console.warn(
-                  `[WalletRequest:${networkTag}] Blocked unsafe mobile redirect URL: ${href}`
-                );
               }
             }
           } catch (e) {
             console.error('[WalletService] Auto-redirect error:', e);
           }
 
-          let timerId: any;
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            timerId = setTimeout(() => reject(new Error('SIGNATURE_TIMEOUT')), 120_000);
-          });
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('SIGNATURE_TIMEOUT')), 120_000)
+          );
 
-          if (provider?.client) {
-            provider.client.__parentCalling = true;
-          }
-
-          try {
-            const result = await Promise.race([originalRequest.apply(this, args), timeoutPromise]);
-            console.info(
-              `[WalletRequest:${networkTag}] ✓ '${method}' confirmed on ${chainIdentifier}`
-            );
-            return result;
-          } finally {
-            clearTimeout(timerId);
-          }
+          const result = await Promise.race([originalRequest.apply(this, args), timeoutPromise]);
+          return result;
         } catch (error: any) {
           if (isUserRejection(error)) {
-            console.warn(
-              `[WalletRequest:${networkTag}] ✕ User rejected '${method}' on ${chainIdentifier}`
-            );
             const rejectError = new Error('USER_REJECTED') as any;
             rejectError.code = 4001;
             throw rejectError;
           }
           const cleanMsg = extractErrorMessage(error);
-          console.error(
-            `[WalletRequest:${networkTag}] ✕ Error during '${method}' on ${chainIdentifier}:`,
-            cleanMsg
-          );
           const newErr = new Error(cleanMsg) as any;
           newErr.code = error?.code || -32603;
           throw newErr;
         } finally {
-          if (provider?.client) {
-            provider.client.__parentCalling = false;
-          }
           ctx.isSignRequestInFlight.set(signingType, false);
         }
       }
-
-      // ─── All Other Requests (eth_chainId, eth_accounts, etc.) ───────────────
-      console.debug(
-        `[WalletRequest:${networkTag}] ○ '${method}'`,
-        params !== undefined ? { params } : ''
-      );
 
       return originalRequest.apply(this, args);
     };

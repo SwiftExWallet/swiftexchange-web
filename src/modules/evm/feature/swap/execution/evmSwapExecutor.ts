@@ -5,7 +5,6 @@ import { parseRawChainId, switchOrAddChain } from '../../../utils/evmChainUtils'
 import { getEVMNetworkConfig } from '../../../utils/evmUtils';
 import { rpcManager } from '../../../utils/rpcProvider';
 import type { SwapQuote } from '../types/swap.types';
-import { waitForTxConfirmation } from './approvalExecutor';
 
 export interface ExecuteSwapDependencies {
   prepareSwapTransaction: (params: any) => Promise<any[]>;
@@ -133,7 +132,6 @@ export async function executeSwap(
     } else if (!isLast && onApprovalTxHash) {
       onApprovalTxHash(lastTxHash);
       if (onProgress) onProgress('signing');
-      await waitForTxConfirmation(lastTxHash, chainId, rawProvider);
     }
   }
 

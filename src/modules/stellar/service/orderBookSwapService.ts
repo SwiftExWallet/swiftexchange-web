@@ -1,5 +1,4 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
-import BigNumber from 'bignumber.js';
 
 import type {
   LargeOrderOptions,
@@ -12,12 +11,12 @@ import { StellarBaseService } from './StellarBaseService';
 
 export class OrderBookSwapService extends StellarBaseService {
   calculateTotal(amount: string, price: string): string {
-    const amt = new BigNumber(amount || '0');
-    const prc = new BigNumber(price || '0');
-    if (amt.isNaN() || prc.isNaN() || amt.isLessThanOrEqualTo(0) || prc.isLessThanOrEqualTo(0)) {
-      return '0';
+    const amt = parseFloat(amount);
+    const prc = parseFloat(price);
+    if (isNaN(amt) || isNaN(prc)) {
+      throw new Error('Invalid amount or price');
     }
-    return amt.times(prc).toFixed(7, BigNumber.ROUND_DOWN);
+    return (amt * prc).toFixed(7);
   }
 
   async getOrderQuote(
@@ -67,18 +66,18 @@ export class OrderBookSwapService extends StellarBaseService {
         networkPassphrase: this.networkPassphrase,
       });
 
+      this.ensureTrustline(txBuilder, accountResponse, quote.toAsset);
+
       let operation;
       if (isBuy) {
-        this.ensureTrustline(txBuilder, accountResponse, quote.fromAsset);
         operation = StellarSDK.Operation.manageBuyOffer({
-          selling: quote.toAsset,
-          buying: quote.fromAsset,
+          selling: quote.fromAsset,
+          buying: quote.toAsset,
           buyAmount: quote.amount,
           price: quote.price,
           offerId: '0',
         });
       } else {
-        this.ensureTrustline(txBuilder, accountResponse, quote.toAsset);
         operation = StellarSDK.Operation.manageSellOffer({
           selling: quote.fromAsset,
           buying: quote.toAsset,
@@ -96,10 +95,7 @@ export class OrderBookSwapService extends StellarBaseService {
       txBuilder.setTimeout(options.timeout || 300);
 
       const builtTransaction = txBuilder.build();
-      const xdr =
-        typeof builtTransaction.toXdr === 'function'
-          ? builtTransaction.toXdr()
-          : builtTransaction.toXDR();
+      const xdr = builtTransaction.toXDR();
 
       return {
         id: `large-order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,

@@ -2,24 +2,20 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 
 import { useSwapStore } from '../../../../../store/swapStore';
-import { getStellarConfig } from '../../../../walletconnect/config/chains';
 import { WalletType } from '../../../../walletconnect/constants/Wallet';
-import {
-  getEvmChainsForNetwork,
-  getEvmSwapEnabledChains,
-  isEvmChain,
-} from '../../../utils/Chainregistry';
+import { getEvmSwapEnabledChains, isEvmChain } from '../../../utils/Chainregistry';
 import { switchOrAddChain } from '../../../utils/evmChainUtils';
+import { STELLAR_CHAIN_ID } from '../constants/swap.constants';
 import { isStellar } from '../utils/swapAssetUtils';
 
 export function useSwapAssetDefaults(params: {
   connectedWallets: any;
   currentChainId: number | null;
   currentNetwork: 'mainnet' | 'testnet';
-  isConnected?: boolean;
+  isConnected: boolean;
   getProvider: (type: WalletType) => any;
 }) {
-  const { connectedWallets, currentChainId, currentNetwork, getProvider } = params;
+  const { connectedWallets, currentChainId, currentNetwork, isConnected, getProvider } = params;
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const locationState = location.state as { selectedAsset?: any; isPerp?: boolean };
@@ -46,30 +42,15 @@ export function useSwapAssetDefaults(params: {
   const urlParamsApplied = useRef(false);
 
   const parseChainId = (param: string): number | string => {
-    if (param === 'stellar' || param === 'pubnet' || param === 'testnet') {
-      return getStellarConfig(currentNetwork).chainId;
-    }
+    if (param === 'stellar' || param === 'pubnet') return STELLAR_CHAIN_ID;
     const n = Number(param);
     return isNaN(n) ? param : n;
   };
 
   useEffect(() => {
-    const stellarId = getStellarConfig(currentNetwork).chainId;
-    if (isStellar(fromChainId) && fromChainId !== stellarId) {
-      setFromChainId(stellarId);
-    }
-    if (isStellar(toChainId) && toChainId !== stellarId) {
-      setToChainId(stellarId);
-    }
-  }, [currentNetwork, fromChainId, toChainId, setFromChainId, setToChainId]);
-
-  useEffect(() => {
     if (locationState?.selectedAsset) {
       const asset = locationState.selectedAsset;
-      const targetChainId =
-        asset.chainType === 'stellar'
-          ? getStellarConfig(currentNetwork).chainId
-          : asset.chainId || 1;
+      const targetChainId = asset.chainType === 'stellar' ? STELLAR_CHAIN_ID : asset.chainId || 1;
       setFromChainId(targetChainId);
       setSellAssetSymbol(asset.symbol);
       setSellAssetAddress(asset.address || '');
@@ -99,7 +80,7 @@ export function useSwapAssetDefaults(params: {
     }
 
     urlParamsApplied.current = true;
-  }, [locationState, searchParams, currentNetwork]);
+  }, [locationState, searchParams]);
 
   useEffect(() => {
     if (hasInitializedDefaults.current) return;
@@ -108,44 +89,25 @@ export function useSwapAssetDefaults(params: {
     const hasStoredSelection =
       stored.sellAssetSymbol !== '' ||
       isStellar(stored.fromChainId) ||
-      (stored.fromChainId !== 'pubnet' &&
-        stored.fromChainId !== 'testnet' &&
-        stored.fromChainId !== 1);
+      (stored.fromChainId !== 'pubnet' && stored.fromChainId !== 1);
 
     if (hasStoredSelection) {
       hasInitializedDefaults.current = true;
       return;
     }
 
-    const stellarId = getStellarConfig(currentNetwork).chainId;
-
     if (connectedWallets[WalletType.STELLAR]) {
-      setFromChainId(stellarId);
-      setToChainId(stellarId);
+      setFromChainId(STELLAR_CHAIN_ID);
+      setToChainId(STELLAR_CHAIN_ID);
     } else if (connectedWallets[WalletType.EVM] && currentChainId) {
       const swapEnabledChains = getEvmSwapEnabledChains(currentNetwork);
       if (swapEnabledChains.some(c => c.chainId === currentChainId)) {
         setFromChainId(currentChainId);
         setToChainId(currentChainId);
-      } else {
-        // Testnet EVM chains have swapEnable: false — still use connected chain as default
-        // so swap screen shows EVM chains instead of defaulting to Stellar
-        const evmTestnetChains = getEvmChainsForNetwork(currentNetwork);
-        const matchedChain = evmTestnetChains.find(c => c.chainId === currentChainId);
-        if (matchedChain) {
-          setFromChainId(currentChainId);
-          setToChainId(currentChainId);
-        } else if (evmTestnetChains.length > 0) {
-          setFromChainId(evmTestnetChains[0].chainId);
-          setToChainId(evmTestnetChains[0].chainId);
-        } else {
-          setFromChainId(stellarId);
-          setToChainId(stellarId);
-        }
       }
     } else {
-      setFromChainId(stellarId);
-      setToChainId(stellarId);
+      setFromChainId(STELLAR_CHAIN_ID);
+      setToChainId(STELLAR_CHAIN_ID);
     }
 
     hasInitializedDefaults.current = true;
@@ -168,9 +130,7 @@ export function useSwapAssetDefaults(params: {
     sellAssetAddress,
     buyAssetSymbol,
     buyAssetAddress,
-    // setSearchParams intentionally omitted: React Router v6 returns a new reference
-    // on every render, which would cause this effect to re-run (and re-navigate)
-    // on every keystroke. setSearchParams is stable once the router is mounted.
+    setSearchParams,
   ]);
 
   const isInitialMount = useRef(true);
@@ -187,41 +147,41 @@ export function useSwapAssetDefaults(params: {
     }
   }, [fromChainId, toChainId, resetInputs]);
 
-  // Note: locationState?.selectedAsset handling is covered by the combined URL-params
-  // effect above (lines 67-103), which sets hasInitializedDefaults.current = true and
-  // returns early on subsequent renders. The duplicate effect was removed because it
-  // had no initialization guard and re-fired setFromChainId/setSellAssetSymbol on
-  // every dependency change, overriding user selections made after mount.
-
-  const lastAttemptedChainIdRef = useRef<string | number | null>(null);
-
   useEffect(() => {
-    if (currentChainId !== null && String(currentChainId) === String(fromChainId)) {
-      lastAttemptedChainIdRef.current = null;
+    if (locationState?.selectedAsset) {
+      const asset = locationState.selectedAsset;
+      const targetChainId = asset.chainType === 'stellar' ? STELLAR_CHAIN_ID : asset.chainId || 1;
+      setFromChainId(targetChainId);
+      setSellAssetSymbol(asset.symbol);
+      setSellAssetAddress(asset.address || '');
+      if (locationState.isPerp) {
+        setToChainId(targetChainId);
+      }
     }
-  }, [currentChainId, fromChainId]);
+  }, [locationState]);
 
   useEffect(() => {
     if (
-      connectedWallets[WalletType.EVM] &&
+      isConnected &&
       isEvmChain(fromChainId) &&
       currentChainId !== null &&
       String(currentChainId) !== String(fromChainId) &&
-      !isChainSwitching &&
-      lastAttemptedChainIdRef.current !== fromChainId
+      !isChainSwitching
     ) {
       let active = true;
-      lastAttemptedChainIdRef.current = fromChainId;
-
       const autoSwitchChain = async () => {
         setIsChainSwitching(true);
         try {
           const provider = getProvider(WalletType.EVM);
-          if (provider) {
-            await switchOrAddChain(provider, fromChainId);
-          }
+          await switchOrAddChain(provider, fromChainId);
         } catch (err) {
-          console.warn('[useSwapAssetDefaults] autoSwitchChain delayed or rejected:', err);
+          console.error(err);
+          if (active) {
+            setFromChainId(currentChainId);
+            if (fromChainId === toChainId) {
+              setToChainId(currentChainId);
+            }
+          }
         } finally {
           if (active) {
             setIsChainSwitching(false);
@@ -233,7 +193,16 @@ export function useSwapAssetDefaults(params: {
         active = false;
       };
     }
-  }, [fromChainId, currentChainId, connectedWallets, isChainSwitching, getProvider]);
+  }, [
+    fromChainId,
+    currentChainId,
+    isConnected,
+    isChainSwitching,
+    getProvider,
+    setFromChainId,
+    setToChainId,
+    toChainId,
+  ]);
 
   return {
     isChainSwitching,

@@ -22,6 +22,7 @@ import {
   getEvmChainId,
   getNearIntentQuote,
   isStellarBlockchain,
+  safeParseUnits,
   submitNearIntentDeposit,
 } from '../services/oneClickApi';
 
@@ -54,14 +55,10 @@ export const useNearIntentCrossChain = ({
   const quoteAbortController = useRef<AbortController | null>(null);
 
   const fetchTokens = useCallback(async () => {
-    if (currentNetwork === 'testnet') {
-      setTokens([]);
-      return;
-    }
     setIsFetchingTokens(true);
     setError(null);
     try {
-      const data = await fetchNearIntentTokens('mainnet');
+      const data = await fetchNearIntentTokens();
       setTokens(data);
     } catch (err: any) {
       console.error('Failed to fetch Near Intent tokens:', err);
@@ -69,7 +66,7 @@ export const useNearIntentCrossChain = ({
     } finally {
       setIsFetchingTokens(false);
     }
-  }, [currentNetwork]);
+  }, []);
 
   const fetchQuote = useCallback(
     async (
@@ -78,11 +75,6 @@ export const useNearIntentCrossChain = ({
       amount: string,
       slippageToleranceBps: number = 100
     ) => {
-      if (currentNetwork === 'testnet') {
-        setError('Cross-chain swaps via NEAR Intents are not supported on Testnet.');
-        return;
-      }
-
       quoteAbortController.current?.abort();
       quoteAbortController.current = new AbortController();
 
@@ -122,7 +114,7 @@ export const useNearIntentCrossChain = ({
           deadline: new Date(Date.now() + 900000).toISOString(), // 15 minutes
         };
 
-        const data = await getNearIntentQuote(quotePayload, currentNetwork);
+        const data = await getNearIntentQuote(quotePayload);
         setQuote(data.quote);
       } catch (err: any) {
         if (err.name !== 'AbortError') {
@@ -133,7 +125,7 @@ export const useNearIntentCrossChain = ({
         setQuoteLoading(false);
       }
     },
-    [evmAddress, stellarAddress, currentNetwork]
+    [evmAddress, stellarAddress]
   );
 
   const executeDeposit = useCallback(
@@ -142,10 +134,6 @@ export const useNearIntentCrossChain = ({
       amount: string,
       providedQuote?: NearIntentQuote
     ): Promise<string> => {
-      if (currentNetwork === 'testnet') {
-        throw new Error('Cross-chain swaps via NEAR Intents are not supported on Testnet.');
-      }
-
       const quoteToUse = providedQuote || quote;
       if (!quoteToUse || !quoteToUse.depositAddress) {
         const errMsg = 'No valid quote or deposit address';
@@ -206,12 +194,11 @@ export const useNearIntentCrossChain = ({
           }
 
           const transaction = txBuilder.setTimeout(300).build();
-          const xdr =
-            typeof transaction.toXdr === 'function' ? transaction.toXdr() : transaction.toXDR();
+          const xdr = transaction.toXDR();
 
           const result = await signAndSubmitTransaction({
             xdr,
-            network: currentNetwork,
+            network: 'mainnet',
             networkPassphrase: config.networkPassphrase,
             provider: stellarProvider,
             stellarAddress,
@@ -263,9 +250,7 @@ export const useNearIntentCrossChain = ({
           const sellAddress = sellAsset.contractAddress || '';
           let txHashResultHex = '';
           const fromAddr = (await signer.getAddress()).toLowerCase();
-          // ethers.parseUnits always returns a native bigint and handles all edge cases
-          // (scientific notation, leading zeros, etc.) that BigInt(safeParseUnits()) cannot.
-          const amountInWei = ethers.parseUnits(amount, sellAsset.decimals || 18);
+          const amountInWei = BigInt(safeParseUnits(amount, sellAsset.decimals || 18));
 
           // `fromAddr` is obtained from the signer which is already bound to evmAddress,
           // so it will always match the active keyring account. `from` is required for
@@ -365,7 +350,7 @@ export const useNearIntentCrossChain = ({
         setLoading(false);
       }
     },
-    [quote, getProvider, evmAddress, stellarAddress, currentNetwork]
+    [quote, getProvider]
   );
 
   const reset = useCallback(() => {

@@ -51,12 +51,9 @@ describe('evmUtils', () => {
         maxFeePerGas: '2000000000', // 2 gwei
       };
 
-      // Ethereum (chainId 1) has minGasGwei: 10, so priority fee is adjusted to 10 gwei and max fee to 11 gwei
+      // When chain has no minGasGwei or minGasGwei is 0, it returns feeData as is
       const adjusted = adjustFeeDataForMinGas(feeData, 1);
-      expect(adjusted).toEqual({
-        maxFeePerGas: 11000000000n,
-        maxPriorityFeePerGas: 10000000000n,
-      });
+      expect(adjusted).toEqual(feeData);
     });
   });
 

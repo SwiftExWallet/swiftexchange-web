@@ -33,10 +33,6 @@ export interface SwapQuote {
   priceImpact: number;
   slippageTolerance: number;
   timestamp: number;
-  source?: 'SOROSWAP' | 'AQUARIUS' | 'STELLAR_AMM';
-  swapChainXdr?: string;
-  pools?: string[];
-  platform?: string;
 }
 
 export interface SwapOptions {

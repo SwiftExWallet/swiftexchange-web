@@ -27,11 +27,12 @@ export class StellarChartService {
   private networkKey: string;
 
   constructor(horizonUrl: string, networkPassphrase: string, networkKey: string) {
-    if (horizonUrl.startsWith('http://') && !import.meta.env.VITEST) {
-      throw new Error(`Insecure Horizon URL rejected: ${horizonUrl}. HTTPS is required.`);
+    const serverOptions: any = {};
+    if (horizonUrl.startsWith('http://')) {
+      serverOptions.allowHttp = true;
     }
 
-    this.server = new Horizon.Server(horizonUrl);
+    this.server = new Horizon.Server(horizonUrl, serverOptions);
     this.networkPassphrase = networkPassphrase;
     this.networkKey = networkKey;
   }

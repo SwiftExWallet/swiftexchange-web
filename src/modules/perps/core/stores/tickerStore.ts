@@ -18,7 +18,6 @@ interface TickerStoreState {
   setAssetCtx: (market: string, ctx: AssetCtx) => void;
   setMultipleAssetCtxs: (contexts: Record<string, AssetCtx>) => void;
   getAssetCtx: (market: string) => AssetCtx | undefined;
-  clear: () => void;
 }
 
 export const useTickerStore = create<TickerStoreState>((set, get) => ({
@@ -38,5 +37,4 @@ export const useTickerStore = create<TickerStoreState>((set, get) => ({
       },
     })),
   getAssetCtx: market => get().assetCtxByMarket[market],
-  clear: () => set({ assetCtxByMarket: {} }),
 }));

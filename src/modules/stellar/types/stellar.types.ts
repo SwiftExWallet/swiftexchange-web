@@ -13,7 +13,6 @@ export interface TokenInfo {
   hasTrustline?: boolean;
   homeDomain?: string;
   domain?: string;
-  contract?: string;
 }
 
 export interface PriceInfo {

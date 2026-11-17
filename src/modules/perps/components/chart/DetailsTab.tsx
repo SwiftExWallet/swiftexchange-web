@@ -7,7 +7,6 @@ import {
   getSymbolDetail,
 } from '../../adapters/aster/api/funding';
 import { useMarketStore } from '../../core/stores/marketStore';
-import { safeFormatNumber } from '../../utils/precision';
 import { CoinIcon } from '../ui/CoinIcon';
 import FundingChart from './FundingChart';
 
@@ -137,14 +136,14 @@ const TokenInfoView: React.FC<{ symbol: string; coin: string; data: any; athlDat
           <div className="flex-1 bg-secondary rounded-xl p-4 border border-color">
             <span className="text-muted text-xs block mb-2">All-time High</span>
             <span className="text-success text-lg font-bold block mb-1">
-              ${safeFormatNumber(ath, 2, 4, '--')}
+              ${ath.toLocaleString(undefined, { maximumFractionDigits: 4 })}
             </span>
             <span className="text-muted text-[10px]">{athDate}</span>
           </div>
           <div className="flex-1 bg-secondary rounded-xl p-4 border border-color">
             <span className="text-muted text-xs block mb-2">All-time Low</span>
             <span className="text-danger text-lg font-bold block mb-1">
-              ${safeFormatNumber(atl, 2, 6, '--')}
+              ${atl.toLocaleString(undefined, { maximumFractionDigits: 6 })}
             </span>
             <span className="text-muted text-[10px]">{atlDate}</span>
           </div>

@@ -1,5 +1,4 @@
 import * as StellarSDK from '@stellar/stellar-sdk';
-import BigNumber from 'bignumber.js';
 
 import { generateTransactionId } from '../../../utils/transactionUtils';
 import { getStellarConfig } from '../../walletconnect/config/chains';
@@ -9,7 +8,6 @@ import {
   type StellarTransactionOptions,
 } from '../types/stellarTransaction.types';
 import { StellarSequenceTracker } from '../utils/StellarSequenceTracker';
-import { StellarBaseService } from './StellarBaseService';
 
 export function ensureTrustlineOp(
   txBuilder: StellarSDK.TransactionBuilder,
@@ -26,23 +24,6 @@ export function ensureTrustlineOp(
   );
 
   if (!hasTrustline) {
-    const nativeBalRecord = sourceAccount.balances.find((b: any) => b.asset_type === 'native');
-    const totalXlm = new BigNumber(nativeBalRecord?.balance || '0');
-    const subentryCount = sourceAccount.subentry_count || 0;
-    const liabilities = new BigNumber((nativeBalRecord as any)?.selling_liabilities || '0');
-    const baseReserve = new BigNumber('0.5');
-    const buffer = new BigNumber('0.01');
-    const requiredReserve = new BigNumber(2 + subentryCount + 1)
-      .multipliedBy(baseReserve)
-      .plus(liabilities)
-      .plus(buffer);
-
-    if (totalXlm.isLessThan(requiredReserve)) {
-      throw new Error(
-        `Insufficient XLM balance to establish trustline for ${asset.getCode()}. You need at least ${requiredReserve.toFixed(2)} XLM to cover Stellar minimum reserves (current balance: ${totalXlm.toFixed(2)} XLM).`
-      );
-    }
-
     txBuilder.addOperation(
       StellarSDK.Operation.changeTrust({
         asset: asset,
@@ -57,24 +38,21 @@ export async function getStellarBalance(assetType: string, from: string): Promis
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
 
-  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
+  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
   try {
     const account = await server.loadAccount(from);
     let balance = '0';
     if (assetType === 'native') {
       const nativeBalanceObj = account.balances.find(b => b.asset_type === 'native');
       if (nativeBalanceObj) {
-        const nativeBalBN = new BigNumber(nativeBalanceObj.balance || '0');
-        const baseReserveBN = new BigNumber('0.5'); // XLM
-        const subentryCount = account.subentry_count || 0;
-        const totalReserveBN = new BigNumber(2 + subentryCount).times(baseReserveBN);
-        const liabilitiesBN = new BigNumber((nativeBalanceObj as any).selling_liabilities || '0');
+        const nativeBalance = parseFloat(nativeBalanceObj.balance);
+        const baseReserve = 0.5; // XLM
+        const subentryCount = account.subentry_count;
+        const totalReserve = (2 + subentryCount) * baseReserve;
+        const liabilities = parseFloat((nativeBalanceObj as any).selling_liabilities || '0');
 
-        const availableBN = BigNumber.max(
-          0,
-          nativeBalBN.minus(totalReserveBN).minus(liabilitiesBN)
-        );
-        balance = availableBN.toFixed(7, BigNumber.ROUND_DOWN);
+        const available = Math.max(0, nativeBalance - totalReserve - liabilities);
+        balance = available.toString();
       } else {
         balance = '0';
       }
@@ -96,7 +74,7 @@ export async function getStellarBalance(assetType: string, from: string): Promis
 export async function fetchStellarAccountAssets(address: string): Promise<any[]> {
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
-  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
+  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
 
   try {
     const account = await server.loadAccount(address);
@@ -143,7 +121,7 @@ export async function sendCryptoStellarBuild(
         : currentNetwork;
   const config = getStellarConfig(networkToUse);
 
-  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
+  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
   const networkPassphrase =
     config.network === 'PUBLIC' ? StellarSDK.Networks.PUBLIC : StellarSDK.Networks.TESTNET;
 
@@ -169,7 +147,7 @@ export async function sendCryptoStellarBuild(
     accountResponse.sequenceNumber()
   );
   const sourceAccount = new StellarSDK.Account(from, baseSeq);
-  const stellarAmount = new BigNumber(amount || '0').toFixed(7, BigNumber.ROUND_DOWN);
+  const stellarAmount = parseFloat(amount).toFixed(7);
 
   const txBuilder = new StellarSDK.TransactionBuilder(sourceAccount, {
     fee: StellarSDK.BASE_FEE,
@@ -186,12 +164,11 @@ export async function sendCryptoStellarBuild(
   // 1. Ensure sender has trustline
   ensureTrustlineOp(txBuilder, accountResponse, stellarAsset);
 
-  let isNewAccount = false;
+  // 2. Check if recipient has trustline (for non-native assets)
   let useClaimableBalance = false;
-
-  try {
-    const destAccount = await server.loadAccount(to);
-    if (!stellarAsset.isNative()) {
+  if (!stellarAsset.isNative()) {
+    try {
+      const destAccount = await server.loadAccount(to);
       const hasDestTrust = destAccount.balances.some(
         (b: any) =>
           b.asset_code === stellarAsset.getCode() && b.asset_issuer === stellarAsset.getIssuer()
@@ -199,23 +176,12 @@ export async function sendCryptoStellarBuild(
       if (!hasDestTrust) {
         useClaimableBalance = true;
       }
-    }
-  } catch {
-    if (stellarAsset.isNative()) {
-      isNewAccount = true;
-    } else {
+    } catch {
       useClaimableBalance = true;
     }
   }
 
-  if (isNewAccount && stellarAsset.isNative()) {
-    txBuilder.addOperation(
-      StellarSDK.Operation.createAccount({
-        destination: to,
-        startingBalance: stellarAmount,
-      })
-    );
-  } else if (useClaimableBalance) {
+  if (useClaimableBalance) {
     txBuilder.addOperation(
       StellarSDK.Operation.createClaimableBalance({
         asset: stellarAsset,
@@ -240,13 +206,10 @@ export async function sendCryptoStellarBuild(
     txBuilder.addMemo(memo);
   }
 
-  txBuilder.setTimeout(180);
+  txBuilder.setTimeout(30);
 
   const builtTransaction = txBuilder.build();
-  const xdr =
-    typeof builtTransaction.toXdr === 'function'
-      ? builtTransaction.toXdr()
-      : builtTransaction.toXDR();
+  const xdr = builtTransaction.toXDR();
 
   const transaction: StellarSendTransaction = {
     id: generateTransactionId('stellar'),
@@ -284,7 +247,7 @@ export async function estimateStellarFees(): Promise<{
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
 
-  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
+  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
   try {
     const baseFee = await server.fetchBaseFee();
     const totalFee = baseFee.toString();
@@ -298,6 +261,96 @@ export async function estimateStellarFees(): Promise<{
   }
 }
 
+export async function signStellarTransaction(
+  transaction: StellarSendTransaction,
+  privateKey: string
+): Promise<string> {
+  const currentNetwork = useWalletStore.getState().network;
+  const config = getStellarConfig(currentNetwork);
+
+  const networkPassphrase =
+    config.network === 'PUBLIC' ? StellarSDK.Networks.PUBLIC : StellarSDK.Networks.TESTNET;
+
+  if (!privateKey.startsWith('S') || privateKey.length !== 56) {
+    throw new Error('Invalid Stellar private key format');
+  }
+
+  try {
+    const sourceKeypair = StellarSDK.Keypair.fromSecret(privateKey);
+
+    if (transaction.xdr) {
+      const tx = new StellarSDK.Transaction(transaction.xdr, networkPassphrase);
+      tx.sign(sourceKeypair);
+      return tx.toXDR();
+    }
+
+    const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+    const account = await server.loadAccount(transaction.from);
+    const txBuilder = new StellarSDK.TransactionBuilder(account, {
+      fee: transaction.fee || StellarSDK.BASE_FEE,
+      networkPassphrase,
+    });
+
+    transaction.operations.forEach(op => {
+      if (op.type === 'payment') {
+        txBuilder.addOperation(
+          StellarSDK.Operation.payment({
+            destination: op.destination,
+            asset: StellarSDK.Asset.native(),
+            amount: op.amount,
+          })
+        );
+      }
+    });
+
+    if (transaction.memo) {
+      txBuilder.addMemo(StellarSDK.Memo.text(transaction.memo));
+    }
+
+    txBuilder.setTimeout(30);
+    const builtTx = txBuilder.build();
+    builtTx.sign(sourceKeypair);
+    return builtTx.toXDR();
+  } catch (error) {
+    console.error('Failed to sign Stellar transaction:', error);
+    throw new Error(
+      `Transaction signing failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+    );
+  }
+}
+
+export async function sendCryptoStellarBroadcast(signedXDR: string): Promise<string> {
+  const currentNetwork = useWalletStore.getState().network;
+  const config = getStellarConfig(currentNetwork);
+
+  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
+  const networkPassphrase =
+    config.network === 'PUBLIC' ? StellarSDK.Networks.PUBLIC : StellarSDK.Networks.TESTNET;
+
+  const tx = new StellarSDK.Transaction(signedXDR, networkPassphrase);
+
+  try {
+    const response = await server.submitTransaction(tx);
+    return response.hash || 'unknown';
+  } catch (error: any) {
+    const sourceAddress = tx.source;
+    const txSeq = tx.sequence;
+    if (sourceAddress && txSeq) {
+      const baseSeqUsed = (BigInt(txSeq) - 1n).toString();
+      StellarSequenceTracker.rollbackSequence(sourceAddress, baseSeqUsed);
+
+      const errStr = String(error?.message || error);
+      if (
+        errStr.includes('tx_bad_seq') ||
+        errStr.includes('sequence_mismatch') ||
+        errStr.includes('bad sequence')
+      ) {
+        StellarSequenceTracker.reset(sourceAddress);
+      }
+    }
+    throw error;
+  }
+}
 export async function checkTrustlineExists(
   address: string,
   assetCode: string,
@@ -305,7 +358,7 @@ export async function checkTrustlineExists(
 ): Promise<boolean> {
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
-  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
+  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
 
   try {
     const account = await server.loadAccount(address);
@@ -325,7 +378,7 @@ export async function buildAddTrustlineTransaction(
 ): Promise<string> {
   const currentNetwork = useWalletStore.getState().network;
   const config = getStellarConfig(currentNetwork);
-  const server = StellarBaseService.getOrCreateServer(config.horizonUrl);
+  const server = new StellarSDK.Horizon.Server(config.horizonUrl);
   const networkPassphrase =
     config.network === 'PUBLIC' ? StellarSDK.Networks.PUBLIC : StellarSDK.Networks.TESTNET;
 
@@ -345,5 +398,5 @@ export async function buildAddTrustlineTransaction(
     .setTimeout(30)
     .build();
 
-  return typeof tx.toXdr === 'function' ? tx.toXdr() : tx.toXDR();
+  return tx.toXDR();
 }

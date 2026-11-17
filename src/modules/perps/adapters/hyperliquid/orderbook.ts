@@ -5,9 +5,9 @@ import { HyperliquidMapper } from './mapper';
 import type { HlL2BookResponse } from './mapper';
 
 export class HyperliquidOrderBook extends HttpTransport {
-  constructor(baseUrl: string = 'https://api.hyperliquid.xyz') {
+  constructor() {
     super({
-      baseUrl,
+      baseUrl: 'https://api.hyperliquid.xyz',
       timeoutMs: 15000,
       maxRetries: 3,
     });

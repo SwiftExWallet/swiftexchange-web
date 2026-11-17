@@ -19,54 +19,18 @@ export function isValidCandle(c: {
 }
 
 export function normalizeCandles(raw: any[]): CandleBar[] {
-  if (!Array.isArray(raw) || raw.length === 0) return [];
-
   const mapped = raw
-    .map(c => {
-      if (!c) return null;
-      const rawTime = c.startedAtTime
-        ? c.startedAtTime > 1e11
-          ? Math.floor(c.startedAtTime / 1000)
-          : c.startedAtTime
-        : Math.floor(new Date(c.startedAt || 0).getTime() / 1000);
-
-      const open = parseFloat(c.open);
-      const high = parseFloat(c.high);
-      const low = parseFloat(c.low);
-      const close = parseFloat(c.close);
-      const rawVol = c.usdVolume !== undefined ? c.usdVolume : c.baseTokenVolume || c.volume || 0;
-      const volume = parseFloat(rawVol) || 0;
-
-      if (
-        !rawTime ||
-        isNaN(rawTime) ||
-        !isFinite(rawTime) ||
-        isNaN(open) ||
-        isNaN(high) ||
-        isNaN(low) ||
-        isNaN(close) ||
-        !isFinite(open) ||
-        !isFinite(high) ||
-        !isFinite(low) ||
-        !isFinite(close) ||
-        open <= 0 ||
-        high <= 0 ||
-        low <= 0 ||
-        close <= 0
-      ) {
-        return null;
-      }
-
-      return {
-        time: rawTime,
-        open,
-        high: Math.max(high, open, close),
-        low: Math.min(low, open, close),
-        close,
-        volume: isFinite(volume) && volume >= 0 ? volume : 0,
-      };
-    })
-    .filter((c): c is CandleBar => c !== null)
+    .map(c => ({
+      time: c.startedAtTime
+        ? Math.floor(c.startedAtTime / 1000)
+        : Math.floor(new Date(c.startedAt).getTime() / 1000),
+      open: parseFloat(c.open),
+      high: parseFloat(c.high),
+      low: parseFloat(c.low),
+      close: parseFloat(c.close),
+      volume: parseFloat(c.usdVolume),
+    }))
+    .filter(isValidCandle)
     .sort((a, b) => a.time - b.time);
 
   if (mapped.length === 0) return [];
@@ -123,12 +87,5 @@ export function buildDatasetId(market: string, timeframe: string, candles: any[]
 
 export function candlesMatchMarket(candles: any[], selectedMarket: string): boolean {
   const ticker = candles[0]?.ticker || '';
-  if (!ticker) return true;
-  const cleanTicker = ticker.replace(/[-_]/g, '').toUpperCase();
-  const cleanMarket = selectedMarket.replace(/[-_]/g, '').toUpperCase();
-  return (
-    cleanTicker === cleanMarket ||
-    cleanMarket.startsWith(cleanTicker) ||
-    cleanTicker.startsWith(cleanMarket)
-  );
+  return !ticker || ticker === selectedMarket || selectedMarket.startsWith(ticker);
 }

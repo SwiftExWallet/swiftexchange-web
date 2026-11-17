@@ -5,16 +5,13 @@ export const EVM_CHAIN_NAME_MAP: Record<number, string> = {
   1: 'ETH',
   56: 'BSC',
   42161: 'Arbitrum',
-  97: 'BSC',
-  421614: 'Arbitrum',
-  11155111: 'ETH',
 };
 
 export function getEVMChainName(chainId: number): string {
   const name = EVM_CHAIN_NAME_MAP[chainId];
   if (!name) {
     throw new Error(
-      `Unsupported EVM chainId ${chainId}. Allowed chains: 1 (ETH), 56 (BSC), 42161 (Arbitrum), 97 (BSC Testnet), 421614 (Arb Sepolia), 11155111 (Sepolia).`
+      `Unsupported EVM chainId ${chainId}. Allowed chains: 1 (ETH), 56 (BSC), 42161 (Arbitrum).`
     );
   }
   return name;
@@ -31,8 +28,7 @@ export interface EVMWithdrawPayload {
 export async function signEVMWithdraw(
   signer: Signer,
   chainId: number,
-  params: EVMWithdrawPayload,
-  asterChain: 'Mainnet' | 'Testnet' = 'Mainnet'
+  params: EVMWithdrawPayload
 ): Promise<string> {
   if (!isAddress(params.destination)) {
     throw new Error(`Invalid destination EVM address: ${params.destination}`);
@@ -69,8 +65,20 @@ export async function signEVMWithdraw(
     amount: params.amount,
     fee: params.fee,
     nonce: params.nonce,
-    'aster chain': asterChain,
+    'aster chain': 'Mainnet',
   };
 
   return await signer.signTypedData(domain, types, value);
+}
+
+export class AsterSigner {
+  privateKey?: string;
+
+  constructor(privateKey?: string) {
+    this.privateKey = privateKey;
+  }
+
+  public async signRequest(): Promise<any> {
+    throw new Error('Not implemented: trading is not enabled yet for Aster');
+  }
 }
