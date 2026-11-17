@@ -494,7 +494,10 @@ export class SoroswapService {
       throw new Error('Backend network passphrase does not match this app network');
     }
 
-    const transaction = StellarSDK.TransactionBuilder.fromXDR(prepared.xdr, this.networkPassphrase);
+    const transaction =
+      typeof (StellarSDK.TransactionBuilder as any).fromXdr === 'function'
+        ? (StellarSDK.TransactionBuilder as any).fromXdr(prepared.xdr, this.networkPassphrase)
+        : StellarSDK.TransactionBuilder.fromXDR(prepared.xdr, this.networkPassphrase);
 
     if (!(transaction instanceof StellarSDK.Transaction)) {
       throw new Error('Backend returned an unsupported transaction envelope');

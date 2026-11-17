@@ -160,7 +160,7 @@ describe('SoroswapService', () => {
       })
         .setTimeout(30)
         .build();
-      const dummyXdr = dummyTx.toXDR();
+      const dummyXdr = typeof dummyTx.toXdr === 'function' ? dummyTx.toXdr() : dummyTx.toXDR();
 
       let capturedBody: any = null;
       global.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {

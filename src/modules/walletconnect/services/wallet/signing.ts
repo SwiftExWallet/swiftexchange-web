@@ -299,12 +299,12 @@ export async function signStellarPayload(
           .addOperation(
             Operation.manageData({
               name: 'yourapp auth',
-              value: Buffer.from(hash),
+              value: new Uint8Array(hash),
             })
           )
           .build();
 
-        const unsignedXdr = tx.toXDR();
+        const unsignedXdr = typeof tx.toXdr === 'function' ? tx.toXdr() : tx.toXDR();
         const result = await injectedFreighter.signTransaction(unsignedXdr, {
           networkPassphrase,
           network: isTestnet ? 'TESTNET' : 'PUBLIC',
@@ -405,12 +405,12 @@ export async function signStellarPayload(
       .addOperation(
         Operation.manageData({
           name: 'yourapp auth',
-          value: Buffer.from(hash),
+          value: new Uint8Array(hash),
         })
       )
       .build();
 
-    const unsignedXdr = tx.toXDR();
+    const unsignedXdr = typeof tx.toXdr === 'function' ? tx.toXdr() : tx.toXDR();
     const signParams = {
       xdr: unsignedXdr,
       network: isTestnet ? 'TESTNET' : 'PUBLIC',

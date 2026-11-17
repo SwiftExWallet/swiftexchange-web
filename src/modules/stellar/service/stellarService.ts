@@ -243,7 +243,10 @@ export async function sendCryptoStellarBuild(
   txBuilder.setTimeout(180);
 
   const builtTransaction = txBuilder.build();
-  const xdr = builtTransaction.toXDR();
+  const xdr =
+    typeof builtTransaction.toXdr === 'function'
+      ? builtTransaction.toXdr()
+      : builtTransaction.toXDR();
 
   const transaction: StellarSendTransaction = {
     id: generateTransactionId('stellar'),
@@ -342,5 +345,5 @@ export async function buildAddTrustlineTransaction(
     .setTimeout(30)
     .build();
 
-  return tx.toXDR();
+  return typeof tx.toXdr === 'function' ? tx.toXdr() : tx.toXDR();
 }
