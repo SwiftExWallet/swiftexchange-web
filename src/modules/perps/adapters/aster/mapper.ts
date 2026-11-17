@@ -1,11 +1,16 @@
+import BigNumber from 'bignumber.js';
+
 import type { Candle, Market, OrderBook, Trade } from '../../core/models';
+import { useLeverageStore } from '../../core/stores/leverageStore';
 import type { AssetCtx } from '../../core/stores/tickerStore';
+import { getCurrentPerpNetwork } from './constants';
 
 export class AsterMapper {
   static mapMarket(asterExchangeInfoSymbol: any): Market {
     const rawSymbol = asterExchangeInfoSymbol.symbol || '';
     const baseAsset = asterExchangeInfoSymbol.baseAsset || rawSymbol.replace('USDT', '');
     const quoteAsset = asterExchangeInfoSymbol.quoteAsset || 'USDT';
+    const pairSymbol = `${baseAsset}-${quoteAsset}`;
 
     let tickSize = 0;
     let stepSize = 0;
@@ -25,15 +30,28 @@ export class AsterMapper {
       }
     }
 
+    // Dynamic leverage lookup from leverageStore (MKT-05)
+    // If brackets are available, use their maximum initialLeverage; otherwise fallback to 20 on testnet / 50 on mainnet
+    const isTestnet = getCurrentPerpNetwork() === 'testnet';
+    const fallbackMax = isTestnet ? 20 : 50;
+
+    const storedBrackets =
+      useLeverageStore.getState().bracketsBySymbol[pairSymbol] ||
+      useLeverageStore.getState().bracketsBySymbol[rawSymbol];
+    const maxLeverage =
+      storedBrackets && storedBrackets.length > 0
+        ? Math.max(...storedBrackets.map(b => b.initialLeverage))
+        : fallbackMax;
+
     return {
-      symbol: `${baseAsset}-${quoteAsset}`,
+      symbol: pairSymbol,
       baseAsset,
       quoteAsset,
       tickSize,
       stepSize,
       minOrderSize,
       minNotional,
-      maxLeverage: 50,
+      maxLeverage,
     };
   }
 
@@ -161,11 +179,13 @@ export class AsterMapper {
   }
 
   static mapAccountBalance(asterAsset: any): import('../../core/models').AccountBalance {
+    const totalBn = new BigNumber(asterAsset.walletBalance || '0');
+    const availBn = new BigNumber(asterAsset.availableBalance || '0');
     return {
       asset: asterAsset.asset,
-      total: String(asterAsset.walletBalance),
-      available: String(asterAsset.availableBalance),
-      locked: String(Number(asterAsset.walletBalance) - Number(asterAsset.availableBalance)),
+      total: String(asterAsset.walletBalance ?? '0'),
+      available: String(asterAsset.availableBalance ?? '0'),
+      locked: totalBn.minus(availBn).toString(),
     };
   }
 

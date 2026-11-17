@@ -150,7 +150,7 @@ export const PortfolioCardsGrid: React.FC<PortfolioCardsGridProps> = ({
                 </div>
               </div>
               <div className="text-right">
-                {pnl.change !== 0 && (
+                {pnl.change !== 0 ? (
                   <span
                     className={`text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-0.5 border ${
                       pnl.change >= 0
@@ -160,10 +160,20 @@ export const PortfolioCardsGrid: React.FC<PortfolioCardsGridProps> = ({
                   >
                     {pnl.change >= 0 ? '▲' : '▼'} {Math.abs(pnl.percent).toFixed(1)}%
                   </span>
+                ) : (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5 border bg-(--color-bg-tertiary) text-(--color-text-secondary) border-(--color-border)">
+                    0.0%
+                  </span>
                 )}
-                {percentageOfTotal > 0 && (
+                {tab !== 'total' ? (
                   <div className="text-[10px] font-semibold text-(--color-text-secondary) mt-0.5">
-                    {percentageOfTotal.toFixed(0)}% of total
+                    {percentageOfTotal > 0
+                      ? `${percentageOfTotal.toFixed(0)}% of total`
+                      : '0% of total'}
+                  </div>
+                ) : (
+                  <div className="text-[10px] font-semibold text-(--color-text-secondary) mt-0.5">
+                    100% portfolio
                   </div>
                 )}
               </div>

@@ -1,4 +1,4 @@
-import { type FC, type ReactNode, createContext, useContext, useMemo, useReducer } from 'react';
+import { createContext, useContext } from 'react';
 
 export type ActionType = 'SEND' | 'RECEIVE' | 'BRIDGE' | 'SWAP';
 
@@ -12,7 +12,7 @@ export interface AssetSelectorState {
   onSelect: ((asset: any) => void) | null;
 }
 
-interface OpenOptions {
+export interface OpenOptions {
   onSelect?: (asset: any) => void;
   defaultNetwork?: string | number;
   forceNetwork?: string | number;
@@ -20,16 +20,17 @@ interface OpenOptions {
   showAllStellarAssets?: boolean;
 }
 
-interface AssetSelectorDispatch {
+export interface AssetSelectorDispatch {
   openAssetSelector: (type: ActionType, options?: OpenOptions) => void;
   closeAssetSelector: () => void;
 }
-const StateContext = createContext<AssetSelectorState | undefined>(undefined);
-const DispatchContext = createContext<AssetSelectorDispatch | undefined>(undefined);
+export const stateContext = createContext<AssetSelectorState | undefined>(undefined);
+export const dispatchContext = createContext<AssetSelectorDispatch | undefined>(undefined);
 
-type Action = { type: 'OPEN'; actionType: ActionType; options?: OpenOptions } | { type: 'CLOSE' };
+export type Action =
+  { type: 'OPEN'; actionType: ActionType; options?: OpenOptions } | { type: 'CLOSE' };
 
-const initialState: AssetSelectorState = {
+export const initialAssetSelectorState: AssetSelectorState = {
   isOpen: false,
   actionType: 'SEND',
   defaultNetwork: null,
@@ -39,7 +40,10 @@ const initialState: AssetSelectorState = {
   onSelect: null,
 };
 
-function reducer(state: AssetSelectorState, action: Action): AssetSelectorState {
+export function assetSelectorReducer(
+  state: AssetSelectorState,
+  action: Action
+): AssetSelectorState {
   switch (action.type) {
     case 'OPEN':
       return {
@@ -52,43 +56,23 @@ function reducer(state: AssetSelectorState, action: Action): AssetSelectorState 
         onSelect: action.options?.onSelect ?? null,
       };
     case 'CLOSE':
-      return initialState;
+      return initialAssetSelectorState;
     default:
       return state;
   }
 }
 
-export const AssetSelectorProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(reducer, initialState);
-  const actions = useMemo<AssetSelectorDispatch>(
-    () => ({
-      openAssetSelector: (type: ActionType, options?: OpenOptions) =>
-        dispatch({ type: 'OPEN', actionType: type, options }),
-      closeAssetSelector: () => dispatch({ type: 'CLOSE' }),
-    }),
-    []
-  );
-
-  return (
-    <DispatchContext.Provider value={actions}>
-      <StateContext.Provider value={state}>{children}</StateContext.Provider>
-    </DispatchContext.Provider>
-  );
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
 export function useAssetSelectorModal(): AssetSelectorState & AssetSelectorDispatch {
-  const state = useContext(StateContext);
-  const dispatch = useContext(DispatchContext);
+  const state = useContext(stateContext);
+  const dispatch = useContext(dispatchContext);
   if (!state || !dispatch) {
     throw new Error('useAssetSelectorModal must be used within AssetSelectorProvider');
   }
   return { ...state, ...dispatch };
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 export function useAssetSelectorDispatch(): AssetSelectorDispatch {
-  const dispatch = useContext(DispatchContext);
+  const dispatch = useContext(dispatchContext);
   if (!dispatch) {
     throw new Error('useAssetSelectorDispatch must be used within AssetSelectorProvider');
   }

@@ -2,6 +2,7 @@ import {
   Infinity as InfinityIcon,
   BarChart2,
   CandlestickChart,
+  Flame,
   History,
   Landmark,
   LayoutDashboard,
@@ -27,6 +28,7 @@ interface NavItem {
   isRestricted?: boolean;
   badge?: string;
   badgeColor?: string;
+  isHot?: boolean;
 }
 
 interface NavSection {
@@ -110,8 +112,7 @@ const Sidebar: FC = () => {
           label: 'Perps',
           icon: <InfinityIcon className="w-[17px] h-[17px]" />,
           isRestricted: isDydxRestricted,
-          badge: '20x',
-          badgeColor: 'bg-amber-500/20 text-amber-400 border border-amber-500/30',
+          isHot: true,
         },
       ],
     },
@@ -157,27 +158,23 @@ const Sidebar: FC = () => {
 
     if (isActive) {
       const activeContent = (
-        <div className="relative inline-flex p-[1.5px] rounded-lg overflow-hidden w-full shadow-[0_0_16px_rgba(6,182,212,0.35)] hover:shadow-[0_0_22px_rgba(59,130,246,0.5)] transition-all duration-300 group cursor-pointer">
-          {/* Distinctive Cyber Neon Rotating Gradient Beam (Cyan -> Blue -> Violet) */}
-          <div className="absolute -inset-[200%] animate-[spin_4s_linear_infinite] bg-[conic-gradient(from_0deg_at_50%_50%,transparent_0%,#06b6d4_20%,#3b82f6_45%,#a855f7_70%,transparent_85%)] will-change-transform opacity-100" />
-
-          {/* Frosted Dark Core */}
-          <div
-            style={{ background: 'var(--color-bg-secondary)' }}
-            className="relative w-full flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-[6.5px] bg-gradient-to-b from-[var(--color-bg-secondary)] to-[var(--color-bg-tertiary)]/90 backdrop-blur-sm select-none"
-          >
-            {item.badge && !item.isRestricted && (
-              <span className="absolute top-1 right-1 text-[8px] font-mono font-bold px-1 py-0.5 rounded-full leading-none scale-90 bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-xs">
-                {item.badge}
-              </span>
-            )}
-            <span className="shrink-0 scale-110 text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.7)] transition-transform">
-              {item.icon}
+        <div
+          style={{ background: 'var(--color-bg-tertiary)' }}
+          className="relative w-full flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg border border-[var(--color-border)] shadow-xs select-none cursor-pointer"
+        >
+          {item.isHot && !item.isRestricted ? (
+            <span className="absolute top-1 right-1 leading-none text-orange-400">
+              <Flame className="w-3 h-3 fill-orange-400 text-orange-400" />
             </span>
-            <span className="text-[9.5px] leading-tight font-semibold text-center tracking-tight truncate max-w-full text-[var(--color-text-primary)]">
-              {item.label}
+          ) : item.badge && !item.isRestricted ? (
+            <span className="absolute top-1 right-1 text-[8px] font-mono font-medium px-1 py-0.5 rounded leading-none bg-blue-500/15 text-blue-400 border border-blue-500/25">
+              {item.badge}
             </span>
-          </div>
+          ) : null}
+          <span className="shrink-0 text-[var(--color-text-primary)]">{item.icon}</span>
+          <span className="text-[9.5px] leading-tight font-semibold text-center tracking-tight truncate max-w-full text-[var(--color-text-primary)]">
+            {item.label}
+          </span>
         </div>
       );
 
@@ -211,11 +208,12 @@ const Sidebar: FC = () => {
 
     const content = (
       <>
-        {/* Restricted overlay icon */}
         {item.isRestricted && <X className="w-3.5 h-3.5 absolute top-1 right-1 text-rose-400" />}
-
-        {/* Micro badge (e.g. 20x for Perps) */}
-        {item.badge && !item.isRestricted && (
+        {item.isHot && !item.isRestricted ? (
+          <span className="absolute top-1 right-1 leading-none text-orange-500 drop-shadow-[0_0_6px_rgba(249,115,22,0.8)] animate-pulse">
+            <Flame className="w-3.5 h-3.5 fill-orange-500 text-orange-500" />
+          </span>
+        ) : item.badge && !item.isRestricted ? (
           <span
             className={`absolute top-1 right-1 text-[8px] font-mono font-bold px-1 py-0.5 rounded-full leading-none scale-90 ${
               item.badgeColor || 'bg-brand-primary/20 text-brand-primary'
@@ -223,7 +221,7 @@ const Sidebar: FC = () => {
           >
             {item.badge}
           </span>
-        )}
+        ) : null}
 
         <span className="shrink-0 transition-transform duration-200 group-hover:scale-105">
           {item.icon}
@@ -280,7 +278,6 @@ const Sidebar: FC = () => {
           ${isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        {/* Exchange Logo Branding */}
         <div className="h-14 shrink-0 flex flex-col items-center justify-center border-b border-[var(--color-border)]/40 relative">
           <Link
             to={ROUTES.DASHBOARD}
@@ -291,7 +288,6 @@ const Sidebar: FC = () => {
           </Link>
         </div>
 
-        {/* Navigation list with clean exchange groupings */}
         <nav className="flex-1 px-1.5 py-2 space-y-1.5 overflow-y-auto hide-scrollbar">
           {navSections.map((section, idx) => (
             <div key={idx} className="space-y-0.5">
@@ -302,7 +298,6 @@ const Sidebar: FC = () => {
         </nav>
       </aside>
 
-      {/* Desktop spacer */}
       <div className="hidden lg:block shrink-0 w-16" />
     </>
   );

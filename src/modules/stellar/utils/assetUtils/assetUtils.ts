@@ -52,10 +52,10 @@ export const buildTrustlineTransaction = async (
         limit: limit,
       })
     )
-    .setTimeout(30)
+    .setTimeout(180)
     .build();
 
-  return transaction.toXDR();
+  return typeof transaction.toXdr === 'function' ? transaction.toXdr() : transaction.toXDR();
 };
 
 export const signAndSubmitTrustline = async (
