@@ -11,6 +11,8 @@ export const ROUTES = {
   TRADING_PERPS: '/trade/perpetuals',
   MARKETS: '/markets',
   PORTFOLIO: '/stellar/portfolio',
+  VAULTS: '/vaults',
+  EARN: '/earn',
   SETTINGS: '/settings',
   STATUS: '/status',
 } as const;
