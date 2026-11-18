@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import { HttpTransport, WebSocketTransport } from '@nktkas/hyperliquid';
 import {
+  frontendOpenOrders,
   clearinghouseState as getClearinghouseState,
   spotClearinghouseState as getSpotClearinghouseState,
 } from '@nktkas/hyperliquid/api/info';
@@ -13,7 +14,7 @@ import {
 } from '@nktkas/hyperliquid/api/subscription';
 
 import { useExchangeManager } from '../../../core/ExchangeManager';
-import type { AccountBalance } from '../../../core/models';
+import type { AccountBalance, Order } from '../../../core/models';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useHistoryStore } from '../../../core/stores/historyStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
@@ -144,6 +145,42 @@ export function mapHyperliquidPositions(
     .filter(Boolean);
 }
 
+export function mapHyperliquidOrders(orderList: any[]): Order[] {
+  if (!Array.isArray(orderList)) return [];
+  return orderList.map((o: any) => {
+    const rawCoin = o.coin || '';
+    const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
+    let type = 'limit';
+    const ot = (o.orderType || '').toLowerCase();
+    if (ot.includes('stop market') || ot === 'stop') {
+      type = 'stop_market';
+    } else if (ot.includes('take profit market') || ot.includes('tp market')) {
+      type = 'take_profit_market';
+    } else if (ot.includes('stop limit')) {
+      type = 'stop';
+    } else if (ot.includes('take profit limit')) {
+      type = 'take_profit';
+    } else if (ot.includes('market')) {
+      type = 'market';
+    }
+
+    return {
+      id: String(o.oid),
+      symbol,
+      type,
+      rawType: o.orderType || type,
+      side: o.side === 'A' ? ('sell' as const) : ('buy' as const),
+      price: o.limitPx || o.triggerPx || '0',
+      size: o.sz || '0',
+      filledSize: '0',
+      status: 'new' as const,
+      reduceOnly: Boolean(o.reduceOnly),
+      timestamp: o.timestamp || Date.now(),
+      stopPrice: o.triggerPx ? String(o.triggerPx) : undefined,
+    };
+  });
+}
+
 export const useHyperliquidDataStream = (userAddr: string | null) => {
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const currentNetwork = useExchangeManager(s => s.currentNetwork);
@@ -217,7 +254,7 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
           if (!isMounted) return;
           try {
             const httpTransport = new HttpTransport({ isTestnet });
-            const [snapshotCh, snapshotSpot] = await Promise.all([
+            const [snapshotCh, snapshotSpot, snapshotOrders] = await Promise.all([
               getClearinghouseState({ transport: httpTransport }, { user: formattedUser }).catch(
                 () => null
               ),
@@ -225,6 +262,9 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
                 { transport: httpTransport },
                 { user: formattedUser }
               ).catch(() => null),
+              frontendOpenOrders({ transport: httpTransport }, { user: formattedUser }).catch(
+                () => null
+              ),
             ]);
 
             if (snapshotCh) {
@@ -232,6 +272,9 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
             }
             if (snapshotSpot) {
               processSpotState(snapshotSpot);
+            }
+            if (Array.isArray(snapshotOrders)) {
+              useOrderStore.getState().setOrders(mapHyperliquidOrders(snapshotOrders));
             }
           } catch {
             void 0;
@@ -284,25 +327,18 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
             { user: formattedUser },
             (event: any) => {
               if (!isMounted || !event) return;
-              const orderList = event.orders || [];
-              const orders = orderList.map((o: any) => {
-                const rawCoin = o.coin || '';
-                const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
-                return {
-                  id: String(o.oid),
-                  symbol,
-                  type: 'limit' as const,
-                  side: o.side === 'A' ? ('sell' as const) : ('buy' as const),
-                  price: o.limitPx || '0',
-                  size: o.sz || '0',
-                  filledSize: '0',
-                  status: 'new' as const,
-                  reduceOnly: Boolean(o.reduceOnly),
-                  timestamp: o.timestamp || Date.now(),
-                };
-              });
-
-              useOrderStore.getState().setOrders(orders);
+              const mappedWsOrders = mapHyperliquidOrders(event.orders || []);
+              const existingOrders = Object.values(useOrderStore.getState().orders || {});
+              const existingTriggers = existingOrders.filter(
+                o =>
+                  o.stopPrice ||
+                  (o.rawType &&
+                    (o.rawType.toLowerCase().includes('stop') ||
+                      o.rawType.toLowerCase().includes('profit')))
+              );
+              const newIds = new Set(mappedWsOrders.map(o => o.id));
+              const retainedTriggers = existingTriggers.filter(o => !newIds.has(o.id));
+              useOrderStore.getState().setOrders([...mappedWsOrders, ...retainedTriggers]);
             },
             { onError: () => {} }
           );

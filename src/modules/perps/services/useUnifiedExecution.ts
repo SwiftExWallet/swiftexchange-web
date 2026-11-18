@@ -43,6 +43,8 @@ export interface UnifiedOrderParams {
   currentPrice?: number;
   workingType?: 'MARK_PRICE' | 'CONTRACT_PRICE';
   closePosition?: boolean;
+  attachedTpPrice?: string | number;
+  attachedSlPrice?: string | number;
 }
 
 export function useUnifiedExecution() {

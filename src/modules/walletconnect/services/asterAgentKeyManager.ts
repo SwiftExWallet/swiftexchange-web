@@ -57,20 +57,6 @@ interface EIP1193Provider {
   };
 }
 
-const APPROVE_AGENT_TYPES = {
-  ApproveAgent: [
-    { name: 'AgentName', type: 'string' },
-    { name: 'AgentAddress', type: 'string' },
-    { name: 'Expired', type: 'uint256' },
-    { name: 'CanSpotTrade', type: 'bool' },
-    { name: 'CanPerpTrade', type: 'bool' },
-    { name: 'CanWithdraw', type: 'bool' },
-    { name: 'AsterChain', type: 'string' },
-    { name: 'User', type: 'string' },
-    { name: 'Nonce', type: 'uint256' },
-  ],
-};
-
 // ============================================================================
 // Internal Helpers (Storage, Network & Chain Resolution)
 // ============================================================================
@@ -179,18 +165,60 @@ function buildDelAgentData(
   };
 }
 
+function buildApproveAgentSortedQuery(params: {
+  user: string;
+  agentName: string;
+  agentAddress: string;
+  nonce: string | number;
+  expired: string | number;
+  signatureChainId: string | number;
+  canSpotTrade: boolean;
+  canPerpTrade: boolean;
+  canWithdraw: boolean;
+}): string {
+  const p: Record<string, string> = {
+    user: getAddress(params.user),
+    agentName: params.agentName,
+    agentAddress: getAddress(params.agentAddress),
+    nonce: String(params.nonce),
+    expired: String(params.expired),
+    signatureChainId: String(params.signatureChainId),
+    canSpotTrade: String(params.canSpotTrade),
+    canPerpTrade: String(params.canPerpTrade),
+    canWithdraw: String(params.canWithdraw),
+  };
+  const keys = Object.keys(p).sort();
+  return keys.map(k => `${k}=${p[k]}`).join('&');
+}
+
 function buildApproveAgentData(
   evmAddress: string,
   agentAddress: string,
   nonce: number,
   expired: number,
   chainId: number,
-  asterChain: string = 'Mainnet',
   permissions?: AgentPermissions
 ) {
+  const msg = buildApproveAgentSortedQuery({
+    user: evmAddress,
+    agentName: AGENT_NAME,
+    agentAddress,
+    nonce,
+    expired,
+    signatureChainId: chainId,
+    canSpotTrade: permissions?.canSpotTrade ?? true,
+    canPerpTrade: permissions?.canPerpTrade ?? true,
+    canWithdraw: permissions?.canWithdraw ?? false,
+  });
+
   return {
-    domain: getAsterAgentDomain(chainId),
-    primaryType: 'ApproveAgent' as const,
+    domain: {
+      name: 'AsterSignTransaction',
+      version: '1',
+      chainId,
+      verifyingContract: ZERO_ADDRESS,
+    },
+    primaryType: 'Message' as const,
     types: {
       EIP712Domain: [
         { name: 'name', type: 'string' },
@@ -198,19 +226,9 @@ function buildApproveAgentData(
         { name: 'chainId', type: 'uint256' },
         { name: 'verifyingContract', type: 'address' },
       ],
-      ...APPROVE_AGENT_TYPES,
+      Message: [{ name: 'msg', type: 'string' }],
     },
-    message: {
-      AgentName: AGENT_NAME,
-      AgentAddress: agentAddress,
-      Expired: expired,
-      CanSpotTrade: permissions?.canSpotTrade ?? true,
-      CanPerpTrade: permissions?.canPerpTrade ?? true,
-      CanWithdraw: permissions?.canWithdraw ?? false,
-      AsterChain: asterChain,
-      User: getAddress(evmAddress),
-      Nonce: nonce,
-    },
+    message: { msg },
   };
 }
 
@@ -230,24 +248,22 @@ function assertWellFormedSignature(signature: string): void {
 
 export async function submitApproveAgent(params: SubmitApproveAgentParams): Promise<void> {
   const isTestnet = params.network === 'testnet' || TESTNET_CHAIN_IDS.has(params.signatureChainId);
-  const asterChain = params.asterChain || (isTestnet ? 'Testnet' : 'Mainnet');
 
   const queryParams = new URLSearchParams({
+    user: getAddress(params.user),
     agentName: params.agentName,
     agentAddress: getAddress(params.agentAddress),
-    expired: params.expired,
+    nonce: String(params.nonce),
+    expired: String(params.expired),
+    signatureChainId: String(params.signatureChainId),
     canSpotTrade: String(params.canSpotTrade),
     canPerpTrade: String(params.canPerpTrade),
     canWithdraw: String(params.canWithdraw),
-    asterChain,
-    user: getAddress(params.user),
-    nonce: params.nonce,
     signature: params.signature,
-    signatureChainId: String(params.signatureChainId),
   });
 
   const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
-  const url = `${baseUrl}/fapi/v3/approveAgent?${queryParams.toString()}`;
+  const url = `${baseUrl}/fapi/v3/registerAndApproveAgent?${queryParams.toString()}`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -540,19 +556,11 @@ export async function deriveAsterAgentKey(
   const nonce = Date.now() * 1000;
   const expired = Date.now() + AGENT_VALIDITY_MS;
 
-  const typedData = buildApproveAgentData(
-    evmAddress,
-    agentAddress,
-    nonce,
-    expired,
-    chainId,
-    asterChain,
-    {
-      canSpotTrade: true,
-      canPerpTrade: true,
-      canWithdraw: false,
-    }
-  );
+  const typedData = buildApproveAgentData(evmAddress, agentAddress, nonce, expired, chainId, {
+    canSpotTrade: true,
+    canPerpTrade: true,
+    canWithdraw: false,
+  });
 
   const signature = await signTypedData(provider, evmAddress, typedData);
 
@@ -560,7 +568,7 @@ export async function deriveAsterAgentKey(
 
   const recovered = verifyTypedData(
     typedData.domain,
-    APPROVE_AGENT_TYPES,
+    { Message: [{ name: 'msg', type: 'string' }] },
     typedData.message,
     signature
   );

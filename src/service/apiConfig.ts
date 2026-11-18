@@ -1,7 +1,7 @@
 import { getAccessToken } from '../modules/walletconnect/services/Siweauthservice';
 
-export const IS_DEV = import.meta.env.DEV;
-export const IS_PROD = import.meta.env.PROD;
+export const IS_DEV = Boolean(import.meta.env?.DEV);
+export const IS_PROD = Boolean(import.meta.env?.PROD);
 
 export function getValidDeviceToken(): string | null {
   if (typeof window === 'undefined') return null;

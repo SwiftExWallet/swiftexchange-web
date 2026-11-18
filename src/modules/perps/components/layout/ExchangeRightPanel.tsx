@@ -228,6 +228,20 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         const isTrailingStop = payload.type === 'TRAILING_STOP_MARKET';
         const isPostOnly = payload.type === 'POST_ONLY';
 
+        const attachedTp =
+          payload.attachedTpEnabled &&
+          payload.attachedTpPrice &&
+          new BigNumber(payload.attachedTpPrice).gt(0)
+            ? formatPriceToTick(payload.attachedTpPrice, tickSize)
+            : undefined;
+
+        const attachedSl =
+          payload.attachedSlEnabled &&
+          payload.attachedSlPrice &&
+          new BigNumber(payload.attachedSlPrice).gt(0)
+            ? formatPriceToTick(payload.attachedSlPrice, tickSize)
+            : undefined;
+
         res = await executeOrder({
           symbol: payload.symbol,
           side: payload.side,
@@ -240,65 +254,59 @@ export const ExchangeOrderFormPanel: React.FC = () => {
           callbackRate: isTrailingStop ? payload.callbackRate || '1.0' : undefined,
           activationPrice: isTrailingStop ? formattedActivation : undefined,
           currentPrice: currentMarketPrice,
+          attachedTpPrice: attachedTp,
+          attachedSlPrice: attachedSl,
         });
 
-        if (
-          payload.attachedTpEnabled &&
-          payload.attachedTpPrice &&
-          new BigNumber(payload.attachedTpPrice).gt(0)
-        ) {
-          const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
-          const formattedTp = formatPriceToTick(payload.attachedTpPrice, tickSize);
-          try {
-            await executeOrder({
-              symbol: payload.symbol,
-              side: oppositeSide,
-              type: 'TAKE_PROFIT_MARKET',
-              price: '0',
-              size: formattedQty || payload.size,
-              reduceOnly: true,
-              stopPrice: formattedTp,
-              workingType: payload.attachedTpTrigger || 'MARK_PRICE',
-              currentPrice: currentMarketPrice,
-            });
-          } catch (tpErr: any) {
-            console.warn('Attached Take Profit order notice:', tpErr);
-            useNotificationStore.getState().showToast({
-              type: 'SYSTEM',
-              status: 'error',
-              title: 'Take Profit Failed',
-              message: tpErr?.message || 'Failed to place attached Take Profit order',
-            });
+        if (currentExchange !== 'hyperliquid') {
+          if (attachedTp) {
+            const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
+            try {
+              await executeOrder({
+                symbol: payload.symbol,
+                side: oppositeSide,
+                type: 'TAKE_PROFIT_MARKET',
+                price: '0',
+                size: formattedQty || payload.size,
+                reduceOnly: true,
+                stopPrice: attachedTp,
+                workingType: payload.attachedTpTrigger || 'MARK_PRICE',
+                currentPrice: currentMarketPrice,
+              });
+            } catch (tpErr: any) {
+              console.warn('Attached Take Profit order notice:', tpErr);
+              useNotificationStore.getState().showToast({
+                type: 'SYSTEM',
+                status: 'error',
+                title: 'Take Profit Failed',
+                message: tpErr?.message || 'Failed to place attached Take Profit order',
+              });
+            }
           }
-        }
 
-        if (
-          payload.attachedSlEnabled &&
-          payload.attachedSlPrice &&
-          new BigNumber(payload.attachedSlPrice).gt(0)
-        ) {
-          const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
-          const formattedSl = formatPriceToTick(payload.attachedSlPrice, tickSize);
-          try {
-            await executeOrder({
-              symbol: payload.symbol,
-              side: oppositeSide,
-              type: 'STOP_MARKET',
-              price: '0',
-              size: formattedQty || payload.size,
-              reduceOnly: true,
-              stopPrice: formattedSl,
-              workingType: payload.attachedSlTrigger || 'MARK_PRICE',
-              currentPrice: currentMarketPrice,
-            });
-          } catch (slErr: any) {
-            console.warn('Attached Stop Loss order notice:', slErr);
-            useNotificationStore.getState().showToast({
-              type: 'SYSTEM',
-              status: 'error',
-              title: 'Stop Loss Failed',
-              message: slErr?.message || 'Failed to place attached Stop Loss order',
-            });
+          if (attachedSl) {
+            const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
+            try {
+              await executeOrder({
+                symbol: payload.symbol,
+                side: oppositeSide,
+                type: 'STOP_MARKET',
+                price: '0',
+                size: formattedQty || payload.size,
+                reduceOnly: true,
+                stopPrice: attachedSl,
+                workingType: payload.attachedSlTrigger || 'MARK_PRICE',
+                currentPrice: currentMarketPrice,
+              });
+            } catch (slErr: any) {
+              console.warn('Attached Stop Loss order notice:', slErr);
+              useNotificationStore.getState().showToast({
+                type: 'SYSTEM',
+                status: 'error',
+                title: 'Stop Loss Failed',
+                message: slErr?.message || 'Failed to place attached Stop Loss order',
+              });
+            }
           }
         }
       }

@@ -30,6 +30,8 @@ export interface HyperliquidOrderRequest {
   timeInForce?: 'GTC' | 'IOC' | 'FOK' | 'GTX' | 'ALO' | 'FrontendMarket';
   stopPrice?: string | number;
   currentPrice?: number;
+  attachedTpPrice?: string | number;
+  attachedSlPrice?: string | number;
 }
 
 let cachedUniverse: { name: string; szDecimals: number; maxLeverage: number }[] | null = null;
@@ -172,18 +174,60 @@ export async function placeHyperliquidOrder(
     }
   }
 
-  const payload = {
-    orders: [
-      {
+  const ordersList: any[] = [
+    {
+      a: assetId,
+      b: isBuy,
+      p: limitPx,
+      s: sizeFormatted,
+      r: reduceOnly,
+      t: orderTypeObj,
+    },
+  ];
+
+  let grouping: 'na' | 'normalTpsl' = 'na';
+
+  if (!reduceOnly && (req.attachedTpPrice || req.attachedSlPrice)) {
+    grouping = 'normalTpsl';
+    if (req.attachedTpPrice && new BigNumber(req.attachedTpPrice).gt(0)) {
+      const tpPx = formatHyperliquidPrice(req.attachedTpPrice, szDecimals);
+      ordersList.push({
         a: assetId,
-        b: isBuy,
-        p: limitPx,
+        b: !isBuy,
+        p: tpPx,
         s: sizeFormatted,
-        r: reduceOnly,
-        t: orderTypeObj,
-      },
-    ],
-    grouping: 'na' as const,
+        r: true,
+        t: {
+          trigger: {
+            isMarket: true,
+            triggerPx: tpPx,
+            tpsl: 'tp',
+          },
+        },
+      });
+    }
+    if (req.attachedSlPrice && new BigNumber(req.attachedSlPrice).gt(0)) {
+      const slPx = formatHyperliquidPrice(req.attachedSlPrice, szDecimals);
+      ordersList.push({
+        a: assetId,
+        b: !isBuy,
+        p: slPx,
+        s: sizeFormatted,
+        r: true,
+        t: {
+          trigger: {
+            isMarket: true,
+            triggerPx: slPx,
+            tpsl: 'sl',
+          },
+        },
+      });
+    }
+  }
+
+  const payload = {
+    orders: ordersList,
+    grouping,
   };
 
   const response: any = await order({ transport, wallet: wallet as any }, payload);
