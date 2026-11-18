@@ -40,6 +40,7 @@ vi.mock('@stellar/stellar-sdk', () => {
   const mockSetTimeout = vi.fn().mockReturnThis();
   const mockBuild = vi.fn().mockReturnValue({
     toXDR: () => 'mock_xdr',
+    toXdr: () => 'mock_xdr',
   });
 
   class MockTransactionBuilder {
@@ -59,6 +60,7 @@ vi.mock('@stellar/stellar-sdk', () => {
     Asset: MockAsset,
     BASE_FEE: '100',
     Networks: {
+      PUBLIC: 'Public Global Stellar Network ; September 2015',
       TESTNET: 'Test SDF Network ; September 2015',
     },
     Operation: {
@@ -68,9 +70,13 @@ vi.mock('@stellar/stellar-sdk', () => {
   };
 });
 
-vi.mock('../../../../walletconnect/config/chains', () => ({
-  getStellarConfig: vi.fn(() => ({ networkPassphrase: 'mock_passphrase' })),
-}));
+vi.mock('../../../../walletconnect/config/chains', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../../walletconnect/config/chains')>();
+  return {
+    ...actual,
+    getStellarConfig: vi.fn(() => ({ networkPassphrase: 'mock_passphrase' })),
+  };
+});
 
 vi.mock('../../StellarSequenceTracker', () => ({
   StellarSequenceTracker: {

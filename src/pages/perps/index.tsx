@@ -3,18 +3,28 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import { ExchangeLayout } from '../../modules/perps/components/layout';
 import { useDynamicExchange } from '../../modules/perps/hooks/useDynamicExchange';
+import { IS_MAINNET_ENABLED } from '../../modules/walletconnect/config/chains';
+import { useWalletStore } from '../../modules/walletconnect/store/walletConnectStore';
 
 const PerpetualsTradingPage: React.FC = () => {
   useDynamicExchange();
   const overlayRef = useRef<HTMLDivElement>(null);
   const [tampered, setTampered] = useState(false);
+  const network = useWalletStore(state => state.network);
 
   const isDev =
     (typeof process !== 'undefined' && process.env.NODE_ENV === 'development') ||
     (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV);
 
+  const isTestnet =
+    network === 'testnet' ||
+    !IS_MAINNET_ENABLED ||
+    (typeof window !== 'undefined' && window.location.hostname.includes('testnet'));
+
+  const isOpen = Boolean(isDev || isTestnet);
+
   useEffect(() => {
-    if (isDev) return;
+    if (isOpen) return;
 
     const observer = new MutationObserver(mutations => {
       mutations.forEach(mutation => {
@@ -31,9 +41,9 @@ const PerpetualsTradingPage: React.FC = () => {
     }
 
     return () => observer.disconnect();
-  }, [isDev]);
+  }, [isOpen]);
 
-  if (tampered && !isDev) {
+  if (tampered && !isOpen) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-[#0a0a0a] text-center">
         <ShieldAlert className="mb-6 h-20 w-20 text-red-500 animate-bounce" />
@@ -51,7 +61,7 @@ const PerpetualsTradingPage: React.FC = () => {
     );
   }
 
-  if (isDev) {
+  if (isOpen) {
     return (
       <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg-primary">
         <ExchangeLayout />

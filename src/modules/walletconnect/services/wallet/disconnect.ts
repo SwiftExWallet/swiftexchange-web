@@ -1,3 +1,4 @@
+import { removeEVMListeners } from './eventListeners';
 import { saveSession } from './sessionPersistence';
 import type { WalletServiceContext, WalletType } from './types';
 
@@ -24,13 +25,12 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
     }
   }
 
-  console.log('[WC] DISCONNECT START', {
-    providerInstanceId: (provider as any)?.__debugProviderId,
-    topic: provider?.session?.topic,
-  });
+  const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+  console.info(`[WalletConnect:${networkTag}] Disconnecting session: ${type}`);
 
   if (provider) {
     ctx.registeredProviders.delete(provider);
+    removeEVMListeners(provider);
 
     if (provider.session) {
       try {
@@ -40,15 +40,16 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
       }
     }
 
-    console.log('[WC] DISCONNECT COMPLETE', {
-      providerInstanceId: (provider as any).__debugProviderId,
-      topic: provider.session?.topic,
-    });
+    for (const [key, p] of Array.from(ctx.providers.entries())) {
+      if (p === provider) {
+        ctx.providers.delete(key);
+      }
+    }
   }
 
-  // Clear per-type in-flight signing flags for all affected types.
   for (const t of sharedTypes) {
     ctx.isSignRequestInFlight.set(t, false);
+    ctx.providers.delete(t);
   }
 
   for (const t of sharedTypes) {
@@ -76,10 +77,12 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
 // ---------------------------------------------------------------------------
 
 export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
-  console.log('[WalletService] Disconnecting all wallets...');
+  const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+  console.info(`[WalletConnect:${networkTag}] Disconnecting all connected wallets`);
 
   const providers = new Set(ctx.providers.values());
   for (const provider of providers) {
+    removeEVMListeners(provider);
     if (provider?.session) {
       try {
         await provider.disconnect();
@@ -89,6 +92,7 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
     }
   }
 
+  ctx.providers.clear();
   ctx.isSignRequestInFlight.clear();
   ctx.sessions.clear();
   ctx.modals.clear();
@@ -97,42 +101,64 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
   ctx.registeredProviders.clear();
 
   await clearAppData();
-  saveSession(ctx);
 }
 
 // ---------------------------------------------------------------------------
-// clearAppData — localStorage + IndexedDB + API keys + dYdX vault
+// clearAppData — localStorage + IndexedDB + API keys
 // ---------------------------------------------------------------------------
 
 export async function clearAppData(): Promise<void> {
-  const PRESERVE_KEYS = [
-    'swiftex_local_transactions',
-    'theme-storage',
-    'network',
-    'swiftex_pending_skip_txs_v2',
-    'stellar_dydx_bridge_step',
-  ];
-
-  Object.keys(localStorage).forEach(key => {
-    if (
-      !PRESERVE_KEYS.includes(key) &&
-      !key.startsWith('swiftex_unified') &&
-      !key.startsWith('swiftex_evm') &&
-      !key.startsWith('swiftex_stellar') &&
-      !key.startsWith('wc@2')
-    ) {
-      localStorage.removeItem(key);
-    }
-  });
-
   try {
-    if (typeof indexedDB !== 'undefined' && indexedDB.databases) {
-      const dbs = await indexedDB.databases();
-      for (const db of dbs) {
-        if (db.name && db.name !== 'WALLET_CONNECT_V2_INDEXED_DB') {
-          indexedDB.deleteDatabase(db.name);
+    // Core session keys
+    localStorage.removeItem('wallet_sessions');
+    localStorage.removeItem('_sx_active_auth_addr');
+
+    // Vendor prefixes that must be wiped on full disconnect
+    const PURGE_PREFIXES = [
+      '_sx_auth_',
+      'stellar_active_',
+      'wc@2:',
+      'walletconnect',
+      'WALLETCONNECT_',
+      'walletlink:',
+      '-walletlink',
+      '@appkit/',
+      'WCM_',
+      'W3M_',
+      '@StellarWalletsKit',
+      'freighter',
+      'swiftex_',
+    ];
+
+    const purgeStore = (store: Storage) => {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < store.length; i++) {
+        const key = store.key(i);
+        if (!key) continue;
+        if (
+          key === 'wallet_sessions' ||
+          PURGE_PREFIXES.some(
+            prefix => key.startsWith(prefix) || key.toLowerCase().startsWith(prefix.toLowerCase())
+          )
+        ) {
+          keysToRemove.push(key);
         }
       }
+      keysToRemove.forEach(k => store.removeItem(k));
+    };
+
+    purgeStore(localStorage);
+    if (typeof sessionStorage !== 'undefined') {
+      purgeStore(sessionStorage);
+    }
+  } catch (error) {
+    console.warn('[WalletService] Storage clear failed:', error);
+  }
+
+  try {
+    if (typeof indexedDB !== 'undefined') {
+      indexedDB.deleteDatabase('_sx_v4_kv_28f3');
+      indexedDB.deleteDatabase('WALLET_CONNECT_V2_INDEXED_DB'); // WC v2 IndexedDB
     }
   } catch (error) {
     console.error('[WalletService] Failed to clear IndexedDB:', error);

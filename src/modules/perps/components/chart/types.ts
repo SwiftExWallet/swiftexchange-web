@@ -1,8 +1,21 @@
 import type { ReactNode } from 'react';
 
-import type { CandleResolution } from '../../hooks/useCandles';
-
-export type { CandleResolution };
+export type CandleResolution =
+  | '1MIN'
+  | '3MINS'
+  | '5MINS'
+  | '15MINS'
+  | '30MINS'
+  | '1HOUR'
+  | '2HOURS'
+  | '4HOURS'
+  | '8HOURS'
+  | '12HOURS'
+  | '1DAY'
+  | '3DAYS'
+  | '1WEEK'
+  | '1MONTH'
+  | string;
 
 export type ChartType = 'candlestick' | 'line' | 'area';
 

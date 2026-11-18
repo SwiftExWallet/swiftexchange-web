@@ -17,7 +17,11 @@
       "destination": "https://folioapi.swiftexwallet.com/pnl/:path*"
     },
     {
-      "source": "/((?!pnl).*)",
+      "source": "/api-stellar-expert/:path*",
+      "destination": "https://api.stellar.expert/:path*"
+    },
+    {
+      "source": "/((?!pnl|api-stellar-expert).*)",
       "destination": "/"
     }
   ],

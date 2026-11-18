@@ -79,7 +79,11 @@ export class HttpTransport {
         throw error;
       }
 
-      if (retries < this.maxRetries) {
+      // Only retry idempotent requests (GET, HEAD) to avoid duplicate order executions (ERR-02)
+      const method = (options.method || 'GET').toUpperCase();
+      const isIdempotent = method === 'GET' || method === 'HEAD';
+
+      if (isIdempotent && retries < this.maxRetries) {
         const delay = Math.pow(2, retries) * 500;
         await new Promise(resolve => setTimeout(resolve, delay));
         return this.request<T>(endpoint, options, retries + 1);

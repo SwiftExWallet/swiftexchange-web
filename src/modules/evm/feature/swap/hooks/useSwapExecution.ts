@@ -4,10 +4,14 @@ import { useNavigate } from 'react-router-dom';
 import { Horizon } from '@stellar/stellar-sdk';
 import { ethers } from 'ethers';
 
+import { useActivationStore } from '../../../../../store/activationStore';
 import { useNotificationStore } from '../../../../../store/notificationStore';
 import { useSwapStore } from '../../../../../store/swapStore';
 import { useTransactionModalStore } from '../../../../../store/transactionModalStore';
+import { StellarBaseService } from '../../../../stellar/service/StellarBaseService';
 import { AmmSwapService } from '../../../../stellar/service/ammSwapService';
+import { AquariusService } from '../../../../stellar/service/aquariusService';
+import { SoroswapService } from '../../../../stellar/service/soroswapService';
 import {
   buildTrustlineTransaction,
   signAndSubmitTrustline,
@@ -17,7 +21,7 @@ import { WalletType } from '../../../../walletconnect/constants/Wallet';
 import { usePortfolioStore } from '../../../../walletconnect/store/portfolioStore';
 import { storeSwapOrder } from '../../../service/evmTransactionStatusService';
 import { getChainById } from '../../../utils/Chainregistry';
-import { getEVMNetworkConfig, simulateEVMTransaction } from '../../../utils/evmUtils';
+import { getEVMNetworkConfig } from '../../../utils/evmUtils';
 import type { UnifiedQuote } from '../types/swap.types';
 import { isStellar } from '../utils/swapAssetUtils';
 import { parseSwapError } from '../utils/swapErrorHandler';
@@ -181,8 +185,8 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
     [setBridgeTxStatus, setExecutionApprovalRequired, setExecutionCurrentStep]
   );
 
-  const executeStellarSwap = async (checkAborted: () => void) => {
-    if (!currentQuote.data || !ammService || !stellarAddress) {
+  const executeStellarSwap = async (checkAborted: () => void, quote: UnifiedQuote) => {
+    if (!quote.data || !ammService || !stellarAddress) {
       setBridgeTxStatus('idle');
       return;
     }
@@ -190,9 +194,36 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
       setExecutionApprovalRequired(false);
       setExecutionCurrentStep('preparing');
       setBridgeTxStatus('preparing');
-      const tx = await ammService.buildSwapTransaction(stellarAddress, currentQuote.data, {
-        slippageTolerance: userSlippageTolerance,
-      });
+
+      let tx: any = null;
+      const isSoroswap = quote.data?.source === 'SOROSWAP';
+      const isAquarius = quote.data?.source === 'AQUARIUS';
+      let soroService: SoroswapService | null = null;
+      let aquaService: AquariusService | null = null;
+
+      if (isSoroswap) {
+        soroService = new SoroswapService(ammService.horizonUrl, ammService.networkPassphrase);
+        const assetIn = soroService.getContractId(selectedSellAsset || quote.data.fromAsset);
+        const assetOut = soroService.getContractId(selectedBuyAsset || quote.data.toAsset);
+        const prepared = await soroService.prepareSwap({
+          assetIn,
+          assetOut,
+          amount: sellAmount,
+          slippageBps: Math.round(userSlippageTolerance * 100),
+          from: stellarAddress,
+        });
+        tx = { xdr: prepared.xdr, isSoroswap: true };
+      } else if (isAquarius) {
+        aquaService = new AquariusService(ammService.horizonUrl, ammService.networkPassphrase);
+        tx = await aquaService.buildSwapTransaction(stellarAddress, quote.data, {
+          slippageTolerance: userSlippageTolerance,
+        });
+      } else {
+        tx = await ammService.buildSwapTransaction(stellarAddress, quote.data, {
+          slippageTolerance: userSlippageTolerance,
+        });
+      }
+
       checkAborted();
       setExecutionCurrentStep('signing');
       setBridgeTxStatus('signing');
@@ -202,17 +233,43 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         isGasless,
         showFusionScreen,
         selectedBuyAsset,
-        activeQuoteSource: currentQuote.source,
-        activeQuoteData: currentQuote.data,
+        activeQuoteSource: quote.source,
+        activeQuoteData: quote.data,
         isSameAssetSelected: false,
         feePayType,
       });
       const provider = getProvider(WalletType.STELLAR) as any;
       setIsWaitingForWallet(true);
       try {
-        const hash = await ammService.executeSwapWithWalletConnect(tx, provider);
+        let hash: string;
+        if (isSoroswap && soroService) {
+          hash = await soroService.executeSoroswap(tx.xdr, provider, stellarAddress);
+        } else if (isAquarius && aquaService) {
+          hash = await aquaService.executeSwap(tx.xdr, provider, stellarAddress);
+        } else {
+          hash = await ammService.executeSwapWithWalletConnect(tx, provider);
+        }
+
+        if (hash) {
+          try {
+            await storeSwapOrder({
+              txHash: hash,
+              walletAddress: stellarAddress,
+              provider: 'STELLAR',
+              fromChain: isSoroswap ? 'SRB' : 'STR',
+              toChain: isSoroswap ? 'SRB' : 'STR',
+              fromToken: sellAssetSymbol,
+              toToken: buyAssetSymbol,
+              amountIn: sellAmount,
+              amountOut: computedOutAmount || '0',
+              txType: 'Swap',
+            });
+          } catch (err) {
+            console.error('Failed to store stellar swap order on backend:', err);
+          }
+        }
         const wasTracked = hash ? trackDydxIntent(hash, computedOutAmount) : false;
-        handleReset();
+        resetLoadingState();
         showToast({
           type: 'STELLAR',
           title: 'Swap Transaction Sent',
@@ -254,13 +311,8 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
     }
   };
 
-  const executeEvmSwap = async (checkAborted: () => void) => {
-    if (
-      currentQuote.source !== 'EVM_SWAP' ||
-      !currentQuote.data ||
-      !selectedSellAsset ||
-      !selectedBuyAsset
-    ) {
+  const executeEvmSwap = async (checkAborted: () => void, quote: UnifiedQuote) => {
+    if (quote.source !== 'EVM_SWAP' || !quote.data || !selectedSellAsset || !selectedBuyAsset) {
       setBridgeTxStatus('idle');
       return;
     }
@@ -271,7 +323,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         setIsWaitingForWallet(true);
       };
       const hash = await performSwap(
-        currentQuote.data,
+        quote.data,
         selectedSellAsset as any,
         selectedBuyAsset as any,
         sellAmount,
@@ -284,8 +336,8 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         isGasless,
         showFusionScreen,
         selectedBuyAsset,
-        activeQuoteSource: currentQuote.source,
-        activeQuoteData: currentQuote.data,
+        activeQuoteSource: quote.source,
+        activeQuoteData: quote.data,
         isSameAssetSelected: false,
         feePayType,
       });
@@ -331,7 +383,15 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
     }
   };
 
-  const executeEvmNearIntentBridge = async (checkAborted: () => void) => {
+  const executeEvmNearIntentBridge = async (checkAborted: () => void, quote: UnifiedQuote) => {
+    if (currentNetwork === 'testnet') {
+      const errMsg = 'Cross-chain swaps via NEAR Intents are not supported on Testnet.';
+      setBridgeErrorMsg(errMsg);
+      setBridgeTxStatus('error');
+      showToast({ type: 'BRIDGE', title: 'Bridge Unavailable', message: errMsg, dontSave: true });
+      return;
+    }
+
     if (!executeNearIntentDeposit) {
       setBridgeTxStatus('idle');
       return;
@@ -349,7 +409,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         matchNearIntentToken,
         safeParseUnits,
       } = await import('../services/oneClickApi');
-      const nearTokens = await fetchNearIntentTokens();
+      const nearTokens = await fetchNearIntentTokens(currentNetwork);
 
       const nearSellAsset = matchNearIntentToken(
         nearTokens,
@@ -388,7 +448,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         slippageTolerance: userSlippageTolerance * 100,
         originAsset: nearSellAsset.assetId,
         depositType: 'ORIGIN_CHAIN',
-        destinationAsset: nearBuyAsset?.assetId || (currentQuote.data?.destinationAsset ?? ''),
+        destinationAsset: nearBuyAsset?.assetId || ((quote.data as any)?.destinationAsset ?? ''),
         amount: safeParseUnits(sellAmount, nearSellAsset.decimals),
         recipient,
         recipientType: 'DESTINATION_CHAIN' as const,
@@ -404,17 +464,17 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         throw new Error('Could not get a deposit address for this transaction. Please retry.');
       }
 
-      // Check slippage against the quote the user actually saw
+      // Check slippage against the quote the user actually saw (quote snapshot, not live state)
       let shownAmountOutStr =
-        currentQuote.data?.amountOutFormatted || currentQuote.data?.amountOut || '0';
+        (quote.data as any)?.amountOutFormatted || (quote.data as any)?.amountOut || '0';
       if (
-        currentQuote.data?.amountOut &&
-        !currentQuote.data?.amountOutFormatted &&
+        (quote.data as any)?.amountOut &&
+        !(quote.data as any)?.amountOutFormatted &&
         nearBuyAsset?.decimals
       ) {
         try {
           shownAmountOutStr = ethers.formatUnits(
-            currentQuote.data.amountOut,
+            (quote.data as any).amountOut,
             nearBuyAsset.decimals
           );
         } catch {
@@ -468,7 +528,8 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         const evmProvider = getProvider(WalletType.EVM);
         if (evmProvider) {
           const provider = new ethers.BrowserProvider(evmProvider);
-          const receipt = await provider.waitForTransaction(hash);
+          // 120-second timeout prevents indefinite hang on congested networks / re-orgs
+          const receipt = await provider.waitForTransaction(hash, 1, 120_000);
           if (receipt && receipt.status === 0) {
             throw new Error('Transaction reverted on-chain.');
           }
@@ -480,25 +541,23 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
 
       if (hash) {
         storeSwapOrder({
-          txHash: liveQuote.depositAddress,
+          txHash: liveQuote?.depositAddress || hash,
           walletAddress: evmAddress || stellarAddress,
           provider: 'NEARINTENT',
           memo: isStellarOrigin ? liveQuote.depositMemo : undefined,
           fromChain: getChainById(fromChainId)?.symbol || String(fromChainId),
-          fromAddress: isStellarOrigin ? stellarAddress : evmAddress,
           fromToken: sellAssetSymbol,
           toChain: getChainById(toChainId)?.symbol || String(toChainId),
-          toAddress: isStellarDest ? stellarAddress : evmAddress,
           toToken: buyAssetSymbol,
           amountIn: sellAmount,
           amountOut: computedOutAmount,
           txType: 'Bridge',
-        }).catch(() => {});
+        }).catch(err => {
+          console.error('Failed to store near intent bridge order on backend:', err);
+        });
       }
 
       if (isStellar(toChainId) && isStellarAccountActive === false) {
-        // Intercept normal bridge completion for activation flow
-        const { useActivationStore } = await import('../../../../../store/activationStore');
         useActivationStore.getState().setPendingActivation({
           quoteHash: hash || '',
           depositAddress: liveQuote.depositAddress,
@@ -566,6 +625,11 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
       if (signal.aborted) throw new DOMException('Swap aborted', 'AbortError');
     };
 
+    // Snapshot the quote BEFORE any await. If the 30-second refresh timer fires
+    // mid-execution and overwrites React state, this swap continues with the
+    // exact quote data the user confirmed rather than a stale/updated version.
+    const quoteSnapshot = currentQuote;
+
     const executeSwapFlow = async () => {
       if (isGasless && !isStellar(fromChainId) && !isStellar(toChainId)) {
         if (!selectedSellAsset || !selectedBuyAsset) {
@@ -575,7 +639,7 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
         setIsFusionLoading(true);
         try {
           const { get1InchFusionQuote } = await import('../services/fusionOrderService');
-
+          const { safeParseUnits } = await import('../services/oneClickApi');
           const { AGGREGATOR_NATIVE_ADDRESS } = await import('../constants/swap.constants');
 
           const normalizedTokenIn = (selectedSellAsset as any).isNative
@@ -585,14 +649,16 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
             ? AGGREGATOR_NATIVE_ADDRESS.toLowerCase()
             : (selectedBuyAsset as any).address;
 
+          const sellDecimals = (selectedSellAsset as any)?.decimals ?? 18;
+          const parsedAmount = safeParseUnits(sellAmount, sellDecimals);
+
           const fQuote = await get1InchFusionQuote(
             fromChainId,
             {
               tokenIn: normalizedTokenIn,
               tokenOut: normalizedTokenOut,
-              amount: sellAmount,
+              amount: parsedAmount,
               walletAddress: evmAddress || '0x0000000000000000000000000000000000000000',
-              decimals: (selectedSellAsset as any).decimals,
             },
             toChainId,
             abortCtrl.signal
@@ -614,6 +680,116 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
           setIsFusionLoading(false);
         }
         return;
+      }
+
+      const isBuyClassic =
+        selectedBuyAsset &&
+        !(selectedBuyAsset as any).isNative &&
+        (typeof (selectedBuyAsset as any).asset?.isNative === 'function'
+          ? !(selectedBuyAsset as any).asset.isNative()
+          : true) &&
+        Boolean(
+          (selectedBuyAsset as any).issuer?.startsWith('G') ||
+          (typeof (selectedBuyAsset as any).asset?.getIssuer === 'function' &&
+            (selectedBuyAsset as any).asset.getIssuer()?.startsWith('G')) ||
+          ((selectedBuyAsset as any).address?.startsWith('G') &&
+            !(selectedBuyAsset as any).address?.startsWith('C')) ||
+          ((selectedBuyAsset as any).contract?.startsWith('C') &&
+            (selectedBuyAsset as any).issuer?.startsWith('G')) ||
+          (typeof quoteSnapshot.data?.toAsset?.getIssuer === 'function' &&
+            quoteSnapshot.data.toAsset.getIssuer()?.startsWith('G'))
+        );
+
+      const isSoroswap = quoteSnapshot.data?.source === 'SOROSWAP';
+      const isAquarius = quoteSnapshot.data?.source === 'AQUARIUS';
+
+      const isSettingTrustline =
+        isStellar(toChainId) &&
+        isStellarAccountActive !== false &&
+        isBuyClassic &&
+        !(selectedBuyAsset as any).hasTrustline &&
+        (isSoroswap || isAquarius || !isStellar(fromChainId));
+
+      if (isSettingTrustline) {
+        setExecutionCurrentStep('setting_trustline');
+        setBridgeTxStatus('preparing');
+        setIsWaitingForWallet(true);
+        try {
+          const stellarConfig = getStellarConfig(currentNetwork);
+          const server = new Horizon.Server(stellarConfig.horizonUrl);
+          const stellarProvider = getProvider(WalletType.STELLAR);
+          const buyAssetIssuer =
+            (selectedBuyAsset as any)?.issuer ||
+            (typeof (selectedBuyAsset as any)?.asset?.getIssuer === 'function'
+              ? (selectedBuyAsset as any).asset.getIssuer()
+              : undefined) ||
+            ((selectedBuyAsset as any)?.address?.startsWith('G')
+              ? (selectedBuyAsset as any).address
+              : undefined) ||
+            (typeof quoteSnapshot.data?.toAsset?.getIssuer === 'function'
+              ? quoteSnapshot.data.toAsset.getIssuer()
+              : undefined);
+
+          if (!buyAssetIssuer) {
+            throw new Error('Missing issuer for Stellar asset trustline.');
+          }
+
+          const rawCode = (
+            selectedBuyAsset?.symbol ||
+            (typeof (selectedBuyAsset as any)?.asset?.getCode === 'function'
+              ? (selectedBuyAsset as any).asset.getCode()
+              : '') ||
+            buyAssetSymbol ||
+            ''
+          ).split(/[:-]/)[0];
+
+          const xdr = await buildTrustlineTransaction({
+            server,
+            stellarAddress,
+            assetCode: rawCode,
+            assetIssuer: buyAssetIssuer,
+            currentNetwork,
+          });
+
+          const networkPassphrase = stellarConfig.networkPassphrase || '';
+          const trustlineResult = await signAndSubmitTrustline(
+            xdr,
+            stellarConfig.network === 'PUBLIC' ? 'mainnet' : 'testnet',
+            networkPassphrase,
+            stellarProvider
+          );
+
+          if (!trustlineResult.success)
+            throw new Error(trustlineResult.error || 'Failed to set up trustline.');
+          setIsWaitingForWallet(false);
+
+          try {
+            AmmSwapService.clearAccountCache();
+            StellarBaseService.clearAccountCache();
+          } catch (e) {
+            console.error(e);
+          }
+          window.dispatchEvent(new Event('stellar-trustline-added'));
+          window.dispatchEvent(new Event('stellar-balance-changed'));
+
+          resetLoadingState();
+          showToast({
+            type: 'STELLAR',
+            title: 'Trustline Added',
+            message: `Trustline created for ${rawCode}. You can now execute your swap!`,
+          });
+          openModal({
+            status: 'success',
+            type: 'Trustline',
+            hash: trustlineResult.transactionHash,
+            isStellar: true,
+          });
+          return;
+        } catch (err: any) {
+          setIsWaitingForWallet(false);
+          if ((err as any)?.name === 'AbortError') throw err;
+          throw new Error(`Trustline setup failed: ${err.message}`);
+        }
       }
 
       if (!isGasless && !isStellar(fromChainId) && evmAddress) {
@@ -639,107 +815,20 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
             resetLoadingState();
             return;
           }
-
-          await simulateEVMTransaction(fromChainId, evmAddress, evmAddress, '0', '0x');
         } catch (gasErr: any) {
-          const msg = gasErr?.message || '';
-          if (
-            msg.toLowerCase().includes('insufficient funds') ||
-            msg.toLowerCase().includes('insufficient') ||
-            msg.includes('Minimum 4 XLM')
-          ) {
-            setBridgeErrorMsg(msg);
-            setBridgeTxStatus('error');
-            showToast({
-              type: 'EVM_SWAP',
-              title: 'Insufficient Gas',
-              message: msg,
-              dontSave: true,
-            });
-            resetLoadingState();
-            return;
-          }
+          void gasErr;
         }
       }
-
-      // --- NEW ACTIVATION & TRUSTLINE LOGIC ---
-      const isSettingTrustline =
-        !isStellar(fromChainId) &&
-        isStellar(toChainId) &&
-        isStellarAccountActive !== false &&
-        selectedBuyAsset &&
-        !(selectedBuyAsset as any).isNative &&
-        !(selectedBuyAsset as any).hasTrustline;
-
-      if (isSettingTrustline) {
-        // Perform Trustline Setup Only
-        setExecutionCurrentStep('setting_trustline');
-        setBridgeTxStatus('preparing');
-        setIsWaitingForWallet(true);
-        try {
-          const stellarConfig = getStellarConfig(currentNetwork);
-          const server = new Horizon.Server(stellarConfig.horizonUrl);
-          const stellarProvider = getProvider(WalletType.STELLAR);
-          const buyAssetIssuer =
-            (selectedBuyAsset as any)?.issuer || (selectedBuyAsset as any)?.address;
-
-          const xdr = await buildTrustlineTransaction({
-            server,
-            stellarAddress,
-            assetCode: buyAssetSymbol,
-            assetIssuer: buyAssetIssuer,
-            currentNetwork,
-          });
-
-          const networkPassphrase = stellarConfig.networkPassphrase || '';
-          const trustlineResult = await signAndSubmitTrustline(
-            xdr,
-            stellarConfig.network === 'PUBLIC' ? 'mainnet' : 'testnet',
-            networkPassphrase,
-            stellarProvider
-          );
-
-          if (!trustlineResult.success)
-            throw new Error(trustlineResult.error || 'Failed to set up trustline.');
-          setIsWaitingForWallet(false);
-
-          try {
-            AmmSwapService.clearAccountCache();
-          } catch (e) {
-            console.error(e);
-          }
-          window.dispatchEvent(new Event('stellar-trustline-added'));
-
-          handleReset();
-          showToast({
-            type: 'STELLAR',
-            title: 'Trustline Added',
-            message: `Trustline created for ${buyAssetSymbol}. You can now execute your swap!`,
-          });
-          openModal({
-            status: 'success',
-            type: 'Swap',
-            hash: trustlineResult.transactionHash,
-            isStellar: true,
-          });
-          return; // STOP execution here, don't execute the main swap.
-        } catch (err: any) {
-          setIsWaitingForWallet(false);
-          if ((err as any)?.name === 'AbortError') throw err;
-          throw new Error(`Trustline setup failed: ${err.message}`);
-        }
-      }
-      // --- END ACTIVATION LOGIC ---
 
       if (actionType === 'SWAP') {
-        if (!currentQuote.data) {
+        if (!quoteSnapshot.data) {
           setBridgeTxStatus('idle');
           return;
         }
         if (isStellar(fromChainId)) {
-          await executeStellarSwap(checkAborted);
+          await executeStellarSwap(checkAborted, quoteSnapshot);
         } else {
-          await executeEvmSwap(checkAborted);
+          await executeEvmSwap(checkAborted, quoteSnapshot);
         }
       } else {
         if (isStellar(fromChainId) && !stellarAddress) {
@@ -754,15 +843,15 @@ export function useSwapExecution(params: UseSwapExecutionParams) {
           setBridgeTxStatus('idle');
           return;
         }
-        if (!currentQuote.data) {
+        if (!quoteSnapshot.data) {
           setBridgeTxStatus('idle');
           return;
         }
 
         try {
-          if (currentQuote.source === 'NEAR_INTENT' && currentQuote.data) {
-            await executeEvmNearIntentBridge(checkAborted);
-          } else if (currentQuote.source === 'FUSION_PLUS' && currentQuote.data) {
+          if (quoteSnapshot.source === 'NEAR_INTENT' && quoteSnapshot.data) {
+            await executeEvmNearIntentBridge(checkAborted, quoteSnapshot);
+          } else if (quoteSnapshot.source === 'FUSION_PLUS' && quoteSnapshot.data) {
             setShowFusionScreen(true);
             setBridgeTxStatus('idle');
             return;

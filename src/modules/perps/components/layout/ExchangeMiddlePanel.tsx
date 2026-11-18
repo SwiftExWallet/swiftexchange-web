@@ -2,6 +2,7 @@ import React from 'react';
 
 import { marketStore } from '../../core/stores/marketStore';
 import { useOrderbook } from '../../hooks/useOrderbook';
+import { safeFormatNumber } from '../../utils/precision';
 
 export const ExchangeMiddlePanel: React.FC = () => {
   const orderbook = useOrderbook();
@@ -27,10 +28,7 @@ export const ExchangeMiddlePanel: React.FC = () => {
 
   // Format currency
   const formatCurrency = (val: number, isSize: boolean = false) => {
-    return val.toLocaleString('en-US', {
-      minimumFractionDigits: isSize ? 2 : 4,
-      maximumFractionDigits: isSize ? 2 : 4,
-    });
+    return safeFormatNumber(val, isSize ? 2 : 4, isSize ? 2 : 4, '0.00');
   };
 
   return (

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 export type OrderSide = 'BUY' | 'SELL';
 export type OrderType =
@@ -24,6 +25,8 @@ interface OrderEntryStoreState {
   price: string;
   leverage: number;
   marginType: 'cross' | 'isolated';
+  leverageBySymbol: Record<string, number>;
+  marginTypeBySymbol: Record<string, 'cross' | 'isolated'>;
   isReduceOnly: boolean;
   isPostOnly: boolean;
 
@@ -35,6 +38,8 @@ interface OrderEntryStoreState {
 
   chaseOffset: string;
   maxChaseOffset: string;
+  maxChaseDifferenceEnabled: boolean;
+  chasePriceMode: 'BBO' | 'GAP';
 
   scaledPriceLower: string;
   scaledPriceUpper: string;
@@ -61,8 +66,10 @@ interface OrderEntryStoreState {
   setSizeAsset: (asset: 'base' | 'quote') => void;
   setSize: (size: string) => void;
   setPrice: (price: string) => void;
-  setLeverage: (leverage: number) => void;
-  setMarginType: (type: 'cross' | 'isolated') => void;
+  setLeverage: (leverage: number, symbol?: string) => void;
+  setMarginType: (type: 'cross' | 'isolated', symbol?: string) => void;
+  syncForSymbol: (symbol: string) => void;
+  setSymbolSettings: (symbol: string, leverage: number, marginType: 'cross' | 'isolated') => void;
   setReduceOnly: (val: boolean) => void;
   setPostOnly: (val: boolean) => void;
 
@@ -74,6 +81,8 @@ interface OrderEntryStoreState {
 
   setChaseOffset: (offset: string) => void;
   setMaxChaseOffset: (offset: string) => void;
+  setMaxChaseDifferenceEnabled: (enabled: boolean) => void;
+  setChasePriceMode: (mode: 'BBO' | 'GAP') => void;
 
   setScaledPriceLower: (price: string) => void;
   setScaledPriceUpper: (price: string) => void;
@@ -94,6 +103,14 @@ interface OrderEntryStoreState {
   setAttachedSlPrice: (price: string) => void;
   setAttachedSlTrigger: (trigger: WorkingType) => void;
 
+  activeInput:
+    'price' | 'stopPrice' | 'activationPrice' | 'scaledPriceLower' | 'scaledPriceUpper' | null;
+  setActiveInput: (
+    input:
+      'price' | 'stopPrice' | 'activationPrice' | 'scaledPriceLower' | 'scaledPriceUpper' | null
+  ) => void;
+  applyOrderbookPrice: (price: string) => void;
+
   reset: () => void;
 }
 
@@ -104,6 +121,8 @@ const initialState = {
   price: '',
   leverage: 20,
   marginType: 'cross' as const,
+  leverageBySymbol: {} as Record<string, number>,
+  marginTypeBySymbol: {} as Record<string, 'cross' | 'isolated'>,
   isReduceOnly: false,
   isPostOnly: false,
 
@@ -113,8 +132,10 @@ const initialState = {
   callbackRate: '',
   workingType: 'CONTRACT_PRICE' as WorkingType,
 
-  chaseOffset: '',
+  chaseOffset: '0',
   maxChaseOffset: '',
+  maxChaseDifferenceEnabled: false,
+  chasePriceMode: 'BBO' as const,
 
   scaledPriceLower: '',
   scaledPriceUpper: '',
@@ -136,48 +157,164 @@ const initialState = {
   sl: '',
 
   sizeAsset: 'base' as const,
+  activeInput: null as 'price' | 'stopPrice' | 'activationPrice' | null,
 };
 
-export const useOrderEntryStore = create<OrderEntryStoreState>(set => ({
-  ...initialState,
+export const useOrderEntryStore = create<OrderEntryStoreState>()(
+  persist(
+    (set, get) => ({
+      ...initialState,
 
-  setSide: side => set({ side }),
-  setOrderType: orderType => set({ orderType }),
-  setSizeAsset: sizeAsset => set({ sizeAsset }),
-  setSize: size => set({ size }),
-  setPrice: price => set({ price }),
-  setLeverage: leverage => set({ leverage }),
-  setMarginType: marginType => set({ marginType }),
-  setReduceOnly: isReduceOnly => set({ isReduceOnly }),
-  setPostOnly: isPostOnly => set({ isPostOnly }),
+      setSide: side => set({ side }),
+      setOrderType: orderType =>
+        set(state => ({
+          orderType,
+          ...(orderType === 'TRAILING_STOP_MARKET' && !state.callbackRate
+            ? { callbackRate: '1.0' }
+            : {}),
+          ...(orderType === 'CHASE'
+            ? {
+                chaseOffset: state.chaseOffset || '0',
+                maxChaseOffset: state.maxChaseOffset || '10',
+              }
+            : {}),
+          ...(orderType === 'SCALED'
+            ? {
+                scaledOrderCount: state.scaledOrderCount || '5',
+                scaledDistribution: state.scaledDistribution || 'FLAT',
+              }
+            : {}),
+        })),
+      setSizeAsset: sizeAsset => set({ sizeAsset }),
+      setSize: size => set({ size }),
+      setPrice: price => set({ price }),
+      setLeverage: (leverage, symbol) =>
+        set(state => ({
+          leverage,
+          leverageBySymbol: symbol
+            ? { ...state.leverageBySymbol, [symbol]: leverage }
+            : state.leverageBySymbol,
+        })),
+      setMarginType: (marginType, symbol) =>
+        set(state => ({
+          marginType,
+          marginTypeBySymbol: symbol
+            ? { ...state.marginTypeBySymbol, [symbol]: marginType }
+            : state.marginTypeBySymbol,
+        })),
+      syncForSymbol: symbol => {
+        const state = get();
+        const storedLev = state.leverageBySymbol[symbol];
+        const storedMt = state.marginTypeBySymbol[symbol];
+        set({
+          ...(storedLev ? { leverage: storedLev } : {}),
+          ...(storedMt ? { marginType: storedMt } : {}),
+        });
+      },
+      setSymbolSettings: (symbol, leverage, marginType) =>
+        set(state => ({
+          leverageBySymbol: { ...state.leverageBySymbol, [symbol]: leverage },
+          marginTypeBySymbol: { ...state.marginTypeBySymbol, [symbol]: marginType },
+        })),
+      setReduceOnly: isReduceOnly => set({ isReduceOnly }),
+      setPostOnly: isPostOnly => set({ isPostOnly }),
 
-  setTimeInForce: timeInForce => set({ timeInForce }),
-  setStopPrice: stopPrice => set({ stopPrice }),
-  setActivationPrice: activationPrice => set({ activationPrice }),
-  setCallbackRate: callbackRate => set({ callbackRate }),
-  setWorkingType: workingType => set({ workingType }),
+      setTimeInForce: timeInForce => set({ timeInForce }),
+      setStopPrice: stopPrice => set({ stopPrice }),
+      setActivationPrice: activationPrice => set({ activationPrice }),
+      setCallbackRate: callbackRate => set({ callbackRate }),
+      setWorkingType: workingType => set({ workingType }),
 
-  setChaseOffset: chaseOffset => set({ chaseOffset }),
-  setMaxChaseOffset: maxChaseOffset => set({ maxChaseOffset }),
+      setChaseOffset: chaseOffset => set({ chaseOffset }),
+      setMaxChaseOffset: maxChaseOffset => set({ maxChaseOffset }),
+      setMaxChaseDifferenceEnabled: maxChaseDifferenceEnabled => set({ maxChaseDifferenceEnabled }),
+      setChasePriceMode: chasePriceMode => set({ chasePriceMode }),
 
-  setScaledPriceLower: scaledPriceLower => set({ scaledPriceLower }),
-  setScaledPriceUpper: scaledPriceUpper => set({ scaledPriceUpper }),
-  setScaledOrderCount: scaledOrderCount => set({ scaledOrderCount }),
-  setScaledDistribution: scaledDistribution => set({ scaledDistribution }),
+      setScaledPriceLower: scaledPriceLower => set({ scaledPriceLower }),
+      setScaledPriceUpper: scaledPriceUpper => set({ scaledPriceUpper }),
+      setScaledOrderCount: scaledOrderCount => set({ scaledOrderCount }),
+      setScaledDistribution: scaledDistribution => set({ scaledDistribution }),
 
-  setTpEnabled: tpEnabled => set({ tpEnabled }),
-  setTp: tp => set({ tp }),
-  setSlEnabled: slEnabled => set({ slEnabled }),
-  setSl: sl => set({ sl }),
+      setTpEnabled: tpEnabled => set({ tpEnabled }),
+      setTp: tp => set({ tp }),
+      setSlEnabled: slEnabled => set({ slEnabled }),
+      setSl: sl => set({ sl }),
 
-  setSlippageEnabled: slippageEnabled => set({ slippageEnabled }),
-  setSlippageTolerance: slippageTolerance => set({ slippageTolerance }),
-  setAttachedTpEnabled: attachedTpEnabled => set({ attachedTpEnabled }),
-  setAttachedTpPrice: attachedTpPrice => set({ attachedTpPrice }),
-  setAttachedTpTrigger: attachedTpTrigger => set({ attachedTpTrigger }),
-  setAttachedSlEnabled: attachedSlEnabled => set({ attachedSlEnabled }),
-  setAttachedSlPrice: attachedSlPrice => set({ attachedSlPrice }),
-  setAttachedSlTrigger: attachedSlTrigger => set({ attachedSlTrigger }),
+      setSlippageEnabled: slippageEnabled => set({ slippageEnabled }),
+      setSlippageTolerance: slippageTolerance => set({ slippageTolerance }),
+      setAttachedTpEnabled: attachedTpEnabled => set({ attachedTpEnabled }),
+      setAttachedTpPrice: attachedTpPrice => set({ attachedTpPrice }),
+      setAttachedTpTrigger: attachedTpTrigger => set({ attachedTpTrigger }),
+      setAttachedSlEnabled: attachedSlEnabled => set({ attachedSlEnabled }),
+      setAttachedSlPrice: attachedSlPrice => set({ attachedSlPrice }),
+      setAttachedSlTrigger: attachedSlTrigger => set({ attachedSlTrigger }),
 
-  reset: () => set(initialState),
-}));
+      setActiveInput: activeInput => set({ activeInput }),
+      applyOrderbookPrice: price => {
+        set(state => {
+          // 1. If STOP_MARKET or TAKE_PROFIT_MARKET: only stopPrice exists!
+          if (state.orderType === 'STOP_MARKET' || state.orderType === 'TAKE_PROFIT_MARKET') {
+            return { stopPrice: price };
+          }
+          // 2. If user specifically focused a field
+          if (state.activeInput === 'stopPrice') {
+            return { stopPrice: price };
+          }
+          if (state.activeInput === 'activationPrice') {
+            return { activationPrice: price };
+          }
+          if (state.activeInput === 'price') {
+            return { price };
+          }
+          if (state.activeInput === 'scaledPriceLower') {
+            return { scaledPriceLower: price };
+          }
+          if (state.activeInput === 'scaledPriceUpper') {
+            return { scaledPriceUpper: price };
+          }
+          if (state.orderType === 'SCALED') {
+            if (!state.scaledPriceLower || state.scaledPriceLower === '0') {
+              return { scaledPriceLower: price };
+            }
+            return { scaledPriceUpper: price };
+          }
+          // 3. If STOP (Stop Limit) or TAKE_PROFIT (Take Profit Limit):
+          if (state.orderType === 'STOP' || state.orderType === 'TAKE_PROFIT') {
+            // If trigger price is empty, fill trigger price first!
+            if (!state.stopPrice || state.stopPrice === '' || state.stopPrice === '0') {
+              return { stopPrice: price };
+            }
+            // Else fill order price
+            return { price };
+          }
+          // 4. Trailing Stop
+          if (state.orderType === 'TRAILING_STOP_MARKET') {
+            return { activationPrice: price };
+          }
+          // 5. Default (LIMIT, POST_ONLY, etc.)
+          return { price };
+        });
+      },
+
+      reset: () =>
+        set(state => ({
+          ...initialState,
+          leverage: state.leverage,
+          marginType: state.marginType,
+          leverageBySymbol: state.leverageBySymbol,
+          marginTypeBySymbol: state.marginTypeBySymbol,
+        })),
+    }),
+    {
+      name: 'swiftex_perps_order_entry_settings',
+      partialize: state => ({
+        leverage: state.leverage,
+        marginType: state.marginType,
+        leverageBySymbol: state.leverageBySymbol,
+        marginTypeBySymbol: state.marginTypeBySymbol,
+        orderType: state.orderType,
+        sizeAsset: state.sizeAsset,
+      }),
+    }
+  )
+);
