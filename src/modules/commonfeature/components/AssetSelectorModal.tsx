@@ -10,15 +10,19 @@ import {
   getEvmChainId,
 } from '../../evm/feature/swap/services/oneClickApi';
 import { getTokensForChain } from '../../evm/service/tokenListService';
-import { CHAIN_REGISTRY, getChainById } from '../../evm/utils/Chainregistry';
-import { getEVMChains, getStellarConfig } from '../../walletconnect/config/chains';
+import { getChainById, getChainsForNetwork } from '../../evm/utils/Chainregistry';
+import { isSoroswapTestnetSupported } from '../../stellar/service/soroswapService';
+import {
+  getEVMChains,
+  getStellarConfig,
+  isStellarChainId,
+} from '../../walletconnect/config/chains';
 import { useWalletAssets } from '../../walletconnect/hooks/useWalletAssets';
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
 import { portfolioUtils } from '../../walletconnect/utils/portfolioUtils';
 import { useAssetSelectorModal } from './useAssetSelectorModal';
 
 const ROW_HEIGHT = 72;
-const STELLAR_CHAIN_ID = 'pubnet';
 const DYDX_CHAIN_ID = 'dydx-mainnet-1';
 
 interface NetworkOption {
@@ -66,8 +70,12 @@ const AssetSelectorModal: FC = () => {
   const [nearTokens, setNearTokens] = useState<NearIntentToken[]>([]);
 
   useEffect(() => {
-    fetchNearIntentTokens().then(setNearTokens).catch(console.error);
-  }, []);
+    if (currentNetwork === 'mainnet') {
+      fetchNearIntentTokens('mainnet').then(setNearTokens).catch(console.error);
+    } else {
+      setNearTokens([]);
+    }
+  }, [currentNetwork]);
 
   useEffect(() => {
     const handleUpdate = () => setRegistryVersion(v => v + 1);
@@ -88,6 +96,7 @@ const AssetSelectorModal: FC = () => {
   }, [searchQuery]);
 
   const networks = useMemo(() => {
+    const stellarConfig = getStellarConfig(currentNetwork);
     const allNetworks: NetworkOption[] = [
       {
         id: 'all',
@@ -107,10 +116,10 @@ const AssetSelectorModal: FC = () => {
           }) as any
       ),
       {
-        id: STELLAR_CHAIN_ID,
+        id: stellarConfig.chainId,
         name: 'Stellar',
-        logo: getStellarConfig(currentNetwork).logoUrl,
-        ...getChainById(STELLAR_CHAIN_ID),
+        logo: stellarConfig.logoUrl,
+        ...getChainById(stellarConfig.chainId),
       } as any,
     ];
 
@@ -118,6 +127,10 @@ const AssetSelectorModal: FC = () => {
       if (forceNetwork && net.id !== forceNetwork) return false;
       if (net.id === 'all' && forceNetwork) return false;
       if (net.id === 'all') return true;
+      // On testnet, always show ALL chains in every action type —
+      // testnet EVM chains have swapEnable/bridgeEnable: false to avoid production routing,
+      // but we still want them visible in the UI for testing purposes.
+      if (currentNetwork === 'testnet') return true;
       if (actionType === 'SEND') return net.sendEnable;
       if (actionType === 'RECEIVE') return net.receiveEnable;
       if (actionType === 'SWAP') return net.swapEnable;
@@ -142,76 +155,105 @@ const AssetSelectorModal: FC = () => {
 
   const filteredAssets = useMemo(() => {
     let result: any[] = [];
+    const stellarConfig = getStellarConfig(currentNetwork);
+
     if (effectiveActionType === 'SEND') {
-      const activeWalletAssets = walletAssets.filter(a => (a.balance || 0) > 0);
-      if (activeWalletAssets.length > 0) {
-        result = activeWalletAssets;
-      } else {
-        for (const config of CHAIN_REGISTRY) {
-          if (config.sendEnable) {
+      // SEND: show only portfolio tokens (user must have balance to send)
+      walletAssets.forEach(wa => {
+        const isWANative =
+          !!wa.isNative ||
+          !wa.address ||
+          wa.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+          wa.address.toLowerCase() === 'native';
+        result.push({
+          id: `send-${wa.chainId}-${wa.symbol}-${isWANative ? 'native' : (wa as any).contract || wa.address || ''}`,
+          symbol: wa.symbol,
+          name: wa.name,
+          image: wa.image || '',
+          chainId: wa.chainId,
+          address: wa.address,
+          contract: (wa as any).contract,
+          issuer: (wa as any).issuer,
+          domain: (wa as any).domain,
+          decimals: wa.decimals,
+          isNative: wa.isNative,
+          balance: wa.balance || 0,
+          chainType: wa.chainType,
+        });
+      });
+
+      // On testnet EVM: show native tokens as fallback when portfolio is empty
+      if (currentNetwork === 'testnet') {
+        const evmTestnetChains = getChainsForNetwork('testnet').filter(
+          c => typeof c.chainId === 'number'
+        );
+        evmTestnetChains.forEach(chainConfig => {
+          const alreadyInResult = result.some(
+            r => String(r.chainId) === String(chainConfig.chainId) && r.isNative
+          );
+          if (!alreadyInResult && chainConfig.nativeCurrency) {
             result.push({
-              id: `send-${config.chainId}-native`,
-              symbol: config.nativeCurrency.symbol,
-              name: config.nativeCurrency.name,
-              image: config.nativeCurrency.logoURI,
-              chainId: config.chainId,
+              id: `send-${chainConfig.chainId}-${chainConfig.nativeCurrency.symbol}-native`,
+              symbol: chainConfig.nativeCurrency.symbol,
+              name: chainConfig.nativeCurrency.name,
+              image: chainConfig.nativeCurrency.logoURI || chainConfig.logoURI || '',
+              chainId: chainConfig.chainId,
+              address: '0x0000000000000000000000000000000000000000',
+              decimals: chainConfig.nativeCurrency.decimals,
               isNative: true,
               balance: 0,
-            });
-            config.assets?.forEach(asset => {
-              if (asset.symbol === config.nativeCurrency.symbol) return;
-              result.push({
-                id: `send-${config.chainId}-${asset.symbol}`,
-                symbol: asset.symbol,
-                name: asset.name,
-                image: asset.logoURI,
-                chainId: config.chainId,
-                address: asset.address,
-                decimals: asset.decimals,
-                balance: 0,
-              });
+              chainType: 'evm',
             });
           }
-        }
+        });
       }
-    } else if (effectiveActionType === 'RECEIVE') {
-      for (const config of CHAIN_REGISTRY) {
-        if (config.receiveEnable) {
-          result.push({
-            id: `receive-${config.chainId}-native`,
-            symbol: config.nativeCurrency.symbol,
-            name: config.nativeCurrency.name,
-            image: config.nativeCurrency.logoURI,
-            chainId: config.chainId,
-            isNative: true,
-          });
-          config.assets?.forEach(asset => {
-            if (asset.symbol === config.nativeCurrency.symbol) return;
-            result.push({
-              id: `receive-${config.chainId}-${asset.symbol}`,
-              symbol: asset.symbol,
-              name: asset.name,
-              image: asset.logoURI,
-              chainId: config.chainId,
-              address: asset.address,
-            });
-          });
-        }
+
+      // Stellar fallback for SEND
+      const hasStellarInSend = result.some(
+        r => r.chainType === 'stellar' || isStellarChainId(r.chainId)
+      );
+      if (!hasStellarInSend) {
+        const stellarChainConfig = getChainById(stellarConfig.chainId);
+        result.push({
+          id: `send-${stellarConfig.chainId}-XLM-native`,
+          symbol: 'XLM',
+          name: 'Stellar Lumens',
+          image:
+            stellarChainConfig?.nativeCurrency?.logoURI ||
+            stellarChainConfig?.logoURI ||
+            'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/stellar/info/logo.png',
+          chainId: stellarConfig.chainId,
+          address: 'native',
+          decimals: 7,
+          isNative: true,
+          balance: 0,
+          chainType: 'stellar',
+        });
       }
-    } else if (effectiveActionType === 'SWAP' || effectiveActionType === 'BRIDGE') {
-      const allPossibleChains = [
-        ...CHAIN_REGISTRY.map(c => c.chainId),
-        STELLAR_CHAIN_ID,
-        DYDX_CHAIN_ID,
-      ];
+    } else if (
+      effectiveActionType === 'RECEIVE' ||
+      effectiveActionType === 'SWAP' ||
+      effectiveActionType === 'BRIDGE'
+    ) {
+      // RECEIVE: show ALL registry tokens (user can receive any token, balance shown if available)
+      // SWAP/BRIDGE: same registry-based approach
+      const networkChainConfigs = getChainsForNetwork(currentNetwork as any);
+      const allPossibleChains = [...networkChainConfigs.map(c => c.chainId), stellarConfig.chainId];
+      if (currentNetwork === 'mainnet') {
+        allPossibleChains.push(DYDX_CHAIN_ID);
+      }
 
       const targetChains =
         selectedNetwork === 'all'
           ? Array.from(new Set(allPossibleChains)).filter(chainId => {
               const chainConfig = getChainById(chainId);
               if (!chainConfig) return false;
-              if (effectiveActionType === 'SWAP')
+              // On testnet: include ALL chains (EVM + Stellar) for both SWAP and BRIDGE
+              // so tokens are shown even when swapEnable/bridgeEnable is false
+              if (currentNetwork === 'testnet') return true;
+              if (effectiveActionType === 'SWAP') {
                 return chainConfig.swapEnabled || (chainConfig as any).swapEnable;
+              }
               if (effectiveActionType === 'BRIDGE') return chainConfig.bridgeEnable;
               return true;
             })
@@ -219,17 +261,24 @@ const AssetSelectorModal: FC = () => {
 
       targetChains.forEach(activeChainId => {
         const registryTokens = getTokensForChain(activeChainId);
-        let validTokens = registryTokens;
+        let validTokens = [...registryTokens];
 
-        if (effectiveActionType === 'BRIDGE') {
+        if (
+          effectiveActionType === 'SWAP' &&
+          currentNetwork === 'testnet' &&
+          isStellarChainId(activeChainId)
+        ) {
+          validTokens = validTokens.filter(t => isSoroswapTestnetSupported(t));
+        }
+
+        if (effectiveActionType === 'BRIDGE' && currentNetwork === 'mainnet') {
           const isStellarInvolved =
-            activeChainId === STELLAR_CHAIN_ID || pairedChainId === STELLAR_CHAIN_ID;
+            isStellarChainId(activeChainId) || isStellarChainId(pairedChainId);
 
           if (isStellarInvolved && !showAllStellarAssets) {
-            // Get tokens supported by NEAR Intents for this chain
             const intentsSupportedSymbols = nearTokens
               .filter(nt => {
-                if (activeChainId === STELLAR_CHAIN_ID) {
+                if (isStellarChainId(activeChainId)) {
                   return nt.blockchain?.toLowerCase().includes('stellar');
                 }
                 const tChainId = getEvmChainId(nt);
@@ -239,39 +288,119 @@ const AssetSelectorModal: FC = () => {
 
             const combinedSupportedSymbols = Array.from(new Set([...intentsSupportedSymbols]));
 
-            validTokens = registryTokens.filter(t =>
-              combinedSupportedSymbols.includes(t.symbol.toUpperCase())
-            );
+            if (combinedSupportedSymbols.length > 0) {
+              validTokens = registryTokens.filter(t =>
+                combinedSupportedSymbols.includes(t.symbol.toUpperCase())
+              );
+            }
           }
+        }
+
+        const customWalletAssetsForChain = walletAssets.filter(
+          wa => String(wa.chainId) === String(activeChainId)
+        );
+        for (const wa of customWalletAssetsForChain) {
+          if (
+            effectiveActionType === 'SWAP' &&
+            currentNetwork === 'testnet' &&
+            isStellarChainId(activeChainId) &&
+            !isSoroswapTestnetSupported(wa)
+          ) {
+            continue;
+          }
+          const alreadyExists = validTokens.some(vt =>
+            vt.isNative && wa.isNative
+              ? vt.symbol.toUpperCase() === wa.symbol.toUpperCase()
+              : isStellarChainId(activeChainId) && currentNetwork === 'testnet'
+                ? vt.symbol.toUpperCase() === wa.symbol.toUpperCase()
+                : (vt.address || '').toLowerCase() === (wa.address || '').toLowerCase()
+          );
+          if (!alreadyExists) {
+            validTokens.push({
+              chainId: activeChainId,
+              address: wa.address || '',
+              contract:
+                (wa as any).contract || (wa.address?.startsWith('C') ? wa.address : undefined),
+              name: wa.name || wa.symbol,
+              symbol: wa.symbol,
+              decimals: wa.decimals || 7,
+              logoURI: wa.image,
+              isNative: wa.isNative,
+              type: wa.chainType === 'stellar' ? 'STELLAR' : 'ERC20',
+            });
+          }
+        }
+
+        if (isStellarChainId(activeChainId) && currentNetwork === 'testnet') {
+          const seen = new Set<string>();
+          validTokens = validTokens.filter(t => {
+            const sym =
+              t.isNative || t.symbol?.toUpperCase() === 'XLM' ? 'XLM' : t.symbol?.toUpperCase();
+            if (!sym || seen.has(sym)) return false;
+            seen.add(sym);
+            return true;
+          });
         }
 
         validTokens.forEach(t => {
           const isTNative =
             !!t.isNative ||
-            !t.address ||
-            t.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
-            t.address.toLowerCase() === 'native';
+            (isStellarChainId(activeChainId)
+              ? t.symbol?.toUpperCase() === 'XLM' && (!t.issuer || t.issuer === 'native')
+              : !t.address ||
+                t.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+                t.address.toLowerCase() === 'native');
           result.push({
-            id: `${effectiveActionType.toLowerCase()}-${activeChainId}-${t.symbol}-${isTNative ? 'native' : t.address || ''}`,
+            id: `${effectiveActionType.toLowerCase()}-${activeChainId}-${t.symbol}-${isTNative ? 'native' : (t as any).contract || t.address || ''}`,
             symbol: t.symbol,
             name: t.name,
             image: t.logoURI,
             chainId: activeChainId,
             address: t.address,
+            contract: (t as any).contract,
+            issuer: (t as any).issuer,
+            domain: (t as any).domain,
             decimals: t.decimals,
-            isNative: t.isNative,
+            isNative: isTNative,
             balance:
               walletAssets.find(w => {
-                if (w.chainId !== activeChainId) return false;
+                if (String(w.chainId) !== String(activeChainId)) return false;
+                if (
+                  isStellarChainId(activeChainId) &&
+                  currentNetwork === 'testnet' &&
+                  w.symbol.toUpperCase() === t.symbol.toUpperCase()
+                ) {
+                  return true;
+                }
                 const wIsNative =
                   !!w.isNative ||
-                  (w.address &&
-                    w.address.toLowerCase() === '0x0000000000000000000000000000000000000000');
-                if (wIsNative !== isTNative) return false;
+                  !w.address ||
+                  w.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+                  w.address.toLowerCase() === 'native';
                 if (wIsNative && isTNative) {
                   return w.symbol.toUpperCase() === t.symbol.toUpperCase();
                 }
-                return w.address?.toLowerCase() === t.address?.toLowerCase();
+                if (!wIsNative && !isTNative) {
+                  const tAddr = (t.address || '').toLowerCase();
+                  const wAddr = (w.address || '').toLowerCase();
+                  const tContract = ((t as any).contract || '').toLowerCase();
+                  const wContract = ((w as any).contract || '').toLowerCase();
+                  const tIssuer = ((t as any).issuer || '').toLowerCase();
+                  const wIssuer = ((w as any).issuer || '').toLowerCase();
+
+                  if (tContract && wContract && tContract === wContract) return true;
+                  if (tContract && wAddr && tContract === wAddr) return true;
+                  if (tAddr && wContract && tAddr === wContract) return true;
+                  if (tIssuer && wIssuer && tIssuer === wIssuer) return true;
+                  if (tIssuer && wAddr && tIssuer === wAddr) return true;
+                  if (tAddr && wIssuer && tAddr === wIssuer) return true;
+                  if (tAddr && wAddr && tAddr === wAddr) return true;
+
+                  if (!isStellarChainId(activeChainId) && !tAddr && !wAddr) {
+                    return w.symbol.toUpperCase() === t.symbol.toUpperCase();
+                  }
+                }
+                return false;
               })?.balance || 0,
           });
         });
@@ -281,8 +410,9 @@ const AssetSelectorModal: FC = () => {
     if (selectedNetwork !== 'all') {
       result = result.filter(
         a =>
-          a.chainId === selectedNetwork ||
-          (selectedNetwork === STELLAR_CHAIN_ID && a.chainType === 'stellar') ||
+          String(a.chainId) === String(selectedNetwork) ||
+          (isStellarChainId(selectedNetwork) &&
+            (a.chainType === 'stellar' || isStellarChainId(a.chainId))) ||
           selectedNetwork === DYDX_CHAIN_ID
       );
     }
@@ -293,8 +423,11 @@ const AssetSelectorModal: FC = () => {
         a =>
           a.symbol.toLowerCase().includes(q) ||
           (a.name && a.name.toLowerCase().includes(q)) ||
+          (a.domain && a.domain.toLowerCase().includes(q)) ||
           (a.address && q.length > 5 && a.address.toLowerCase().includes(q)) ||
-          (a.address && a.address.toLowerCase() === q)
+          (a.address && a.address.toLowerCase() === q) ||
+          (a.contract && q.length > 5 && a.contract.toLowerCase().includes(q)) ||
+          (a.contract && a.contract.toLowerCase() === q)
       );
     }
 
@@ -304,6 +437,7 @@ const AssetSelectorModal: FC = () => {
       return a.symbol.toLowerCase().localeCompare(b.symbol.toLowerCase());
     });
   }, [
+    currentNetwork,
     walletAssets,
     selectedNetwork,
     debouncedSearch,
@@ -318,34 +452,38 @@ const AssetSelectorModal: FC = () => {
     (asset: any) => {
       const isAssetNative =
         !!asset.isNative ||
-        !asset.address ||
-        asset.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
-        asset.address.toLowerCase() === 'native';
-      const addressVal = isAssetNative ? 'native' : asset.address;
+        (isStellarChainId(asset.chainId)
+          ? asset.symbol?.toUpperCase() === 'XLM' && (!asset.issuer || asset.issuer === 'native')
+          : !asset.address ||
+            asset.address.toLowerCase() === '0x0000000000000000000000000000000000000000' ||
+            asset.address.toLowerCase() === 'native');
+      const addressVal = isAssetNative
+        ? 'native'
+        : isStellarChainId(asset.chainId)
+          ? asset.contract || asset.issuer || asset.address || ''
+          : asset.address;
 
       if (onSelect) {
         onSelect(asset);
         closeAssetSelector();
         if (actionType === 'SEND' || actionType === 'RECEIVE') {
           const path = actionType === 'SEND' ? '/send' : '/receive';
-          const cId =
-            asset.chainId === STELLAR_CHAIN_ID
-              ? 'stellar'
-              : asset.chainId === DYDX_CHAIN_ID
-                ? 'dydx'
-                : asset.chainId;
+          const cId = isStellarChainId(asset.chainId)
+            ? 'stellar'
+            : asset.chainId === DYDX_CHAIN_ID
+              ? 'dydx'
+              : asset.chainId;
           navigate(`${path}?asset=${asset.symbol}&chainId=${cId}&address=${addressVal}`, {
             replace: true,
           });
         }
         return;
       }
-      const cId =
-        asset.chainId === STELLAR_CHAIN_ID
-          ? 'stellar'
-          : asset.chainId === DYDX_CHAIN_ID
-            ? 'dydx'
-            : asset.chainId;
+      const cId = isStellarChainId(asset.chainId)
+        ? 'stellar'
+        : asset.chainId === DYDX_CHAIN_ID
+          ? 'dydx'
+          : asset.chainId;
       const path =
         actionType === 'SEND'
           ? '/send'
@@ -364,8 +502,9 @@ const AssetSelectorModal: FC = () => {
 
   const handleCopyAddress = useCallback((e: React.MouseEvent, asset: any) => {
     e.stopPropagation();
-    if (!asset.address) return;
-    navigator.clipboard.writeText(asset.address);
+    const addr = asset.address || asset.contract;
+    if (!addr) return;
+    navigator.clipboard.writeText(addr);
     setCopiedId(asset.id);
     setTimeout(() => setCopiedId(null), 2000);
   }, []);
@@ -409,10 +548,11 @@ const AssetSelectorModal: FC = () => {
                     </span>
                   ) : (
                     <span className="text-[10px] bg-bg-tertiary text-text-secondary px-1.5 py-0.5 rounded-md font-bold uppercase overflow-hidden text-ellipsis whitespace-nowrap max-w-[80px]">
-                      {asset.address?.slice(0, 6)}...{asset.address?.slice(-4)}
+                      {(asset.address || asset.contract)?.slice(0, 6)}...
+                      {(asset.address || asset.contract)?.slice(-4)}
                     </span>
                   )}
-                  {asset.address && !asset.isNative && (
+                  {(asset.address || asset.contract) && !asset.isNative && (
                     <button
                       onClick={e => handleCopyAddress(e, asset)}
                       className="p-1 hover:bg-bg-tertiary rounded-md text-text-muted transition-colors"
@@ -426,7 +566,9 @@ const AssetSelectorModal: FC = () => {
                   )}
                 </div>
                 <div className="text-xs text-text-secondary truncate">
-                  {asset.name || asset.symbol}
+                  {asset.domain
+                    ? `${asset.name || asset.symbol} • ${asset.domain}`
+                    : asset.name || asset.symbol}
                 </div>
               </div>
             </div>

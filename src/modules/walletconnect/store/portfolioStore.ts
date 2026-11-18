@@ -62,6 +62,11 @@ interface PortfolioActions {
 
 const CACHE_TTL = 60_000;
 let enrichInFlight = false;
+let queuedFetchParams: {
+  connectedWallets: Record<string, { address: string } | undefined>;
+  network: string;
+  force?: boolean;
+} | null = null;
 
 export const usePortfolioStore = create<PortfolioState & PortfolioActions>()(
   subscribeWithSelector(
@@ -142,7 +147,15 @@ export const usePortfolioStore = create<PortfolioState & PortfolioActions>()(
           const state = get();
           const now = Date.now();
 
-          if (state.isFetching) return;
+          // If a fetch is already in flight, queue this request so we don't drop newly connected wallets
+          if (state.isFetching) {
+            queuedFetchParams = {
+              connectedWallets,
+              network,
+              force: force || queuedFetchParams?.force,
+            };
+            return;
+          }
 
           const currentWalletsStr = JSON.stringify(connectedWallets);
           const walletsChanged = state.lastConnectedWalletsStr !== currentWalletsStr;
@@ -151,7 +164,23 @@ export const usePortfolioStore = create<PortfolioState & PortfolioActions>()(
           const isNetworkSame = state.network === network;
           const hasData = state.assets.length > 0;
 
-          if (!force && !walletsChanged && isRecentlyFetched && isNetworkSame && hasData) {
+          const hasEvmWallet = !!connectedWallets.evm?.address;
+          const hasStellarWallet = !!connectedWallets.stellar?.address;
+          const hasEvmData = state.assets.some(a => a.chainType === 'evm');
+          const hasStellarData = state.assets.some(a => a.chainType === 'stellar');
+
+          // If a connected wallet has NO loaded data at all, we MUST fetch it (never skip due to CACHE_TTL)
+          const missingDataForConnectedWallet =
+            (hasEvmWallet && !hasEvmData) || (hasStellarWallet && !hasStellarData);
+
+          if (
+            !force &&
+            !walletsChanged &&
+            !missingDataForConnectedWallet &&
+            isRecentlyFetched &&
+            isNetworkSame &&
+            hasData
+          ) {
             return;
           }
 
@@ -278,6 +307,17 @@ export const usePortfolioStore = create<PortfolioState & PortfolioActions>()(
                     .finally(() => {
                       enrichInFlight = false;
                     });
+                }
+
+                // Process queued fetch if another request came in while in flight
+                if (queuedFetchParams) {
+                  const nextParams = queuedFetchParams;
+                  queuedFetchParams = null;
+                  void get().fetchAssets(
+                    nextParams.connectedWallets,
+                    nextParams.network,
+                    nextParams.force
+                  );
                 }
               }
             }

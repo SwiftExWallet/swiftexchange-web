@@ -3,81 +3,107 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Signer } from 'ethers';
 
 import { useHistoryStore } from '../../../core/stores/historyStore';
+import { useMarketStore } from '../../../core/stores/marketStore';
 import { getAllOrders } from '../api/orders';
+import { type ScanProgress, getPersistedHistory, persistHistory } from '../historyScanner';
 import type { AsterOrderResponse } from '../types/orders';
 
-const PAGE_LIMIT = 50;
-const CACHE_TTL = 30000; // 30 seconds
+export type TimeRange = '1d' | '1w';
 
-// Module-level global cache that persists across tab switches
-const globalOrderCache: Record<
-  string,
-  { data: AsterOrderResponse[]; timestamp: number; hasMore: boolean }
-> = {};
+const PAGE_LIMIT = 100;
 
-const getOrderTime = (o: AsterOrderResponse) => {
+const getOrderTime = (o: AsterOrderResponse): number => {
   return o.updateTime || o.time || 0;
-};
-
-const sortDesc = (items: AsterOrderResponse[]) => {
-  return [...items].sort((a, b) => getOrderTime(b) - getOrderTime(a));
 };
 
 export const useOrderHistory = (
   signer: Signer | null,
   userAddr: string | null,
-  symbol: string | null
+  symbol: string | null,
+  timeRange: TimeRange = '1w'
 ) => {
-  const cacheKey = userAddr ? `${userAddr}_${symbol || 'all'}_orders` : '';
-  const cachedEntry = cacheKey ? globalOrderCache[cacheKey] : undefined;
+  const orderHistory = useHistoryStore(state => state.orderHistory);
+  const hasFetched = useHistoryStore(state => state.hasFetchedOrderHistory);
+  const hasMore = useHistoryStore(state => state.hasMoreOrderHistory);
+  const oldestOrderTime = useHistoryStore(state => state.oldestOrderTime);
 
-  const [orders, setOrders] = useState<AsterOrderResponse[]>(() => cachedEntry?.data || []);
-  const [isLoading, setIsLoading] = useState(() => !cachedEntry);
+  const [isLoading, setIsLoading] = useState(() => !hasFetched && !!userAddr && !!signer);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(() => (cachedEntry ? cachedEntry.hasMore : true));
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
+  const [pausedNotice, setPausedNotice] = useState<string | null>(null);
 
   const isFetchingMoreRef = useRef(false);
+  const lastUserRef = useRef<string | null>(userAddr);
+
+  useEffect(() => {
+    if (userAddr !== lastUserRef.current) {
+      lastUserRef.current = userAddr;
+      useHistoryStore.getState().clear();
+    }
+  }, [userAddr]);
 
   useEffect(() => {
     if (!signer || !userAddr) {
-      setOrders([]);
-      setHasMore(true);
+      setIsLoading(false);
+      setScanProgress(null);
+      setPausedNotice(null);
+      return;
+    }
+
+    if (useHistoryStore.getState().hasFetchedOrderHistory) {
       setIsLoading(false);
       return;
+    }
+
+    const persisted = getPersistedHistory<AsterOrderResponse>(userAddr, 'orders');
+    if (
+      persisted?.data &&
+      persisted.data.length > 0 &&
+      useHistoryStore.getState().orderHistory.length === 0
+    ) {
+      useHistoryStore.getState().loadPersistedOrderHistory(persisted.data);
     }
 
     let isMounted = true;
-    const currentCached = globalOrderCache[cacheKey];
+    setIsLoading(true);
+    const abortController = new AbortController();
 
-    // If cache is fresh, don't show loading and don't spam API
-    if (currentCached && Date.now() - currentCached.timestamp < CACHE_TTL) {
-      setOrders(currentCached.data);
-      setHasMore(currentCached.hasMore);
-      setIsLoading(false);
-      return;
-    }
-
-    if (!currentCached) {
-      setIsLoading(true);
-    }
+    const rangeMs = 7 * 24 * 60 * 60 * 1000;
+    const minTimestamp = Date.now() - rangeMs;
+    const targetSymbol = (symbol || useMarketStore.getState().selectedSymbol || 'BTCUSDT')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .toUpperCase();
 
     const fetchHistory = async () => {
       try {
-        const data = await getAllOrders(signer, userAddr, {
-          symbol: symbol || undefined,
-          limit: PAGE_LIMIT,
-        });
-        if (isMounted) {
-          const sorted = sortDesc(Array.isArray(data) ? data : []);
-          const more = sorted.length > 0;
-          setOrders(sorted);
-          setHasMore(more);
-          globalOrderCache[cacheKey] = { data: sorted, timestamp: Date.now(), hasMore: more };
-        }
+        const res = await getAllOrders(
+          signer,
+          userAddr,
+          {
+            symbol: targetSymbol,
+            startTime: minTimestamp,
+            endTime: Math.floor(Date.now()),
+            limit: PAGE_LIMIT,
+          },
+          abortController.signal
+        );
+
+        if (!isMounted) return;
+
+        const items = Array.isArray(res) ? res : [];
+        const more = items.length >= PAGE_LIMIT;
+        useHistoryStore.getState().setOrderHistory(items, more);
+        persistHistory(userAddr, 'orders', items, Date.now());
       } catch (err) {
-        console.error('Failed to load order history:', err);
+        if (!abortController.signal.aborted) {
+          console.error('[Aster Order History] Failed to load order history:', err);
+        }
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+          setScanProgress(null);
+          setPausedNotice(null);
+        }
       }
     };
 
@@ -85,70 +111,67 @@ export const useOrderHistory = (
 
     return () => {
       isMounted = false;
+      abortController.abort();
     };
-  }, [signer, userAddr, symbol, cacheKey]);
+  }, [signer, userAddr, symbol]);
 
   const loadMore = useCallback(async () => {
     if (!signer || !userAddr || isLoadingMore || !hasMore || isFetchingMoreRef.current) return;
-    if (orders.length === 0) return;
 
-    const oldestOrder = orders[orders.length - 1];
-    const oldestTime = getOrderTime(oldestOrder);
-    if (!oldestTime) return;
+    const curEnd = (oldestOrderTime || Date.now()) - 1;
+    const rangeMs = 7 * 24 * 60 * 60 * 1000;
+    const minTimestamp = Date.now() - rangeMs;
+
+    if (curEnd <= minTimestamp || curEnd <= 0) {
+      useHistoryStore.getState().appendOrderHistory([], false);
+      return;
+    }
 
     isFetchingMoreRef.current = true;
     setIsLoadingMore(true);
 
     try {
-      const nextBatch = await getAllOrders(signer, userAddr, {
-        symbol: symbol || undefined,
-        endTime: oldestTime - 1,
+      const targetSymbol = (symbol || useMarketStore.getState().selectedSymbol || 'BTCUSDT')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toUpperCase();
+      const res = await getAllOrders(signer, userAddr, {
+        symbol: targetSymbol,
+        startTime: minTimestamp,
+        endTime: Math.floor(curEnd),
         limit: PAGE_LIMIT,
       });
 
-      const list = Array.isArray(nextBatch) ? nextBatch : [];
-      if (list.length === 0) {
-        setHasMore(false);
-        if (globalOrderCache[cacheKey]) globalOrderCache[cacheKey].hasMore = false;
-      } else {
-        setOrders(prev => {
-          const existingIds = new Set(prev.map(o => String(o.orderId)));
-          const uniqueNew = list.filter(o => !existingIds.has(String(o.orderId)));
-          if (uniqueNew.length === 0) {
-            setHasMore(false);
-            if (globalOrderCache[cacheKey]) globalOrderCache[cacheKey].hasMore = false;
-            return prev;
-          }
-          const combined = sortDesc([...prev, ...uniqueNew]);
-          const more = uniqueNew.length > 0;
-          setHasMore(more);
-          globalOrderCache[cacheKey] = { data: combined, timestamp: Date.now(), hasMore: more };
-          return combined;
-        });
-      }
+      const nextBatch = Array.isArray(res) ? res : [];
+      const more = nextBatch.length >= PAGE_LIMIT;
+      useHistoryStore.getState().appendOrderHistory(nextBatch, more);
     } catch (err) {
-      console.error('Failed to load more order history:', err);
+      console.error('[Aster Order History] Failed to load more order history:', err);
     } finally {
       setIsLoadingMore(false);
       isFetchingMoreRef.current = false;
     }
-  }, [signer, userAddr, symbol, isLoadingMore, hasMore, orders, cacheKey]);
+  }, [signer, userAddr, isLoadingMore, hasMore, oldestOrderTime, symbol]);
 
-  const recentOrders = useHistoryStore(state => state.recentOrders);
+  const filteredOrders = useMemo(() => {
+    let list = orderHistory;
+    if (symbol && symbol.trim()) {
+      const cleanTarget = symbol.replace('-', '').toUpperCase();
+      list = list.filter(o => (o.symbol || '').replace('-', '').toUpperCase() === cleanTarget);
+    }
+    if (timeRange === '1d') {
+      const minTimestamp = Date.now() - 24 * 60 * 60 * 1000;
+      list = list.filter(o => getOrderTime(o) >= minTimestamp);
+    }
+    return list;
+  }, [orderHistory, symbol, timeRange]);
 
-  const mergedOrders = useMemo(() => {
-    const socketOrders = symbol ? recentOrders.filter(o => o.symbol === symbol) : recentOrders;
-    const all = [...socketOrders, ...orders];
-    const seen = new Set();
-    return all
-      .filter(o => {
-        const key = String(o.orderId);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .sort((a, b) => getOrderTime(b) - getOrderTime(a));
-  }, [symbol, recentOrders, orders]);
-
-  return { orders: mergedOrders, isLoading, isLoadingMore, hasMore, loadMore };
+  return {
+    orders: filteredOrders,
+    isLoading,
+    isLoadingMore,
+    hasMore,
+    loadMore,
+    scanProgress,
+    pausedNotice,
+  };
 };

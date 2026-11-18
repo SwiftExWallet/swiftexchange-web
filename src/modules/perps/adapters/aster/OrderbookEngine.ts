@@ -1,69 +1,83 @@
 import { orderBookStore } from '../../core/stores/orderbookStore';
-import { ASTER_ENDPOINTS, ASTER_REST_URL } from './constants';
+import { asterHttpClient } from './client/asterHttpClient';
+import { ASTER_ENDPOINTS, getAsterRestUrl } from './constants';
 
 interface DiffEvent {
-  U: number; // First update ID in event
-  u: number; // Final update ID in event
-  pu: number; // Final update ID in last event (pu continuity chain)
-  b: [string, string][]; // Bids: [price, size]
-  a: [string, string][]; // Asks: [price, size]
+  U: number;
+  u: number;
+  pu?: number;
+  b: [string, string][];
+  a: [string, string][];
 }
 
-type EngineState = 'idle' | 'buffering' | 'synced' | 'error';
-
 export class OrderbookEngine {
-  private symbol: string; // Aster REST symbol, e.g. "BTCUSDT"
-  private uiSymbol: string; // UI symbol, e.g. "BTC-USDT"
+  private symbol: string;
+  private uiSymbol: string;
 
-  private state: EngineState = 'idle';
-  private buffer: DiffEvent[] = [];
   private lastAppliedU = -1;
+  private isFetching = false;
+  private hasSnapshot = false;
+  private bridgedSnapshot = false;
+  private snapshotRetryCount = 0;
+  private lastResyncTime = 0;
 
-  private lastFlushTime = 0;
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly FLUSH_INTERVAL_MS = 80;
+  private isDisposed = false;
+  private abortController: AbortController | null = null;
 
   constructor(asterSymbol: string) {
-    this.symbol = asterSymbol.toUpperCase();
-    this.uiSymbol = this.symbol.replace('USDT', '-USDT');
+    const clean = asterSymbol
+      .replace(/[-_]/g, '')
+      .toUpperCase()
+      .replace(/(USDT)+$/g, '');
+    this.symbol = `${clean}USDT`;
+    this.uiSymbol = `${clean}-USDT`;
+    orderBookStore.startSync(this.uiSymbol);
+    orderBookStore.startSync(this.symbol);
+    this.fetchSnapshot();
   }
 
-  /**
-   * Called by the WS client when a `@depth` diff event arrives.
-   * Must be called regardless of sync state — buffering happens here.
-   */
-  public onDiffEvent(raw: DiffEvent): void {
-    if (this.state === 'idle') {
-      this.state = 'buffering';
-      this.fetchSnapshot();
-    }
+  public async fetchSnapshot(): Promise<void> {
+    if (this.isDisposed || this.isFetching || this.hasSnapshot) return;
 
-    if (this.state === 'buffering') {
-      this.buffer.push(raw);
-      return;
-    }
+    this.isFetching = true;
 
-    if (this.state === 'synced') {
-      this.applyDiff(raw);
+    if (this.abortController) {
+      this.abortController.abort();
     }
-  }
+    this.abortController = new AbortController();
 
-  private async fetchSnapshot(): Promise<void> {
     try {
-      const res = await fetch(
-        `${ASTER_REST_URL}${ASTER_ENDPOINTS.DEPTH}?symbol=${this.symbol}&limit=1000`
-      );
-      const snap = await res.json();
-      this.applySnapshot(snap);
-    } catch {
-      // If snapshot fetch fails or snapshot is invalid (e.g. rate limit error)
-      // Enter 'error' state so we don't instantly fetch again on the next WS event.
-      this.state = 'error';
-      this.buffer = [];
-      // Wait 2 seconds before allowing another snapshot attempt
-      setTimeout(() => {
-        if (this.state === 'error') this.state = 'idle';
-      }, 2000);
+      const url = `${getAsterRestUrl()}${ASTER_ENDPOINTS.DEPTH}?symbol=${this.symbol}&limit=100`;
+      const snap = await asterHttpClient.request<any>(url, {
+        method: 'GET',
+        weight: 2,
+        ttlMs: 1000,
+        signal: this.abortController.signal,
+      });
+
+      if (!this.isDisposed && snap && snap.bids && snap.asks) {
+        this.applySnapshot(snap);
+      } else if (!this.hasSnapshot) {
+        orderBookStore.reconcileAndFlush(this.uiSymbol, 0);
+        orderBookStore.reconcileAndFlush(this.symbol, 0);
+      }
+    } catch (e: any) {
+      if (!this.hasSnapshot) {
+        orderBookStore.reconcileAndFlush(this.uiSymbol, 0);
+        orderBookStore.reconcileAndFlush(this.symbol, 0);
+      }
+      if (e?.name !== 'AbortError' && !this.isDisposed) {
+        if (!this.hasSnapshot && this.snapshotRetryCount < 2) {
+          this.snapshotRetryCount++;
+          setTimeout(() => {
+            if (!this.isDisposed && !this.hasSnapshot) {
+              this.fetchSnapshot();
+            }
+          }, 3000);
+        }
+      }
+    } finally {
+      this.isFetching = false;
     }
   }
 
@@ -71,126 +85,83 @@ export class OrderbookEngine {
     lastUpdateId: number;
     bids: [string, string][];
     asks: [string, string][];
-    _retryCount?: number;
   }): void {
     const { lastUpdateId } = snap;
+    if (!snap.bids || !snap.asks) return;
 
-    if (!snap.bids || !snap.asks) {
-      throw new Error('Invalid snapshot data received');
-    }
+    const formattedBids = snap.bids.map(([price, size]) => ({ price, size }));
+    const formattedAsks = snap.asks.map(([price, size]) => ({ price, size }));
 
-    // Discard stale buffered events
-    const validBuffer = this.buffer.filter(e => e.u >= lastUpdateId);
+    orderBookStore.applySnapshot(this.uiSymbol, formattedBids, formattedAsks, lastUpdateId || 0);
+    orderBookStore.applySnapshot(this.symbol, formattedBids, formattedAsks, lastUpdateId || 0);
 
-    // Find first valid event: U <= lastUpdateId AND u >= lastUpdateId
-    // (Aster sometimes has gaps between pu and U, so we also check pu <= lastUpdateId)
-    const firstIdx = validBuffer.findIndex(
-      e => (e.U <= lastUpdateId || e.pu <= lastUpdateId) && e.u >= lastUpdateId
-    );
+    const flushedU1 = orderBookStore.reconcileAndFlush(this.uiSymbol, lastUpdateId || 0);
+    const flushedU2 = orderBookStore.reconcileAndFlush(this.symbol, lastUpdateId || 0);
 
-    if (firstIdx === -1) {
-      if (this.buffer.length > 0 && lastUpdateId < this.buffer[0].U) {
-        // The snapshot from the REST API is older than the oldest event in our WebSocket buffer.
-        // This happens when the exchange caches the REST API.
-        // Do NOT clear the buffer. Just fetch the snapshot again in 1s.
-        setTimeout(() => this.fetchSnapshot(), 1000);
-        return;
-      }
+    this.hasSnapshot = true;
+    this.bridgedSnapshot = false;
+    this.lastAppliedU = Math.max(lastUpdateId || 0, flushedU1 || 0, flushedU2 || 0);
+  }
 
-      // Snapshot might be NEWER than the buffer (WebSocket is lagging behind REST API).
-      // Wait 100ms for more WebSocket events to arrive, then try applying this same snapshot again.
-      if (this.buffer.length === 0 || lastUpdateId > this.buffer[this.buffer.length - 1].u) {
-        if (!snap._retryCount) snap._retryCount = 0;
-        if (snap._retryCount < 20) {
-          // Max 2 seconds of waiting for WS to catch up
-          snap._retryCount++;
-          setTimeout(() => this.applySnapshot(snap), 100);
-          return;
-        }
-      }
+  public onDiffEvent(raw: DiffEvent): void {
+    if (this.isDisposed) return;
 
-      // No valid starting event in buffer for other reasons (e.g. dropped packets)
-      // Restart after a delay to avoid spamming
-      this.state = 'error';
-      this.buffer = [];
-      setTimeout(() => {
-        if (this.state === 'error') this.state = 'idle';
-      }, 2000);
+    if (!this.hasSnapshot) {
+      const bids = raw.b.map(([price, size]) => ({ price, size }));
+      const asks = raw.a.map(([price, size]) => ({ price, size }));
+      orderBookStore.applyDiff(this.uiSymbol, bids, asks, raw.u, raw.U, raw.pu);
+      orderBookStore.applyDiff(this.symbol, bids, asks, raw.u, raw.U, raw.pu);
       return;
     }
 
-    orderBookStore.applySnapshot(
-      this.uiSymbol,
-      snap.bids.map(([price, size]) => ({ price, size })),
-      snap.asks.map(([price, size]) => ({ price, size })),
-      lastUpdateId
-    );
-
-    this.state = 'synced';
-
-    // Drain buffered diffs in order
-    // Note: this.lastAppliedU is -1 here, so the first applyDiff skips the pu check.
-    // This is correct per Aster/Binance specs: the first diff's pu might not equal lastUpdateId.
-    for (let i = firstIdx; i < validBuffer.length; i++) {
-      this.applyDiff(validBuffer[i]);
-    }
-
-    this.buffer = [];
-    this.scheduleFlush();
-  }
-
-  private applyDiff(event: DiffEvent): void {
-    // pu chain integrity check — break means we are desynced, must fully restart
-    if (this.lastAppliedU !== -1 && event.pu !== this.lastAppliedU) {
-      this.restart();
+    if (raw.u <= this.lastAppliedU) {
       return;
     }
 
-    orderBookStore.applyDiff(
-      this.uiSymbol,
-      event.b.map(([price, size]) => ({ price, size })),
-      event.a.map(([price, size]) => ({ price, size })),
-      event.u
-    );
-
-    this.lastAppliedU = event.u;
-    this.scheduleFlush();
-  }
-
-  /** Throttled flush: update React state at smooth 12-15fps without UI blocking */
-  private scheduleFlush(): void {
-    const now = performance.now();
-    const elapsed = now - this.lastFlushTime;
-
-    if (elapsed >= this.FLUSH_INTERVAL_MS) {
-      this.lastFlushTime = now;
-      if (this.flushTimer !== null) {
-        clearTimeout(this.flushTimer);
-        this.flushTimer = null;
-      }
-      orderBookStore.flushToState(this.uiSymbol);
-    } else if (this.flushTimer === null) {
-      this.flushTimer = setTimeout(() => {
-        this.lastFlushTime = performance.now();
-        this.flushTimer = null;
-        orderBookStore.flushToState(this.uiSymbol);
-      }, this.FLUSH_INTERVAL_MS - elapsed);
+    if (!this.bridgedSnapshot) {
+      this.bridgedSnapshot = true;
+      this.lastAppliedU = raw.u;
+      const bids = raw.b.map(([price, size]) => ({ price, size }));
+      const asks = raw.a.map(([price, size]) => ({ price, size }));
+      orderBookStore.applyDiff(this.uiSymbol, bids, asks, raw.u, raw.U, raw.pu);
+      orderBookStore.applyDiff(this.symbol, bids, asks, raw.u, raw.U, raw.pu);
+      return;
     }
-  }
 
-  /** Full restart: discard all state, re-buffer on next incoming diff */
-  private restart(): void {
-    this.state = 'idle';
-    this.buffer = [];
-    this.lastAppliedU = -1;
-    orderBookStore.resetBook(this.uiSymbol);
-    if (this.flushTimer !== null) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
+    if (
+      raw.pu !== undefined &&
+      this.lastAppliedU > 0 &&
+      raw.pu !== this.lastAppliedU &&
+      (raw.U === undefined || raw.U > this.lastAppliedU + 1)
+    ) {
+      const now = Date.now();
+      if (now - this.lastResyncTime > 5000) {
+        this.lastResyncTime = now;
+        this.hasSnapshot = false;
+        this.bridgedSnapshot = false;
+        this.fetchSnapshot();
+      }
+      return;
+    }
+
+    const bids = raw.b.map(([price, size]) => ({ price, size }));
+    const asks = raw.a.map(([price, size]) => ({ price, size }));
+
+    orderBookStore.applyDiff(this.uiSymbol, bids, asks, raw.u, raw.U, raw.pu);
+    orderBookStore.applyDiff(this.symbol, bids, asks, raw.u, raw.U, raw.pu);
+
+    if (raw.u > this.lastAppliedU) {
+      this.lastAppliedU = raw.u;
     }
   }
 
   public dispose(): void {
-    this.restart();
+    this.isDisposed = true;
+    this.hasSnapshot = false;
+    this.bridgedSnapshot = false;
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
   }
 }

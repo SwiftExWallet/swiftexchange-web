@@ -18,6 +18,7 @@
 ## 📖 Table of Contents
 
 - [Overview](#-overview)
+  - [Two Ecosystems, One Interface: EVM & Stellar Unified](#-two-ecosystems-one-interface-evm--stellar-unified)
 - [Mobile Applications](#-mobile-applications)
 - [Screenshots](#-screenshots)
 - [Supported Networks & Ecosystems](#-supported-networks--ecosystems)
@@ -44,7 +45,46 @@
 
 **Swiftex Wallet Exchange** is an open-source, non-custodial decentralized trading hub connecting the EVM ecosystem and the Stellar Network into a single, unified interface.
 
-Swiftex gives traders complete sovereign control of their private keys while delivering a CEX-grade user experience: manage assets across 7+ major EVM chains and Stellar, execute cross-chain swaps, bridge assets, and trade perpetual derivatives on Aster DEX with zero repetitive wallet approval popups.
+Swiftex gives traders complete sovereign control of their private keys while delivering a CEX-grade user experience: manage assets across 7+ major EVM chains and Stellar, execute cross-chain swaps, bridge assets, and trade perpetual derivatives on Aster DEX _(Beta — Under Active Development)_ with zero repetitive wallet approval popups.
+
+### 🌐 Two Ecosystems, One Interface: EVM & Stellar Unified
+
+Swiftex gives users the unique capability to connect and manage **both EVM and Stellar wallets simultaneously** under a single, non-custodial interface:
+
+```mermaid
+flowchart TD
+    subgraph Wallets["🔑 User's Self-Custodial Wallets"]
+        W1["EVM Wallet (MetaMask, Coinbase, WalletConnect)"]
+        W2["Stellar Wallet (Freighter, Albedo, WalletConnect)"]
+    end
+
+    subgraph App["🛡️ SwiftEx Unified Platform"]
+        direction TB
+        UI1["Multi-Chain Portfolio View"]
+        UI2["Aster Perps Trading (Beta · In Development)"]
+    end
+
+    subgraph Ecosystems["⛓️ Direct Blockchain Interactions"]
+        subgraph EVM["EVM Ecosystem (7+ Chains)"]
+            E1["Deep Liquidity & Native Swaps"]
+            E2["Aster Perps Futures (Beta · In Development)"]
+        end
+        subgraph Stellar["Stellar Network & Soroban"]
+            S1["Sub-Second Settlement (<5s) & Micro-Fees"]
+            S2["Soroban Smart Contracts & Native Tokens"]
+        end
+    end
+
+    W1 --> App
+    W2 --> App
+
+    App --> EVM
+    App --> Stellar
+```
+
+- **EVM Capability:** Connect any EVM wallet (via WalletConnect v2, MetaMask, etc.) to trade institutional perpetual futures on Aster DEX _(Beta — Under Active Development)_ with zero repetitive popups, execute spot swaps, and manage balances across 7+ major EVM chains.
+- **Stellar & Soroban Capability:** Connect your Stellar account to access ultra-fast settlement (<$0.0001 fees), native SDEX order book liquidity, and native **Soroban Smart Contracts**.
+- **Unified Multi-Wallet Experience:** Instead of juggling separate wallet extensions or opening different websites for EVM and Stellar, Swiftex lets you use both networks side-by-side in one place while you always retain 100% self-custody of your private keys.
 
 ---
 

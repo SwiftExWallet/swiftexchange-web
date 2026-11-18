@@ -74,7 +74,11 @@ describe('walletConnectUtils', () => {
 
     it('sends via provider.request for a standard EIP-1193 provider', async () => {
       const provider = {
-        request: vi.fn().mockResolvedValue('0xTXHASH'),
+        request: vi.fn().mockImplementation(async ({ method }) => {
+          if (method === 'eth_chainId') return '0x1';
+          if (method === 'eth_sendTransaction') return '0xTXHASH';
+          return null;
+        }),
       };
       const hash = await sendEVMTransaction(provider, 1, txParams);
       expect(hash).toBe('0xTXHASH');

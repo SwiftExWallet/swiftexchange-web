@@ -43,27 +43,40 @@ export async function connectChainWallet(
     let peerIcon: string | undefined;
     let peerRedirect: { native?: string; universal?: string } | undefined;
 
-    const isWalletConnectOrSwiftEx = walletId === 'walletconnect' || walletId === 'swiftex';
-    const isExtension = isExtensionInstalled(ctx, walletId);
+    const networkTag = (ctx.currentNetwork || 'mainnet').toUpperCase();
+    let isExtension = isExtensionInstalled(ctx, walletId);
 
-    // If the extension isn't installed, fall back to WalletConnect QR instead of throwing.
-    // The user can scan the QR code with the mobile app of the wallet they clicked.
-    if (!isWalletConnectOrSwiftEx && !isExtension) {
-      console.info(
-        `[WalletService] ${walletId} extension not detected — falling back to WalletConnect QR`
-      );
-    }
+    console.info(
+      `[WalletConnect:${networkTag}] Connecting EVM wallet: ${walletId} (Method: ${isExtension ? 'Injected Extension' : 'WalletConnect QR'})`
+    );
 
-    // Use the extension if it's installed; otherwise fall through to WalletConnect QR.
     if (isExtension) {
-      const result = await connectExtension(ctx, walletId);
-      provider = result.provider;
-      evmAddress = result.evmAddress;
-      evmChainId = result.evmChainId;
-      const meta = getSessionMetadata(walletId);
-      peerName = meta.peerName;
-      peerIcon = meta.peerIcon;
-      peerRedirect = meta.peerRedirect;
+      try {
+        const result = await connectExtension(ctx, walletId);
+        provider = result.provider;
+        evmAddress = result.evmAddress;
+        evmChainId = result.evmChainId;
+        const meta = getSessionMetadata(walletId);
+        peerName = meta.peerName;
+        peerIcon = meta.peerIcon;
+        peerRedirect = meta.peerRedirect;
+      } catch (extError: any) {
+        if (
+          extError?.message?.includes('not found') ||
+          extError?.message?.includes('not installed')
+        ) {
+          isExtension = false;
+          const result = await connectWalletConnectSingle(ctx, walletId);
+          provider = result.provider;
+          evmAddress = result.evmAddress;
+          evmChainId = result.evmChainId;
+          peerName = result.peerName;
+          peerIcon = result.peerIcon;
+          peerRedirect = result.peerRedirect;
+        } else {
+          throw extError;
+        }
+      }
     } else {
       const result = await connectWalletConnectSingle(ctx, walletId);
       provider = result.provider;
@@ -84,6 +97,10 @@ export async function connectChainWallet(
       peerIcon,
       peerRedirect,
     };
+
+    console.info(
+      `[WalletConnect:${networkTag}] ✓ EVM Wallet connected: ${evmAddress} on Chain ${evmChainId}`
+    );
 
     ctx.sessions.set(type, session);
     ctx.providers.set(type, provider);
@@ -151,42 +168,37 @@ export async function connectWalletConnectSingle(
       '4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0', // Trust Wallet
       'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96', // MetaMask
       'a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393', // Phantom
+      'aee5083aac025c4c3f1c9afc31ea89dbddca0b1c248195bef469fc4886ae3ab2', // HOT Wallet
     ],
   });
   ctx.modals.set('evm', modal);
 
-  const namespaces = {
-    eip155: {
-      methods: [
-        'eth_sendTransaction',
-        'eth_signTypedData_v4',
-        'eth_signTypedData',
-        'personal_sign',
-      ],
-      chains: evmChains,
-      events: ['chainChanged', 'accountsChanged'],
-    },
+  const eip155Namespace = {
+    methods: [
+      'eth_sendTransaction',
+      'eth_signTypedData_v4',
+      'eth_signTypedData',
+      'personal_sign',
+      'wallet_switchEthereumChain',
+      'wallet_addEthereumChain',
+    ],
+    chains: evmChains,
+    events: ['chainChanged', 'accountsChanged'],
+  };
+
+  // Use optionalNamespaces on both mainnet and testnet to prevent rigid rejection by wallets
+  // that do not support every single chain in the list (e.g. Ethereum-only or subset wallets).
+  const connectParams = {
+    optionalNamespaces: { eip155: eip155Namespace },
+    requiredNamespaces: {},
   };
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      modal.closeModal();
-      reject(new Error('Connection timeout'));
-    }, CONNECTION_TIMEOUT_MS);
-
+    let sessionResolved = false;
     let modalOpened = false;
-    const unsubscribe = modal.subscribeModal(state => {
-      if (state.open) {
-        modalOpened = true;
-      } else if (modalOpened && !state.open) {
-        clearTimeout(timeout);
-        unsubscribe();
-        provider.abortPairing?.();
-        reject(new Error('User closed the modal'));
-      }
-    });
 
-    provider.on('display_uri', (uri: string) => {
+    const onDisplayUri = (uri: string) => {
+      console.info('[WalletConnect:EVM] WC URI generated — opening modal/deeplink');
       ctx.openMobileDeepLink(walletId, uri);
       if (!isMobileDevice() || walletId === 'walletconnect') {
         modal.openModal({ uri });
@@ -200,30 +212,86 @@ export async function connectWalletConnectSingle(
           console.error(err);
         });
       }
+    };
+
+    const cleanup = () => {
+      ctx.cancelActiveConnection = undefined;
+      ctx.modals.delete('evm');
+      clearTimeout(timeout);
+      unsubscribe();
+      try {
+        if (typeof provider.removeListener === 'function') {
+          provider.removeListener('display_uri', onDisplayUri);
+        } else if (typeof provider.off === 'function') {
+          provider.off('display_uri', onDisplayUri);
+        }
+      } catch (err) {
+        void err;
+      }
+    };
+
+    ctx.cancelActiveConnection = (reason = 'Connection cancelled by user') => {
+      cleanup();
+      modal.closeModal();
+      reject(new Error(reason));
+    };
+
+    const timeout = setTimeout(() => {
+      console.warn('[WalletConnect:EVM] Connection timed out');
+      cleanup();
+      modal.closeModal();
+      reject(new Error('Connection timeout'));
+    }, CONNECTION_TIMEOUT_MS);
+
+    const unsubscribe = modal.subscribeModal(state => {
+      if (state.open) {
+        modalOpened = true;
+        console.info('[WalletConnect:EVM] QR modal opened — waiting for wallet approval...');
+      } else if (modalOpened && !state.open) {
+        if (!sessionResolved) {
+          console.info(
+            '[WalletConnect:EVM] Modal closed before session resolved — treating as user cancel'
+          );
+          cleanup();
+          provider.abortPairing?.();
+          reject(new Error('User closed the modal'));
+        } else {
+          console.debug('[WalletConnect:EVM] Modal closed after session resolved — ignoring');
+        }
+      }
     });
 
+    provider.on('display_uri', onDisplayUri);
+
     provider
-      .connect({ namespaces: namespaces as any })
+      .connect(connectParams as any)
       .then((session: any) => {
-        clearTimeout(timeout);
-        unsubscribe();
+        sessionResolved = true;
+        console.info('[WalletConnect:EVM] ✓ provider.connect() resolved — session established');
+        cleanup();
         modal.closeModal();
 
         const namespacesRes = session.namespaces;
         const eip155Acc = namespacesRes?.eip155?.accounts?.[0];
 
-        if (!eip155Acc) {
+        if (!eip155Acc || typeof eip155Acc !== 'string') {
           reject(new Error('EVM account not returned'));
           return;
         }
 
-        let evmAddress: string | undefined;
-        let evmChainId: number | undefined;
-        if (eip155Acc) {
-          const [, chainIdStr, addr] = eip155Acc.split(':');
-          evmAddress = addr;
-          evmChainId = parseInt(chainIdStr, 10);
+        const parts = eip155Acc.split(':');
+        if (parts.length < 3) {
+          reject(new Error('Malformed CAIP-10 EVM account format'));
+          return;
         }
+
+        const [, chainIdStr, addr] = parts;
+        const evmChainId = parseInt(chainIdStr, 10);
+        if (!addr || !/^0x[a-fA-F0-9]{40}$/i.test(addr)) {
+          reject(new Error('Invalid EVM address returned by wallet'));
+          return;
+        }
+        const evmAddress = addr;
         setupWalletConnectListeners(ctx, provider, 'evm');
         const peerMetadata = session.peer?.metadata;
         const meta = getSessionMetadata(walletId, peerMetadata);
@@ -237,8 +305,8 @@ export async function connectWalletConnectSingle(
         });
       })
       .catch((error: any) => {
-        clearTimeout(timeout);
-        unsubscribe();
+        console.error('[WalletConnect:EVM] ✕ provider.connect() failed:', error?.message ?? error);
+        cleanup();
         modal.closeModal();
         reject(error);
       });

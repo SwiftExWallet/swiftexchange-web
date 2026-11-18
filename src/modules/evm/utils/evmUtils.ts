@@ -23,13 +23,13 @@ export function isValidEVMNetwork(networkKey: unknown): networkKey is NetworkKey
   const currentNetwork = useWalletStore.getState().network;
   return (
     (typeof networkKey === 'number' || typeof networkKey === 'string') &&
-    getEVMChains(currentNetwork).some(c => c.chainId === networkKey)
+    getEVMChains(currentNetwork).some(c => String(c.chainId) === String(networkKey))
   );
 }
 
 export function getEVMNetworkConfig(networkKey: NetworkKey): EVMNetworkConfig {
   const currentNetwork = useWalletStore.getState().network;
-  const cfg = getEVMChains(currentNetwork).find(c => c.chainId === networkKey);
+  const cfg = getEVMChains(currentNetwork).find(c => String(c.chainId) === String(networkKey));
 
   if (!cfg) {
     throw new Error(`Unsupported EVM network: ${networkKey}`);

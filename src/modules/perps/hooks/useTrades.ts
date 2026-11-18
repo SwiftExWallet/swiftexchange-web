@@ -8,6 +8,14 @@ import { useTradeStore } from '../core/stores/tradeStore';
  */
 export const useTrades = () => {
   const symbol = useMarketStore(state => state.selectedSymbol);
-  const trades = useTradeStore(state => state.tradesBySymbol[symbol]);
+  const trades = useTradeStore(state => {
+    const map = state.tradesBySymbol;
+    if (map[symbol]?.length) return map[symbol];
+    const withHyphen = symbol.includes('-') ? symbol : symbol.replace(/(USDT|USDC)$/, '-$1');
+    if (map[withHyphen]?.length) return map[withHyphen];
+    const noHyphen = symbol.replace('-', '');
+    if (map[noHyphen]?.length) return map[noHyphen];
+    return map[symbol];
+  });
   return trades ?? [];
 };

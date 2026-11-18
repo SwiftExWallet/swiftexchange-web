@@ -1,14 +1,20 @@
 import { useEffect, useRef } from 'react';
 
-import { WebSocketTransport } from '@nktkas/hyperliquid';
+import { HttpTransport, WebSocketTransport } from '@nktkas/hyperliquid';
+import { clearinghouseState as getClearinghouseState } from '@nktkas/hyperliquid/api/info';
+import { clearinghouseState, openOrders, userFills } from '@nktkas/hyperliquid/api/subscription';
 
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import { useAccountStore } from '../../../core/stores/accountStore';
 import { useHistoryStore } from '../../../core/stores/historyStore';
+import { useMarketStore } from '../../../core/stores/marketStore';
+import { useOrderEntryStore } from '../../../core/stores/orderEntryStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 
 export const useHyperliquidDataStream = (userAddr: string | null) => {
   const currentExchange = useExchangeManager(s => s.currentExchange);
+  const currentNetwork = useExchangeManager(s => s.currentNetwork);
   const transportRef = useRef<WebSocketTransport | null>(null);
 
   useEffect(() => {
@@ -17,95 +23,161 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
         transportRef.current.close();
         transportRef.current = null;
       }
+      useAccountStore.getState().setIsLoading(false);
       return;
     }
 
     let isMounted = true;
-    const transport = new WebSocketTransport();
+    const isTestnet = currentNetwork === 'testnet';
+    const transport = new WebSocketTransport({ isTestnet });
     transportRef.current = transport;
 
     const setup = async () => {
+      useAccountStore.getState().setIsLoading(true);
       try {
-        // Subscribe to webData2 (includes positions and open orders)
-        await transport.subscribe(
-          'webData2',
-          { type: 'webData2', user: userAddr as `0x${string}` },
-          (event: any) => {
-            if (!isMounted) return;
-            const data = event.data;
-            if (!data) return;
+        const formattedUser = (
+          userAddr.toLowerCase().startsWith('0x') ? userAddr : `0x${userAddr}`
+        ) as `0x${string}`;
 
-            // Handle clearinghouseState (positions)
-            if (data.clearinghouseState) {
-              const positions = data.clearinghouseState.assetPositions?.map((p: any) => ({
-                symbol: p.position.coin,
-                positionAmt: p.position.szi,
-                entryPrice: p.position.entryPx,
-                markPrice: p.position.entryPx, // Replace with actual mark price if available
-                unRealizedProfit: p.position.unrealizedPnl,
-                liquidationPrice: p.position.liquidationPx || '0',
-                leverage: p.position.leverage?.value?.toString() || '1',
-                marginType: p.position.leverage?.type === 'cross' ? 'cross' : 'isolated',
-                isolatedMargin: p.position.marginUsed,
-                positionSide: parseFloat(p.position.szi) >= 0 ? 'LONG' : 'SHORT',
-              }));
+        const processClearinghouseState = (ch: any) => {
+          if (!isMounted || !ch) return;
+          const marginSummary = ch.marginSummary || ch.crossMarginSummary;
+          if (marginSummary) {
+            const accountValue = String(marginSummary.accountValue || '0');
+            const totalMarginUsed = String(marginSummary.totalMarginUsed || '0');
+            const withdrawable = String(
+              marginSummary.withdrawable ||
+                Math.max(0, parseFloat(accountValue) - parseFloat(totalMarginUsed)).toFixed(2)
+            );
 
-              if (positions) {
-                // Mapping positions to PositionStore format
-                usePositionStore.getState().setPositions(positions);
+            useAccountStore.getState().setBalances([
+              {
+                asset: 'USDC',
+                total: accountValue,
+                available: withdrawable,
+                locked: totalMarginUsed,
+                marginBalance: accountValue,
+              },
+              {
+                asset: 'USD',
+                total: accountValue,
+                available: withdrawable,
+                locked: totalMarginUsed,
+                marginBalance: accountValue,
+              },
+            ]);
+          }
+
+          const positions = ch.assetPositions
+            ?.map((p: any) => {
+              const rawPos = p.position;
+              if (!rawPos) return null;
+              const rawCoin = rawPos.coin || '';
+              const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
+              const levValue = rawPos.leverage?.value ? Number(rawPos.leverage.value) : 1;
+              const marginType =
+                rawPos.leverage?.type === 'isolated' ? ('isolated' as const) : ('cross' as const);
+
+              return {
+                symbol,
+                size: rawPos.szi || '0',
+                entryPrice: rawPos.entryPx || '0',
+                markPrice: rawPos.entryPx || '0',
+                liquidationPrice: rawPos.liquidationPx || '0',
+                unrealizedPnl: rawPos.unrealizedPnl || '0',
+                leverage: levValue,
+                marginType,
+                isolatedMargin: rawPos.marginUsed || '0',
+              };
+            })
+            .filter(Boolean);
+
+          if (positions) {
+            usePositionStore.getState().setPositions(positions as any);
+            positions.forEach((pos: any) => {
+              if (pos?.symbol && pos?.leverage) {
+                useOrderEntryStore
+                  .getState()
+                  .setSymbolSettings(pos.symbol, pos.leverage, pos.marginType);
               }
-            }
-
-            // Handle openOrders
-            if (data.openOrders) {
-              const orders = data.openOrders.map((o: any) => ({
-                id: o.oid?.toString(),
-                symbol: o.coin,
-                type: 'limit',
-                side: o.side === 'A' ? 'sell' : 'buy',
-                price: o.limitPx,
-                size: o.sz,
-                filledSize: '0',
-                status: 'new',
-                reduceOnly: o.reduceOnly || false,
-                timestamp: o.timestamp || Date.now(),
-              }));
-
-              useOrderStore.getState().setOrders(orders);
+            });
+            const curSym = useMarketStore.getState().selectedSymbol;
+            if (curSym) {
+              useOrderEntryStore.getState().syncForSymbol(curSym);
             }
           }
-        );
+        };
 
-        // Subscribe to userEvents (for fills/trades)
-        await transport.subscribe(
-          'userEvents',
-          { type: 'userEvents', user: userAddr as `0x${string}` },
-          (event: any) => {
-            if (!isMounted) return;
-            const data = event.data;
-            if (!data) return;
-
-            if (data.fills) {
-              const trades = data.fills.map((f: any) => ({
-                id: f.oid,
-                orderId: f.oid,
-                symbol: f.coin,
-                price: f.px,
-                qty: f.sz,
-                quoteQty: (parseFloat(f.px) * parseFloat(f.sz)).toString(),
-                realizedPnl: f.closedPnl || '0',
-                commission: f.fee || '0',
-                commissionAsset: f.feeToken || 'USDC',
-                time: f.time || Date.now(),
-                buyer: f.side === 'B',
-                maker: f.maker,
-              }));
-
-              const historyStore = useHistoryStore.getState();
-              trades.forEach((t: any) => historyStore.addTrade(t));
-            }
+        // 0. Immediate REST snapshot to eliminate WebSocket delay
+        try {
+          const httpTransport = new HttpTransport({ isTestnet });
+          const snapshot = await getClearinghouseState(
+            { transport: httpTransport },
+            { user: formattedUser }
+          );
+          processClearinghouseState(snapshot);
+        } catch (restErr) {
+          console.warn('[hyperliquid rest snapshot] Failed to fetch initial state:', restErr);
+        } finally {
+          if (isMounted) {
+            useAccountStore.getState().setIsLoading(false);
           }
-        );
+        }
+
+        // 1. Subscribe to clearinghouseState (margin & positions)
+        await clearinghouseState({ transport }, { user: formattedUser }, (event: any) => {
+          if (!isMounted || !event) return;
+          processClearinghouseState(event.clearinghouseState);
+        });
+
+        // 2. Subscribe to openOrders
+        await openOrders({ transport }, { user: formattedUser }, (event: any) => {
+          if (!isMounted || !event) return;
+          const orderList = event.orders || [];
+          const orders = orderList.map((o: any) => {
+            const rawCoin = o.coin || '';
+            const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
+            return {
+              id: String(o.oid),
+              symbol,
+              type: 'limit' as const,
+              side: o.side === 'A' ? ('sell' as const) : ('buy' as const),
+              price: o.limitPx || '0',
+              size: o.sz || '0',
+              filledSize: '0',
+              status: 'new' as const,
+              reduceOnly: Boolean(o.reduceOnly),
+              timestamp: o.timestamp || Date.now(),
+            };
+          });
+
+          useOrderStore.getState().setOrders(orders);
+        });
+
+        // 3. Subscribe to userFills
+        await userFills({ transport }, { user: formattedUser }, (event: any) => {
+          if (!isMounted || !event) return;
+          const fills = event.fills || [];
+          const trades = fills.map((f: any) => {
+            const rawCoin = f.coin || '';
+            const symbol = rawCoin.includes('-') ? rawCoin : `${rawCoin}-USDC`;
+            return {
+              id: String(f.oid || f.tid || Date.now()),
+              orderId: String(f.oid || ''),
+              symbol,
+              side: f.side === 'B' ? ('buy' as const) : ('sell' as const),
+              price: f.px || '0',
+              size: f.sz || '0',
+              fee: f.fee || '0',
+              feeAsset: f.feeToken || 'USDC',
+              realizedPnl: f.closedPnl || '0',
+              timestamp: f.time || Date.now(),
+            };
+          });
+
+          const historyStore = useHistoryStore.getState();
+          trades.forEach((t: any) => historyStore.addTrade(t));
+        });
       } catch (err) {
         console.error('[hyperliquid ws] Subscription error', err);
       }
@@ -120,5 +192,5 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
         transportRef.current = null;
       }
     };
-  }, [userAddr, currentExchange]);
+  }, [userAddr, currentExchange, currentNetwork]);
 };

@@ -6,9 +6,9 @@ import { HyperliquidMapper } from './mapper';
 import type { HlMetaResponse } from './mapper';
 
 export class HyperliquidMarkets extends HttpTransport {
-  constructor() {
+  constructor(baseUrl: string = 'https://api.hyperliquid.xyz') {
     super({
-      baseUrl: 'https://api.hyperliquid.xyz',
+      baseUrl,
       timeoutMs: 15000,
       maxRetries: 3,
     });

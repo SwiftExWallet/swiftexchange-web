@@ -23,12 +23,14 @@ export interface SwapTransactionRequest {
     address: string;
     symbol: string;
     decimals: number;
+    chainId?: number | string;
     isNative?: boolean;
   };
   tokenOut: {
     address: string;
     symbol: string;
     decimals: number;
+    chainId?: number | string;
     isNative?: boolean;
   };
   senderAddress: string;
@@ -97,24 +99,30 @@ export interface BridgeTransactionResponse {
 }
 
 const getSwapEndpoint = (action: 'quote' | 'prepare'): string => {
-  return action === 'quote' ? `/quoter/quote` : `/quoter/swap`;
+  return action === 'quote' ? `/quoter/quote` : `/swap`;
 };
+
+function cleanTokenForQuoter(token: any, fallbackChainId: any) {
+  return {
+    address: token.address,
+    symbol: token.symbol,
+    decimals: Number(token.decimals),
+    chainId: Number(token.chainId || fallbackChainId),
+  };
+}
 
 function buildQuotePayload(request: SwapQuoteRequest, chainId: any): any {
   const slippageValue = request.slippage !== undefined ? parseFloat(request.slippage) : 1;
-  return {
-    ...request,
-    tokenIn: {
-      ...request.tokenIn,
-      chainId: request.tokenIn.chainId || chainId,
-    },
-    tokenOut: {
-      ...request.tokenOut,
-      chainId: request.tokenOut.chainId || chainId,
-    },
-    recipient: request.recipient || '',
+  const payload: any = {
+    amount: request.amount,
+    tokenIn: cleanTokenForQuoter(request.tokenIn, chainId),
+    tokenOut: cleanTokenForQuoter(request.tokenOut, chainId),
     slippage: slippageValue.toString(),
   };
+  if (request.recipient) {
+    payload.recipient = request.recipient;
+  }
+  return payload;
 }
 
 export async function getSwapQuote(
@@ -176,15 +184,18 @@ export async function prepareSwapTransaction(
   const payload = {
     amount,
     tokenIn: {
-      ...tokenIn,
       address: normalizedTokenInAddress,
+      symbol: tokenIn.symbol,
+      decimals: Number(tokenIn.decimals),
+      chainId: Number(tokenIn.chainId || chainId),
     },
     tokenOut: {
-      ...tokenOut,
       address: normalizedTokenOutAddress,
+      symbol: tokenOut.symbol,
+      decimals: Number(tokenOut.decimals),
+      chainId: Number(tokenOut.chainId || chainId),
     },
     recipient: request.senderAddress,
-    chainId: getChainSymbol(chainId),
   };
 
   const res = await fetchApiResponseFromProxy<any>(getSwapEndpoint('prepare'), 'POST', payload);

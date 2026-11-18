@@ -8,7 +8,6 @@ import { GeolocationGuard } from '@/modules/commonfeature/components/Geolocation
 import { RESTRICTED_TRADING_LOCATIONS } from '@/modules/commonfeature/constants/compliance';
 
 import { HomeRedirect } from './components/HomeRedirect';
-import ProtectedRoute from './components/ProtectedRoute';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary';
 
 const AlchemyPayIntegration = lazy(
@@ -29,6 +28,7 @@ const StellarPortfolioUI = lazy(
 );
 const Dashboard = lazy(() => import('@/pages/dashboard'));
 const Profile = lazy(() => import('@/pages/profile'));
+const StatusPage = lazy(() => import('@/pages/status/StatusPage'));
 
 const router = createBrowserRouter([
   {
@@ -39,6 +39,14 @@ const router = createBrowserRouter([
       {
         path: ROUTES.HOME,
         element: <HomeRedirect />,
+      },
+      {
+        path: ROUTES.STATUS,
+        element: (
+          <Layout>
+            <StatusPage />
+          </Layout>
+        ),
       },
       {
         path: ROUTES.TRADING_PERPS,
@@ -71,74 +79,68 @@ const router = createBrowserRouter([
         ),
       },
       {
-        element: <ProtectedRoute />,
-        children: [
-          {
-            path: ROUTES.DASHBOARD,
-            element: (
-              <Layout>
-                <Dashboard />
-              </Layout>
-            ),
-          },
-          {
-            path: ROUTES.SEND,
-            element: (
-              <Layout>
-                <SendAssets />
-              </Layout>
-            ),
-          },
-          {
-            path: ROUTES.RECEIVE,
-            element: (
-              <Layout>
-                <ReceiveAssets />
-              </Layout>
-            ),
-          },
-          {
-            path: ROUTES.TRANSACTIONS,
-            element: (
-              <Layout>
-                <EvmTransactionHistory />
-              </Layout>
-            ),
-          },
-          {
-            path: ROUTES.TRADING_EVM_SWAP,
-            element: (
-              <Layout>
-                <SwapAssets />
-              </Layout>
-            ),
-          },
-          {
-            path: ROUTES.TRADING_EVM_FIAT,
-            element: (
-              <Layout>
-                <AlchemyPayIntegration />
-              </Layout>
-            ),
-          },
-          {
-            path: ROUTES.MARKETS,
-            element: (
-              <Layout>
-                <CryptoMarket />
-              </Layout>
-            ),
-          },
-
-          {
-            path: ROUTES.MY_ASSETS,
-            element: (
-              <Layout>
-                <Profile />
-              </Layout>
-            ),
-          },
-        ],
+        path: ROUTES.DASHBOARD,
+        element: (
+          <Layout>
+            <Dashboard />
+          </Layout>
+        ),
+      },
+      {
+        path: ROUTES.SEND,
+        element: (
+          <Layout>
+            <SendAssets />
+          </Layout>
+        ),
+      },
+      {
+        path: ROUTES.RECEIVE,
+        element: (
+          <Layout>
+            <ReceiveAssets />
+          </Layout>
+        ),
+      },
+      {
+        path: ROUTES.TRANSACTIONS,
+        element: (
+          <Layout>
+            <EvmTransactionHistory />
+          </Layout>
+        ),
+      },
+      {
+        path: ROUTES.TRADING_EVM_SWAP,
+        element: (
+          <Layout>
+            <SwapAssets />
+          </Layout>
+        ),
+      },
+      {
+        path: ROUTES.TRADING_EVM_FIAT,
+        element: (
+          <Layout>
+            <AlchemyPayIntegration />
+          </Layout>
+        ),
+      },
+      {
+        path: ROUTES.MARKETS,
+        element: (
+          <Layout>
+            <CryptoMarket />
+          </Layout>
+        ),
+      },
+      {
+        path: ROUTES.MY_ASSETS,
+        element: (
+          <Layout>
+            <Profile />
+          </Layout>
+        ),
       },
       {
         path: '*',

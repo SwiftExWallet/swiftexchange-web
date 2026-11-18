@@ -1,6 +1,7 @@
-import { Check, ChevronDown, Copy, Plus, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, KeyRound, Loader2, Plus, ShieldOff, X } from 'lucide-react';
 import React, { useRef, useState } from 'react';
 
+import { useAsterAgent } from '../../perps/adapters/aster/hooks/useAsterAgent';
 import { EVM_WALLETS, STELLAR_WALLETS, WalletType } from '../constants/Wallet';
 import { useWalletConnect } from '../hooks/useWalletConnect';
 
@@ -19,8 +20,11 @@ function getWalletIcon(walletId: string, type: string, peerIcon?: string): strin
 
 export const ConnectWalletButton: React.FC = () => {
   const { connectedWallets, openModal, disconnect, disconnectAll } = useWalletConnect();
+  const asterAgent = useAsterAgent();
   const [showDropdown, setShowDropdown] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+  const [disconnectHint, setDisconnectHint] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -31,7 +35,7 @@ export const ConnectWalletButton: React.FC = () => {
       setCopiedAddress(address);
       setTimeout(() => setCopiedAddress(null), 2000);
     } catch (e) {
-      console.log(e, 'coptoclipbord error');
+      console.error('Failed to copy address to clipboard:', e);
     }
   };
 
@@ -46,7 +50,13 @@ export const ConnectWalletButton: React.FC = () => {
   };
 
   const handleDisconnect = async (type: WalletType) => {
+    const isFreighter = connectedWallets.stellar?.walletId === 'freighter' && type === 'stellar';
     await disconnect(type);
+    if (isFreighter) {
+      setDisconnectHint(
+        'To also remove this site permission from Freighter: Freighter -> Settings -> Connected dApps.'
+      );
+    }
     if (Object.keys(connectedWallets).length <= 1) setShowDropdown(false);
   };
 
@@ -78,69 +88,49 @@ export const ConnectWalletButton: React.FC = () => {
     );
   }
 
+  // Select primary active address to display (Aster-style: clean address + dropdown)
+  const primaryWallet =
+    validConnectedWallets.find(([type]) => type === 'evm')?.[1] || validConnectedWallets[0]?.[1];
+  const primaryAddress = primaryWallet ? formatAddress(primaryWallet.address) : '';
+
   return (
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setShowDropdown(v => !v)}
-        className="flex items-center bg-tertiary shadow rounded-lg gap-2 pl-1.5 pr-3 py-1.5 transition-colors cursor-pointer"
+        className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1.5 rounded-lg bg-[var(--color-bg-tertiary)]/70 hover:bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] transition-all cursor-pointer select-none group shadow-xs active:scale-[0.98]"
+        title={primaryAddress}
       >
-        <div className="flex items-center -space-x-2">
-          {validConnectedWallets.slice(0, 3).map(([type, conn]) => (
+        <div className="flex items-center -space-x-1.5">
+          {validConnectedWallets.slice(0, 2).map(([type, conn]) => (
             <div
               key={type}
-              style={{
-                background: 'var(--color-bg-secondary)',
-                border: '2px solid var(--color-bg-tertiary)',
-              }}
-              className="w-7 h-7 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0"
+              className="w-5 h-5 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0 ring-1.5 ring-[var(--color-bg-primary)] bg-[var(--color-bg-secondary)]"
               title={conn.peerName || conn.walletId}
             >
               <img
                 src={getWalletIcon(conn.walletId, type, conn.peerIcon)}
                 alt={conn.peerName || conn.walletId}
-                className="w-full h-full object-contain rounded-full"
+                className="w-full h-full object-contain"
                 onError={e => {
-                  e.currentTarget.style.display = 'none';
-                  const p = e.currentTarget.parentElement;
-                  if (p) {
-                    p.textContent = type[0].toUpperCase();
-                    p.style.color = 'var(--color-text-muted)';
-                    p.style.fontWeight = '700';
-                    p.style.fontSize = '0.75rem';
+                  const img = e.currentTarget as HTMLImageElement;
+                  if (img.src !== WALLETCONNECT_ICON) {
+                    img.src = WALLETCONNECT_ICON;
                   }
                 }}
               />
             </div>
           ))}
-          {validConnectedWallets.length > 3 && (
-            <div
-              style={{
-                background: 'var(--color-brand-primary)',
-                border: '2px solid var(--color-bg-tertiary)',
-                color: '#fff',
-              }}
-              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-            >
-              +{validConnectedWallets.length - 3}
-            </div>
-          )}
         </div>
 
-        <div className="hidden sm:flex items-center gap-1">
-          <div
-            style={{ background: 'var(--color-success)' }}
-            className="w-1.5 h-1.5 rounded-full animate-pulse"
-          />
-          <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            {validConnectedWallets.length === 1
-              ? formatAddress(validConnectedWallets[0][1].address)
-              : `${validConnectedWallets.length} wallets`}
-          </span>
-        </div>
+        <span className="hidden sm:inline text-xs font-semibold tracking-wide font-mono text-[var(--color-text-primary)]">
+          {primaryAddress}
+        </span>
 
         <ChevronDown
-          className={`w-3.5 h-3.5 transition-transform ${showDropdown ? 'rotate-180' : ''}`}
-          style={{ color: 'var(--color-text-muted)' }}
+          size={13}
+          className={`text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] transition-transform duration-200 ${
+            showDropdown ? 'rotate-180' : ''
+          }`}
         />
       </button>
 
@@ -266,6 +256,113 @@ export const ConnectWalletButton: React.FC = () => {
                 );
               })}
             </div>
+
+            {validConnectedWallets.some(([type]) => type === 'evm') && (
+              <div
+                style={{
+                  background: 'color-mix(in srgb, var(--color-bg-tertiary) 90%, #3b82f6 10%)',
+                  borderTop: '1px solid var(--color-border)',
+                }}
+                className="px-5 py-3 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="w-3.5 h-3.5 text-blue-400" />
+                    <span
+                      style={{ color: 'var(--color-text-primary)' }}
+                      className="text-xs font-semibold"
+                    >
+                      1-Click Trading Session
+                    </span>
+                  </div>
+                  {asterAgent.isReady ? (
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      Active (30d)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">
+                      Inactive
+                    </span>
+                  )}
+                </div>
+
+                {asterAgent.isReady ? (
+                  <div className="flex items-center justify-between pt-0.5">
+                    <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                      {asterAgent.timeRemaining ? (
+                        <span>Expires in {asterAgent.timeRemaining}</span>
+                      ) : (
+                        <span>30-day validity</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={asterAgent.isRevoking}
+                      onClick={async () => {
+                        setRevokeError(null);
+                        try {
+                          await asterAgent.revokeSession();
+                        } catch (err: any) {
+                          setRevokeError(err?.message || 'Failed to revoke session on Aster');
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {asterAgent.isRevoking ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>Revoking...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldOff className="w-3 h-3" />
+                          <span>Revoke Session</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                    Orders will require wallet confirmation.
+                  </div>
+                )}
+
+                {revokeError && (
+                  <div className="text-[10px] text-rose-400 flex items-center justify-between gap-1 pt-1">
+                    <span className="truncate">{revokeError}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        asterAgent.emergencyPurgeSession();
+                        setRevokeError(null);
+                      }}
+                      className="underline flex-shrink-0 cursor-pointer hover:text-rose-300"
+                    >
+                      Purge Local
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {disconnectHint && (
+              <div
+                style={{
+                  background: 'var(--color-bg-tertiary)',
+                  borderTop: '1px solid var(--color-border)',
+                }}
+                className="px-4 py-2.5 text-[11px] text-[var(--color-text-muted)] flex items-start justify-between gap-2"
+              >
+                <span>💡 {disconnectHint}</span>
+                <button
+                  type="button"
+                  onClick={() => setDisconnectHint(null)}
+                  className="p-0.5 hover:text-white"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
 
             <div style={{ borderTop: '1px solid var(--color-border)' }} className="flex gap-2 p-3">
               <button

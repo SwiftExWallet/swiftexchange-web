@@ -1,7 +1,14 @@
 import type { Signer } from 'ethers';
 import { getAddress, isAddress } from 'ethers';
 
-import { ASTER_BAPI_URL, ASTER_ENDPOINTS, ASTER_REST_URL, ASTER_SPOT_REST_URL } from '../constants';
+import { asterHttpClient } from '../client/asterHttpClient';
+import {
+  ASTER_CHAIN_ID,
+  ASTER_ENDPOINTS,
+  getAsterBapiUrl,
+  getAsterRestUrl,
+  getAsterSpotRestUrl,
+} from '../constants';
 import type {
   AsterAccountInfo,
   AsterBalance,
@@ -12,7 +19,43 @@ import type {
   MarginType,
   SymbolLeverageBracket,
 } from '../types/account';
-import { signedRequest } from './auth';
+import {
+  EIP712_TYPES,
+  buildSortedQueryString,
+  buildTypedData,
+  generateMonotonicNonce,
+  getSyncedServerTime,
+  signedRequest,
+  throwIfApiError,
+} from './auth';
+
+export interface MigrateUserResult {
+  batchId: string;
+}
+
+export interface MigrateUserDetail {
+  id: number;
+  asset: string;
+  amount: string;
+  tranId: number | null;
+  status: 'I' | 'S' | 'F';
+  fromStatus: 'S' | 'F' | 'P' | null;
+  fromErrorCode: string | null;
+  fromResponse: string | null;
+  toStatus: 'S' | 'F' | 'P' | null;
+  toErrorCode: string | null;
+  toResponse: string | null;
+}
+
+export interface MigrateUserHistoryResult {
+  batchId: string;
+  totalCount: number;
+  successCount: number;
+  processingCount: number;
+  failCount: number;
+  initCount: number;
+  details: MigrateUserDetail[];
+}
 
 export interface DepositAsset {
   name: string;
@@ -88,11 +131,29 @@ export interface DepositWithdrawRecord {
 }
 
 export async function getAccountInfo(signer: Signer, userAddr: string): Promise<AsterAccountInfo> {
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.ACCOUNT);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.ACCOUNT,
+    {},
+    undefined,
+    undefined,
+    5
+  );
 }
 
 export async function getBalance(signer: Signer, userAddr: string): Promise<AsterBalance[]> {
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.BALANCE);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.BALANCE,
+    {},
+    undefined,
+    undefined,
+    5
+  );
 }
 
 export async function getPositionRisk(
@@ -102,7 +163,16 @@ export async function getPositionRisk(
 ): Promise<AsterPositionRisk[]> {
   const p: Record<string, string> = {};
   if (symbol) p.symbol = symbol;
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.POSITION_RISK, p);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.POSITION_RISK,
+    p,
+    undefined,
+    undefined,
+    5
+  );
 }
 
 export async function changeLeverage(
@@ -134,13 +204,16 @@ export async function changePositionMargin(
   userAddr: string,
   symbol: string,
   amount: string,
-  type: 1 | 2
+  type: 1 | 2,
+  positionSide?: 'BOTH' | 'LONG' | 'SHORT'
 ): Promise<{ amount: number; code: number; msg: string; type: number }> {
-  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.POSITION_MARGIN, {
+  const p: Record<string, string> = {
     symbol,
     amount,
     type: String(type),
-  });
+  };
+  if (positionSide) p.positionSide = positionSide;
+  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.POSITION_MARGIN, p);
 }
 
 export async function getLeverageBracket(
@@ -150,13 +223,23 @@ export async function getLeverageBracket(
 ): Promise<SymbolLeverageBracket[]> {
   const p: Record<string, string> = {};
   if (symbol) p.symbol = symbol;
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.LEVERAGE_BRACKET, p);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.LEVERAGE_BRACKET,
+    p,
+    undefined,
+    undefined,
+    1
+  );
 }
 
 export async function getIncomeHistory(
   signer: Signer,
   userAddr: string,
-  params: GetIncomeHistoryParams = {}
+  params: GetIncomeHistoryParams = {},
+  signal?: AbortSignal
 ): Promise<IncomeRecord[]> {
   const p: Record<string, string> = {};
   if (params.symbol) p.symbol = params.symbol;
@@ -164,7 +247,7 @@ export async function getIncomeHistory(
   if (params.startTime !== undefined) p.startTime = String(params.startTime);
   if (params.endTime !== undefined) p.endTime = String(params.endTime);
   if (params.limit !== undefined) p.limit = String(params.limit);
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.INCOME, p);
+  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.INCOME, p, undefined, signal, 30);
 }
 
 export async function changeMultiAssetsMargin(
@@ -181,14 +264,50 @@ export async function getMultiAssetsMargin(
   signer: Signer,
   userAddr: string
 ): Promise<{ multiAssetsMargin: boolean }> {
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.MULTI_ASSETS_MARGIN);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.MULTI_ASSETS_MARGIN,
+    {},
+    undefined,
+    undefined,
+    30
+  );
+}
+
+export async function getPositionMode(
+  signer: Signer,
+  userAddr: string
+): Promise<{ dualSidePosition: boolean }> {
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.POSITION_SIDE_DUAL,
+    {},
+    undefined,
+    undefined,
+    30
+  );
+}
+
+export async function changePositionMode(
+  signer: Signer,
+  userAddr: string,
+  dualSidePosition: boolean
+): Promise<{ code: number; msg: string }> {
+  return signedRequest(signer, userAddr, 'POST', ASTER_ENDPOINTS.POSITION_SIDE_DUAL, {
+    dualSidePosition: dualSidePosition ? 'true' : 'false',
+  });
 }
 
 export async function getUserTrades(
   signer: Signer,
   userAddr: string,
   symbol?: string,
-  opts: { startTime?: number; endTime?: number; limit?: number; fromId?: number } = {}
+  opts: { startTime?: number; endTime?: number; limit?: number; fromId?: number } = {},
+  signal?: AbortSignal
 ): Promise<AsterUserTrade[]> {
   const p: Record<string, string> = {};
   if (symbol) p.symbol = symbol;
@@ -196,36 +315,113 @@ export async function getUserTrades(
   if (opts.endTime !== undefined) p.endTime = String(opts.endTime);
   if (opts.limit !== undefined) p.limit = String(opts.limit);
   if (opts.fromId !== undefined) p.fromId = String(opts.fromId);
-  return signedRequest(signer, userAddr, 'GET', ASTER_ENDPOINTS.USER_TRADES, p);
+  return signedRequest(
+    signer,
+    userAddr,
+    'GET',
+    ASTER_ENDPOINTS.USER_TRADES,
+    p,
+    undefined,
+    signal,
+    5
+  );
 }
 
-const depositAssetsCache: Record<string, { timestamp: number; data: DepositAsset[] }> = {};
-const withdrawAssetsCache: Record<string, { timestamp: number; data: WithdrawAsset[] }> = {};
 const CACHE_TTL_MS = 180000;
+
+function getFallbackAssetsForChain(chainIds: string | number): DepositAsset[] {
+  const cid = Number(chainIds) || 56;
+  const isTestnet = cid === 97 || cid === 421614 || cid === 11155111;
+
+  let usdtContract = '0x55d398326f99059fF775485246999027B3197955';
+  let usdcContract = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d';
+  let usdtDecimals = 18;
+  let usdcDecimals = 18;
+  let netName = 'BSC';
+
+  if (cid === 42161) {
+    usdtContract = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
+    usdcContract = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+    usdtDecimals = 6;
+    usdcDecimals = 6;
+    netName = 'Arbitrum One';
+  } else if (cid === 1) {
+    usdtContract = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+    usdcContract = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+    usdtDecimals = 6;
+    usdcDecimals = 6;
+    netName = 'Ethereum';
+  } else if (cid === 97) {
+    usdtContract = '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd';
+    usdcContract = '0x64544969ed7EBf5f083679233325356EbE738930';
+    usdtDecimals = 18;
+    usdcDecimals = 18;
+    netName = 'BSC Testnet';
+  } else if (cid === 421614) {
+    usdtContract = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
+    usdcContract = '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d';
+    usdtDecimals = 6;
+    usdcDecimals = 6;
+    netName = 'Arb Sepolia';
+  } else if (cid === 11155111) {
+    usdtContract = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+    usdcContract = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
+    usdtDecimals = 6;
+    usdcDecimals = 6;
+    netName = 'Sepolia';
+  }
+
+  return [
+    {
+      name: 'USDT',
+      displayName: 'USDT',
+      contractAddress: usdtContract,
+      decimals: usdtDecimals,
+      network: isTestnet ? `${netName} Testnet` : netName,
+      chainId: cid,
+      isNative: false,
+      isProfit: true,
+      rank: 1,
+    },
+    {
+      name: 'USDC',
+      displayName: 'USDC',
+      contractAddress: usdcContract,
+      decimals: usdcDecimals,
+      network: isTestnet ? `${netName} Testnet` : netName,
+      chainId: cid,
+      isNative: false,
+      isProfit: false,
+      rank: 2,
+    },
+  ];
+}
 
 export async function getDepositAssets(
   chainIds: string = '56',
   accountType: 'spot' | 'perp' = 'perp',
   networks: string = 'EVM'
 ): Promise<DepositAsset[]> {
-  const cacheKey = `dep_${chainIds}_${accountType}_${networks}`;
-  const cached = depositAssetsCache[cacheKey];
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.data;
+  try {
+    const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
+    const data = await asterHttpClient.request<any>(
+      `${getAsterBapiUrl()}/aster/deposit/assets?${qs}`,
+      {
+        method: 'GET',
+        ttlMs: CACHE_TTL_MS,
+      }
+    );
+
+    const isSuccess = data.success === true || data.code === '000000';
+    if (isSuccess && Array.isArray(data.data) && data.data.length > 0) {
+      return data.data;
+    }
+  } catch (err) {
+    console.warn('[Deposit] Failed to fetch deposit assets from Aster bapi, using fallback:', err);
   }
 
-  const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
-  const res = await fetch(`${ASTER_BAPI_URL}/aster/deposit/assets?${qs}`);
-  const data = await res.json();
-
-  const isSuccess = data.success === true || data.code === '000000';
-  if (!isSuccess || !Array.isArray(data.data)) {
-    throw new Error(data.message || data.messageDetail || 'Failed to fetch deposit assets');
-  }
-
-  const result: DepositAsset[] = data.data;
-  depositAssetsCache[cacheKey] = { timestamp: Date.now(), data: result };
-  return result;
+  // Fallback assets tailored with accurate decimals for the requested chain
+  return getFallbackAssetsForChain(chainIds);
 }
 
 export async function getWithdrawAssets(
@@ -233,24 +429,29 @@ export async function getWithdrawAssets(
   accountType: 'spot' | 'perp' = 'perp',
   networks: string = 'EVM'
 ): Promise<WithdrawAsset[]> {
-  const cacheKey = `wd_${chainIds}_${accountType}_${networks}`;
-  const cached = withdrawAssetsCache[cacheKey];
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.data;
+  try {
+    const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
+    const data = await asterHttpClient.request<any>(
+      `${getAsterBapiUrl()}/aster/withdraw/assets?${qs}`,
+      {
+        method: 'GET',
+        ttlMs: CACHE_TTL_MS,
+      }
+    );
+
+    const isSuccess = data.success === true || data.code === '000000';
+    if (isSuccess && Array.isArray(data.data) && data.data.length > 0) {
+      return data.data;
+    }
+  } catch (err) {
+    console.warn(
+      '[Withdraw] Failed to fetch withdraw assets from Aster bapi, using fallback:',
+      err
+    );
   }
 
-  const qs = new URLSearchParams({ chainIds, networks, accountType }).toString();
-  const res = await fetch(`${ASTER_BAPI_URL}/aster/withdraw/assets?${qs}`);
-  const data = await res.json();
-
-  const isSuccess = data.success === true || data.code === '000000';
-  if (!isSuccess || !Array.isArray(data.data)) {
-    throw new Error(data.message || data.messageDetail || 'Failed to fetch withdraw assets');
-  }
-
-  const result: WithdrawAsset[] = data.data;
-  withdrawAssetsCache[cacheKey] = { timestamp: Date.now(), data: result };
-  return result;
+  //fallback so Withdraw tab never remains blank
+  return getFallbackAssetsForChain(chainIds);
 }
 
 export async function getUserWithdrawInfo(
@@ -258,7 +459,7 @@ export async function getUserWithdrawInfo(
   userAddr: string,
   accountType: 'spot' | 'perp' = 'perp'
 ): Promise<UserWithdrawInfo> {
-  const baseUrl = accountType === 'spot' ? ASTER_SPOT_REST_URL : ASTER_REST_URL;
+  const baseUrl = accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
   const res = await signedRequest(
     signer,
     userAddr,
@@ -288,7 +489,7 @@ export async function getDepositWithdrawHistory(
   if (opts.endTime) params.endTime = String(opts.endTime);
   if (opts.limit) params.limit = String(opts.limit);
 
-  const baseUrl = opts.accountType === 'spot' ? ASTER_SPOT_REST_URL : ASTER_REST_URL;
+  const baseUrl = opts.accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
   const res = await signedRequest(
     signer,
     userAddr,
@@ -302,7 +503,7 @@ export async function getDepositWithdrawHistory(
 }
 
 export async function submitWithdraw(
-  signer: Signer,
+  userWalletSigner: Signer,
   userAddr: string,
   params: {
     chainId: number;
@@ -319,23 +520,82 @@ export async function submitWithdraw(
     throw new Error(`Invalid receiver address format: ${params.receiver}`);
   }
 
+  const checksummedUser = getAddress(userAddr);
   const checksummedReceiver = getAddress(params.receiver);
-  const baseUrl = params.accountType === 'spot' ? ASTER_SPOT_REST_URL : ASTER_REST_URL;
+  const baseUrl = params.accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
+  const serverTime = await getSyncedServerTime(baseUrl);
 
+  const corePayload: Record<string, string> = {
+    user: checksummedUser,
+    signer: checksummedUser,
+    chainId: String(params.chainId),
+    asset: params.asset,
+    amount: params.amount,
+    fee: params.fee,
+    receiver: checksummedReceiver,
+    userNonce: params.userNonce,
+    nonce: params.userNonce,
+  };
+
+  const sortedCoreQs = buildSortedQueryString(corePayload);
+  const msgToSign = `${sortedCoreQs}&userSignature=${params.userSignature}`;
+
+  const requestTypedData = buildTypedData(msgToSign, ASTER_CHAIN_ID);
+  const requestSignature = await userWalletSigner.signTypedData(
+    requestTypedData.domain,
+    EIP712_TYPES,
+    requestTypedData.message
+  );
+
+  const finalBody = `${msgToSign}&signature=${requestSignature}&timestamp=${serverTime}&recvWindow=5000`;
+
+  const data = await asterHttpClient.request<{ success: boolean; id?: string; msg?: string }>(
+    `${baseUrl}${ASTER_ENDPOINTS.ASTER_USER_WITHDRAW}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: finalBody,
+      weight: 5,
+    }
+  );
+  throwIfApiError(data);
+  return data;
+}
+
+export async function migrateUserAssets(
+  signer: Signer,
+  userAddr: string
+): Promise<MigrateUserResult> {
+  const user = getAddress(userAddr);
+  const serverTime = await getSyncedServerTime();
+  const nonce = generateMonotonicNonce(serverTime);
+  const params: Record<string, string> = { user, nonce };
+  const sortedQs = buildSortedQueryString(params);
+  const typedData = buildTypedData(sortedQs);
+  const signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
+  const body = `${sortedQs}&signature=${signature}`;
+  const url = `${getAsterRestUrl()}${ASTER_ENDPOINTS.MIGRATE_USER}`;
+  return asterHttpClient.request<MigrateUserResult>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+    weight: 50,
+  });
+}
+
+export async function getMigrateUserHistory(
+  signer: Signer,
+  userAddr: string,
+  batchId: string
+): Promise<MigrateUserHistoryResult> {
   return signedRequest(
     signer,
     userAddr,
-    'POST',
-    ASTER_ENDPOINTS.ASTER_USER_WITHDRAW,
-    {
-      chainId: String(params.chainId),
-      asset: params.asset,
-      amount: params.amount,
-      fee: params.fee,
-      receiver: checksummedReceiver,
-      userNonce: params.userNonce,
-      userSignature: params.userSignature,
-    },
-    baseUrl
+    'GET',
+    ASTER_ENDPOINTS.MIGRATE_USER_HISTORY,
+    { batchId },
+    undefined,
+    undefined,
+    50
   );
 }
