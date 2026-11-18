@@ -25,6 +25,7 @@ import { usePositionStore } from '../../core/stores/positionStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { safeFormatNumber } from '../../utils/precision';
 import { MarketSelectorModal } from '../layout/MarketSelectorModal';
+import { FundingHistoryTab } from '../layout/tabs/FundingHistoryTab';
 import { OpenOrdersTab } from '../layout/tabs/OpenOrdersTab';
 import { OrderHistoryTab } from '../layout/tabs/OrderHistoryTab';
 import { PositionsTab } from '../layout/tabs/PositionsTab';
@@ -183,7 +184,12 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
   const [isMarketSelectorOpen, setIsMarketSelectorOpen] = useState(false);
   const [isExpandedAbout, setIsExpandedAbout] = useState(false);
   const [activeBottomTab, setActiveBottomTab] = useState<
-    'positions' | 'orders' | 'orderHistory' | 'tradeHistory' | 'transactionHistory'
+    | 'positions'
+    | 'orders'
+    | 'orderHistory'
+    | 'tradeHistory'
+    | 'transactionHistory'
+    | 'fundingHistory'
   >('positions');
   const [mobileTimeRange, setMobileTimeRange] = useState<'1d' | '1w'>('1w');
 
@@ -399,20 +405,34 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
               Trade History
             </button>
 
-            <button
-              onClick={() => setActiveBottomTab('transactionHistory')}
-              className={`py-2.5 px-1 transition-colors cursor-pointer whitespace-nowrap ${
-                activeBottomTab === 'transactionHistory'
-                  ? 'text-primary font-bold border-b-2 border-brand'
-                  : 'text-secondary hover:text-primary'
-              }`}
-            >
-              Transactions
-            </button>
+            {currentExchange === 'hyperliquid' ? (
+              <button
+                onClick={() => setActiveBottomTab('fundingHistory')}
+                className={`py-2.5 px-1 transition-colors cursor-pointer whitespace-nowrap ${
+                  activeBottomTab === 'fundingHistory'
+                    ? 'text-primary font-bold border-b-2 border-brand'
+                    : 'text-secondary hover:text-primary'
+                }`}
+              >
+                Funding
+              </button>
+            ) : (
+              <button
+                onClick={() => setActiveBottomTab('transactionHistory')}
+                className={`py-2.5 px-1 transition-colors cursor-pointer whitespace-nowrap ${
+                  activeBottomTab === 'transactionHistory'
+                    ? 'text-primary font-bold border-b-2 border-brand'
+                    : 'text-secondary hover:text-primary'
+                }`}
+              >
+                Transactions
+              </button>
+            )}
 
             {(activeBottomTab === 'orderHistory' ||
               activeBottomTab === 'tradeHistory' ||
-              activeBottomTab === 'transactionHistory') && (
+              activeBottomTab === 'transactionHistory' ||
+              activeBottomTab === 'fundingHistory') && (
               <div className="relative inline-flex items-center ml-auto shrink-0">
                 <select
                   value={mobileTimeRange}
@@ -468,6 +488,15 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
             {activeBottomTab === 'transactionHistory' && (
               <TransactionHistoryTab
                 signer={asterSigner}
+                userAddr={userAddr || ''}
+                asterSymbol={asterSymbol}
+                timeRange={mobileTimeRange}
+                hideOtherSymbols={false}
+              />
+            )}
+
+            {activeBottomTab === 'fundingHistory' && (
+              <FundingHistoryTab
                 userAddr={userAddr || ''}
                 asterSymbol={asterSymbol}
                 timeRange={mobileTimeRange}

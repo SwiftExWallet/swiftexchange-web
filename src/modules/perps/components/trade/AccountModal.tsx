@@ -806,16 +806,17 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       if (!provider) throw new Error('EVM wallet not connected');
 
       if (currentExchange === 'hyperliquid') {
-        if (selectedChainId !== 42161) {
+        const targetChainId = currentNetwork === 'testnet' ? 421614 : 42161;
+        const targetChainName = currentNetwork === 'testnet' ? 'Arbitrum Sepolia' : 'Arbitrum One';
+        if (selectedChainId !== targetChainId) {
           updateActiveTx({
-            message: 'Please switch your wallet to Arbitrum One...',
+            message: `Please switch your wallet to ${targetChainName}...`,
           });
-          await switchOrAddChain(provider, 42161);
+          await switchOrAddChain(provider, targetChainId);
         }
         const ep = new ethers.BrowserProvider(provider as any);
         const userWalletSigner = await ep.getSigner();
 
-        // HYPERLIQUID WITHDRAW FLOW
         await withdrawFromHyperliquid(
           userWalletSigner,
           destinationAddress,

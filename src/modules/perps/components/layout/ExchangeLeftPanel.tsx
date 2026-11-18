@@ -12,6 +12,7 @@ import DepthChart from '../chart/DepthChart';
 import { DetailsTab } from '../chart/DetailsTab';
 import { ExchangeTopBar } from './ExchangeTopBar';
 import { AssetsTab } from './tabs/AssetsTab';
+import { FundingHistoryTab } from './tabs/FundingHistoryTab';
 import { OpenOrdersTab } from './tabs/OpenOrdersTab';
 import { OrderHistoryTab } from './tabs/OrderHistoryTab';
 import { PositionsTab } from './tabs/PositionsTab';
@@ -63,6 +64,14 @@ export const ExchangePositionsPanel: React.FC = () => {
   const userAddr = currentExchange === 'hyperliquid' ? hlUserAddr : asterUserAddr;
   const activeSigner = currentExchange === 'hyperliquid' ? hyperliquidSigner : asterSigner;
 
+  React.useEffect(() => {
+    if (currentExchange === 'hyperliquid' && activeTab === 'Transaction History') {
+      setActiveTab('Funding History');
+    } else if (currentExchange === 'aster' && activeTab === 'Funding History') {
+      setActiveTab('Transaction History');
+    }
+  }, [currentExchange, activeTab]);
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'Assets':
@@ -101,6 +110,15 @@ export const ExchangePositionsPanel: React.FC = () => {
         );
       case 'Transaction History':
         return <TransactionHistoryTab signer={activeSigner} userAddr={userAddr!} />;
+      case 'Funding History':
+        return (
+          <FundingHistoryTab
+            userAddr={userAddr!}
+            timeRange={historyTimeRange}
+            hideOtherSymbols={hideOtherSymbols}
+            asterSymbol={asterSymbol}
+          />
+        );
       default:
         return (
           <div className="flex-1 overflow-y-auto flex items-center justify-center h-full">
@@ -132,14 +150,26 @@ export const ExchangePositionsPanel: React.FC = () => {
     }
   };
 
-  const tabs = [
-    'Open Orders',
-    'Positions',
-    'Assets',
-    'Order History',
-    'Trade History',
-    'Transaction History',
-  ];
+  const tabs = React.useMemo(() => {
+    if (currentExchange === 'hyperliquid') {
+      return [
+        'Open Orders',
+        'Positions',
+        'Assets',
+        'Order History',
+        'Trade History',
+        'Funding History',
+      ];
+    }
+    return [
+      'Open Orders',
+      'Positions',
+      'Assets',
+      'Order History',
+      'Trade History',
+      'Transaction History',
+    ];
+  }, [currentExchange]);
 
   return (
     <div className="flex flex-col h-full relative min-w-0">
@@ -176,11 +206,13 @@ export const ExchangePositionsPanel: React.FC = () => {
         {(activeTab === 'Open Orders' ||
           activeTab === 'Order History' ||
           activeTab === 'Trade History' ||
-          activeTab === 'Transaction History') && (
+          activeTab === 'Transaction History' ||
+          activeTab === 'Funding History') && (
           <div className="flex items-center gap-3 shrink-0 text-[11px]">
             {(activeTab === 'Order History' ||
               activeTab === 'Trade History' ||
-              activeTab === 'Transaction History') && (
+              activeTab === 'Transaction History' ||
+              activeTab === 'Funding History') && (
               <div className="relative inline-flex items-center">
                 <select
                   value={historyTimeRange}

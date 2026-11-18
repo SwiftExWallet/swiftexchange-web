@@ -12,6 +12,7 @@ import {
   spotState,
   userFills,
 } from '@nktkas/hyperliquid/api/subscription';
+import BigNumber from 'bignumber.js';
 
 import { useExchangeManager } from '../../../core/ExchangeManager';
 import type { AccountBalance, Order } from '../../../core/models';
@@ -362,18 +363,27 @@ export const useHyperliquidDataStream = (userAddr: string | null) => {
                     : f.hash
                       ? `${f.hash}-${f.oid}`
                       : `${f.oid}-${f.time}`;
+                const quoteQty = new BigNumber(f.px || 0).times(f.sz || 0).toFixed(2);
 
                 return {
                   id: fillId,
-                  orderId: String(f.oid || ''),
+                  orderId: f.oid,
                   symbol,
-                  side: f.side === 'B' ? ('buy' as const) : ('sell' as const),
                   price: f.px || '0',
-                  size: f.sz || '0',
-                  fee: f.fee || '0',
-                  feeAsset: f.feeToken || 'USDC',
+                  qty: f.sz || '0',
+                  quoteQty,
                   realizedPnl: f.closedPnl || '0',
-                  timestamp: f.time || Date.now(),
+                  commission: f.fee || '0',
+                  commissionAsset: f.feeToken || 'USDC',
+                  marginAsset: 'USDC',
+                  time: f.time || Date.now(),
+                  buyer: f.side === 'B',
+                  maker: (f as any).maker !== undefined ? (f as any).maker : !f.crossed,
+                  side: f.side === 'B' ? 'BUY' : 'SELL',
+                  dir: f.dir,
+                  newChainData: {
+                    hash: f.hash,
+                  },
                 };
               });
 

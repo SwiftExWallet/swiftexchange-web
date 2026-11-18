@@ -1,10 +1,26 @@
 import { HttpTransport } from '@nktkas/hyperliquid';
-import { historicalOrders, openOrders, userFillsByTime } from '@nktkas/hyperliquid/api/info';
+import {
+  historicalOrders,
+  openOrders,
+  userFills,
+  userFillsByTime,
+  userFunding,
+} from '@nktkas/hyperliquid/api/info';
 import BigNumber from 'bignumber.js';
 
 import { useExchangeManager } from '../../../core/ExchangeManager';
 import type { AsterUserTrade } from '../../aster/types/account';
 import type { AsterOrderResponse, OrderSide, OrderType } from '../../aster/types/orders';
+
+export interface HyperliquidFundingRecord {
+  time: number;
+  coin: string;
+  size: string;
+  side: 'Long' | 'Short';
+  payment: string;
+  rate: string;
+  hash: string;
+}
 
 const getTransport = () => {
   const isTestnet = useExchangeManager.getState().currentNetwork === 'testnet';
@@ -82,6 +98,13 @@ export const getHyperliquidHistoricalOrders = async (
       const priceNum = o.limitPx && o.limitPx !== '0' ? o.limitPx : o.triggerPx || '0';
       const cumQuote = new BigNumber(executedQty).times(priceNum).toFixed(2);
 
+      let direction = '';
+      if (o.reduceOnly) {
+        direction = o.side === 'A' ? 'Close Long' : 'Close Short';
+      } else {
+        direction = o.side === 'B' ? 'Long' : 'Short';
+      }
+
       return {
         orderId: o.oid,
         symbol,
@@ -113,6 +136,9 @@ export const getHyperliquidHistoricalOrders = async (
         workingType: 'CONTRACT_PRICE' as any,
         priceProtect: false,
         reduceOnly: o.reduceOnly || false,
+        triggerCondition: o.triggerCondition,
+        direction,
+        rawOrderType: o.orderType,
       } as unknown as AsterOrderResponse;
     });
 
@@ -132,16 +158,27 @@ export const getHyperliquidUserFills = async (
 ): Promise<AsterUserTrade[]> => {
   try {
     const transport = getTransport();
-    // We use a generic startTime since hyperliquid requires it, 1 year back
-    const startTime = Date.now() - 365 * 24 * 60 * 60 * 1000;
-    const data = await userFillsByTime(
-      { transport },
-      {
-        user: userAddr as `0x${string}`,
-        startTime,
-        endTime: options?.endTime,
-      }
-    );
+    let data: any[] = [];
+
+    if (options?.endTime) {
+      const startTime = Date.now() - 365 * 24 * 60 * 60 * 1000;
+      data = await userFillsByTime(
+        { transport },
+        {
+          user: userAddr as `0x${string}`,
+          startTime,
+          endTime: options.endTime,
+        }
+      );
+    } else {
+      data = await userFills({ transport }, { user: userAddr as `0x${string}` });
+    }
+
+    data.sort((a, b) => (b.time || 0) - (a.time || 0));
+
+    if (options?.endTime) {
+      data = data.filter(f => f.time <= options.endTime!);
+    }
 
     let mapped = data.map(f => {
       const fillId =
@@ -150,7 +187,7 @@ export const getHyperliquidUserFills = async (
           : f.hash
             ? `${f.hash}-${f.oid}`
             : `${f.oid}-${f.time}`;
-      const quoteQty = new BigNumber(f.px || 0).times(f.sz || 0).toFixed();
+      const quoteQty = new BigNumber(f.px || 0).times(f.sz || 0).toFixed(2);
       const coin = f.coin || '';
       const symbol = coin.includes('-') ? coin : `${coin}-USDC`;
 
@@ -169,6 +206,7 @@ export const getHyperliquidUserFills = async (
         buyer: f.side === 'B',
         maker: (f as any).maker !== undefined ? (f as any).maker : !f.crossed,
         side: f.side === 'B' ? 'BUY' : 'SELL',
+        dir: f.dir,
         newChainData: {
           hash: f.hash,
         },
@@ -182,6 +220,56 @@ export const getHyperliquidUserFills = async (
     return mapped;
   } catch (err) {
     console.error('getHyperliquidUserFills error', err);
+    return [];
+  }
+};
+
+export const getHyperliquidFundingHistory = async (
+  userAddr: string,
+  options?: { startTime?: number; endTime?: number; limit?: number }
+): Promise<HyperliquidFundingRecord[]> => {
+  try {
+    const transport = getTransport();
+    const startTime = options?.startTime || Date.now() - 365 * 24 * 60 * 60 * 1000;
+    const data = await userFunding(
+      { transport },
+      {
+        user: userAddr as `0x${string}`,
+        startTime,
+      }
+    );
+
+    let list: HyperliquidFundingRecord[] = data.map(item => {
+      const sziNum = parseFloat(item.delta.szi || '0');
+      const side: 'Long' | 'Short' = sziNum >= 0 ? 'Long' : 'Short';
+      const absSize = Math.abs(sziNum);
+      const usdcVal = parseFloat(item.delta.usdc || '0');
+      const rateNum = parseFloat(item.delta.fundingRate || '0') * 100;
+
+      return {
+        time: item.time,
+        coin: item.delta.coin,
+        size: `${absSize} ${item.delta.coin}`,
+        side,
+        payment: `${usdcVal.toFixed(4)} USDC`,
+        rate: `${rateNum.toFixed(4)}%`,
+        hash: item.hash,
+      };
+    });
+
+    list.sort((a, b) => b.time - a.time);
+
+    if (options?.endTime) {
+      list = list.filter(i => i.time <= options.endTime!);
+    }
+
+    if (options?.limit) {
+      list = list.slice(0, options.limit);
+    }
+
+    return list;
+  } catch (err) {
+    console.error('getHyperliquidFundingHistory error', err);
     return [];
   }
 };

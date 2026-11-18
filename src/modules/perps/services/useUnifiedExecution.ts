@@ -20,6 +20,7 @@ import { useMarketStore } from '../core/stores/marketStore';
 import { useOrderStore } from '../core/stores/orderStore';
 import { usePositionStore } from '../core/stores/positionStore';
 import { formatPriceToTick, formatQuantityToStep, generateClientOrderId } from '../utils/precision';
+import { areSymbolsEqual, normalizeSymbol, toAsterSymbol } from '../utils/symbol';
 
 export interface UnifiedOrderParams {
   symbol: string;
@@ -87,11 +88,7 @@ export function useUnifiedExecution() {
           const asterType = params.type === 'POST_ONLY' ? 'LIMIT' : params.type;
 
           const allMarkets = Object.values(useMarketStore.getState().markets);
-          const market = allMarkets.find(
-            m =>
-              m.symbol === params.symbol ||
-              m.symbol.replace('-', '') === params.symbol.replace('-', '')
-          );
+          const market = allMarkets.find(m => areSymbolsEqual(m.symbol, params.symbol));
 
           const stepSize = market?.stepSize || '0.001';
           const tickSize = market?.tickSize || '0.1';
@@ -105,7 +102,7 @@ export function useUnifiedExecution() {
           const clientOrderId = generateClientOrderId();
 
           const asterRes = await placeAsterOrder(asterSigner, effectiveUserAddr, {
-            symbol: params.symbol.replace('-', ''),
+            symbol: toAsterSymbol(params.symbol),
             side: params.side,
             type: asterType as any,
             quantity: cleanSize,
@@ -133,9 +130,7 @@ export function useUnifiedExecution() {
 
           // Instantly reflect order in UI without waiting for WebSocket
           if (asterRes && asterRes.orderId) {
-            const normSymbol = params.symbol.includes('-')
-              ? params.symbol
-              : params.symbol.replace('USDT', '-USDT');
+            const normSymbol = normalizeSymbol(params.symbol);
             if (asterRes.status === 'NEW' || asterRes.status === 'PARTIALLY_FILLED') {
               useOrderStore.getState().updateOrder({
                 id: String(asterRes.orderId),
@@ -191,7 +186,7 @@ export function useUnifiedExecution() {
             throw new Error('Aster session is not ready.');
           }
           await cancelAsterOrder(asterSigner, effectiveUserAddr, {
-            symbol: symbol.replace('-', ''),
+            symbol: toAsterSymbol(symbol),
             orderId: parseInt(orderId, 10),
           });
         } else {
@@ -225,11 +220,11 @@ export function useUnifiedExecution() {
             throw new Error('Aster session is not ready.');
           }
           if (symbol) {
-            await cancelAllAsterOrders(asterSigner, effectiveUserAddr, symbol.replace('-', ''));
+            await cancelAllAsterOrders(asterSigner, effectiveUserAddr, toAsterSymbol(symbol));
           } else {
             const openOrders = useOrderStore.getState().getOpenOrders();
             const openSymbols: string[] = Array.from(
-              new Set(openOrders.map(o => o.symbol.replace('-', '')))
+              new Set(openOrders.map(o => toAsterSymbol(o.symbol)))
             );
             await Promise.all(
               openSymbols.map(s => cancelAllAsterOrders(asterSigner, effectiveUserAddr, s))
@@ -269,10 +264,9 @@ export function useUnifiedExecution() {
         currentPrice,
       });
 
-      // Optimistic instant position clear
       usePositionStore.getState().removePosition(symbol);
-      usePositionStore.getState().removePosition(symbol.replace('-', ''));
-      usePositionStore.getState().removePosition(symbol.replace('USDT', '-USDT'));
+      usePositionStore.getState().removePosition(toAsterSymbol(symbol));
+      usePositionStore.getState().removePosition(normalizeSymbol(symbol));
 
       return res;
     },
@@ -357,7 +351,7 @@ export function useUnifiedExecution() {
           if (!asterSigner || !effectiveUserAddr) {
             throw new Error('Aster session is not ready.');
           }
-          await changeLeverage(asterSigner, effectiveUserAddr, symbol.replace('-', ''), leverage);
+          await changeLeverage(asterSigner, effectiveUserAddr, toAsterSymbol(symbol), leverage);
         } else {
           if (!hyperliquidSigner) {
             throw new Error(
@@ -391,7 +385,7 @@ export function useUnifiedExecution() {
           await changeMarginType(
             asterSigner,
             effectiveUserAddr,
-            symbol.replace('-', ''),
+            toAsterSymbol(symbol),
             marginType === 'cross' ? 'CROSSED' : 'ISOLATED'
           );
         } else {

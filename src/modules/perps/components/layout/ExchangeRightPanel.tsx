@@ -18,6 +18,7 @@ import { useTickerStore } from '../../core/stores/tickerStore';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
 import { useUnifiedExecution } from '../../services/useUnifiedExecution';
 import { formatPriceToTick, formatQuantityToStep } from '../../utils/precision';
+import { toAsterSymbol } from '../../utils/symbol';
 import { AccountModal } from '../trade/AccountModal';
 import { AssetModeModal } from '../trade/AssetModeModal';
 import { LeverageModal } from '../trade/LeverageModal';
@@ -178,7 +179,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
 
           if (fPrice && fSize && parseFloat(fSize) > 0) {
             scaledOrders.push({
-              symbol: payload.symbol.replace('-', ''),
+              symbol: toAsterSymbol(payload.symbol),
               side: payload.side,
               type: 'LIMIT',
               quantity: fSize,
@@ -192,12 +193,13 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         if (scaledOrders.length === 0)
           throw new Error('Calculated sizes are too small for market step size');
 
-        const minNotional = currentMarket?.minNotional || 5.0;
+        const minNotional =
+          currentMarket?.minNotional || (currentExchange === 'hyperliquid' ? 10.0 : 5.0);
         for (const o of scaledOrders) {
           const splitNotional = parseFloat(o.price) * parseFloat(o.quantity);
           if (splitNotional < minNotional) {
             throw new Error(
-              `Each split order must have at least $${minNotional.toFixed(2)} USDT notional (current split is $${splitNotional.toFixed(2)} USDT). Please increase total size or reduce order count.`
+              `Each split order must have at least $${minNotional.toFixed(2)} notional (current split is $${splitNotional.toFixed(2)}). Please increase total size or reduce order count.`
             );
           }
         }
@@ -215,7 +217,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
             : undefined;
 
         res = await placeChase({
-          symbol: payload.symbol.replace('-', ''),
+          symbol: toAsterSymbol(payload.symbol),
           side: payload.side,
           quantity: formattedQty || payload.size,
           quantityUnit: 'BASE',

@@ -41,9 +41,12 @@ function formatSplitDate(timestamp: number): { date: string; time: string } {
   };
 }
 
-function parseSymbol(rawSymbol: string): { base: string; quote: string; display: string } {
+function parseSymbol(
+  rawSymbol: string,
+  exchange: string = 'aster'
+): { base: string; quote: string; display: string } {
   const clean = (rawSymbol || '').replace('-', '').toUpperCase();
-  let quote = 'USDT';
+  let quote = exchange === 'hyperliquid' ? 'USDC' : 'USDT';
   let base = clean;
   if (clean.endsWith('USDT')) {
     quote = 'USDT';
@@ -302,24 +305,41 @@ export const OrderHistoryTab: React.FC<Props> = ({
         <div className="hidden md:block">
           <table className="w-full text-left whitespace-nowrap border-collapse">
             <thead className="text-secondary border-b border-white/[0.04] sticky top-0 bg-secondary z-10 text-[11px] font-medium">
-              <tr>
-                <th className="px-2.5 py-1.5 font-medium">Time</th>
-                <th className="px-2.5 py-1.5 font-medium">Type</th>
-                <th className="px-2.5 py-1.5 font-medium">Symbol</th>
-                <th className="px-2.5 py-1.5 font-medium">Side</th>
-                <th className="px-2.5 py-1.5 font-medium">Filled / Order price</th>
-                <th className="px-2.5 py-1.5 font-medium">Filled / Total amount</th>
-                <th className="px-2.5 py-1.5 font-medium">Filled / Total value</th>
-                <th className="px-2.5 py-1.5 font-medium">Trigger price</th>
-                <th className="px-2.5 py-1.5 font-medium">Reduce only</th>
-                <th className="px-2.5 py-1.5 font-medium">Explorer</th>
-                <th className="px-2.5 py-1.5 font-medium">Status / Order ID</th>
-                <th className="px-2.5 py-1.5 font-medium text-right">Action</th>
-              </tr>
+              {currentExchange === 'hyperliquid' ? (
+                <tr>
+                  <th className="px-2.5 py-1.5 font-medium">Time</th>
+                  <th className="px-2.5 py-1.5 font-medium">Market</th>
+                  <th className="px-2.5 py-1.5 font-medium">Direction</th>
+                  <th className="px-2.5 py-1.5 font-medium">Type</th>
+                  <th className="px-2.5 py-1.5 font-medium">Size</th>
+                  <th className="px-2.5 py-1.5 font-medium">Filled Size</th>
+                  <th className="px-2.5 py-1.5 font-medium">Order Value</th>
+                  <th className="px-2.5 py-1.5 font-medium">Price</th>
+                  <th className="px-2.5 py-1.5 font-medium">Reduce Only</th>
+                  <th className="px-2.5 py-1.5 font-medium">Trigger Conditions</th>
+                  <th className="px-2.5 py-1.5 font-medium">Status</th>
+                  <th className="px-2.5 py-1.5 font-medium text-right">Order ID</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th className="px-2.5 py-1.5 font-medium">Time</th>
+                  <th className="px-2.5 py-1.5 font-medium">Type</th>
+                  <th className="px-2.5 py-1.5 font-medium">Symbol</th>
+                  <th className="px-2.5 py-1.5 font-medium">Side</th>
+                  <th className="px-2.5 py-1.5 font-medium">Filled / Order price</th>
+                  <th className="px-2.5 py-1.5 font-medium">Filled / Total amount</th>
+                  <th className="px-2.5 py-1.5 font-medium">Filled / Total value</th>
+                  <th className="px-2.5 py-1.5 font-medium">Trigger price</th>
+                  <th className="px-2.5 py-1.5 font-medium">Reduce only</th>
+                  <th className="px-2.5 py-1.5 font-medium">Explorer</th>
+                  <th className="px-2.5 py-1.5 font-medium">Status / Order ID</th>
+                  <th className="px-2.5 py-1.5 font-medium text-right">Action</th>
+                </tr>
+              )}
             </thead>
             <tbody className="text-[11px]">
               {filteredOrders.map(o => {
-                const symInfo = parseSymbol(o.symbol);
+                const symInfo = parseSymbol(o.symbol, currentExchange);
                 const isBuy = (o.side || '').toUpperCase() === 'BUY';
                 const avgPriceNum = parseFloat(o.avgPrice || '0');
                 const orderPriceNum = parseFloat(o.price || '0');
@@ -351,6 +371,101 @@ export const OrderHistoryTab: React.FC<Props> = ({
 
                 const dateInfo = formatSplitDate(o.updateTime || o.time || 0);
                 const typeInfo = formatSplitType(o.type || o.origType);
+
+                if (currentExchange === 'hyperliquid') {
+                  const dirText =
+                    (o as any).direction ||
+                    (o.reduceOnly
+                      ? isBuy
+                        ? 'Close Short'
+                        : 'Close Long'
+                      : isBuy
+                        ? 'Long'
+                        : 'Short');
+                  const isLongDir = dirText.includes('Long');
+                  const rawType = (o as any).rawOrderType || typeInfo.line1;
+                  const trigCond =
+                    (o as any).triggerCondition && (o as any).triggerCondition !== 'N/A'
+                      ? (o as any).triggerCondition
+                      : triggerPriceNum > 0
+                        ? `Price >= ${formatNum(triggerPriceNum, 2, 2)}`
+                        : 'N/A';
+
+                  return (
+                    <tr
+                      key={o.orderId || o.clientOrderId}
+                      className="border-b border-white/[0.03] hover:bg-hover/60 transition-colors"
+                    >
+                      <td className="px-2.5 py-2">
+                        <div className="flex flex-col gap-0.5 font-mono-tabular">
+                          <span className="text-secondary text-[11px] leading-tight">
+                            {dateInfo.date}
+                          </span>
+                          <span className="text-muted text-[10px] leading-tight">
+                            {dateInfo.time}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary font-medium">{symInfo.base}</td>
+
+                      <td
+                        className={`px-2.5 py-2 font-medium ${isLongDir ? 'text-success' : 'text-danger'}`}
+                      >
+                        {dirText}
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary">{rawType}</td>
+
+                      <td className="px-2.5 py-2 text-secondary font-mono-tabular">
+                        {o.status === 'FILLED'
+                          ? '--'
+                          : `${formatNum(origQtyNum, 2, 6)} ${symInfo.base}`}
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary font-mono-tabular">
+                        {o.status === 'FILLED' || execQtyNum > 0
+                          ? `${formatNum(execQtyNum > 0 ? execQtyNum : origQtyNum, 2, 6)} ${symInfo.base}`
+                          : '--'}
+                      </td>
+
+                      <td className="px-2.5 py-2 text-secondary font-mono-tabular">
+                        {isMarket ? '--' : `${formatNum(totalValueNum, 2, 2)} USDC`}
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary font-mono-tabular">
+                        {isMarket ? 'Market' : formatNum(orderPriceNum, 2, 4)}
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary">{o.reduceOnly ? 'Yes' : 'No'}</td>
+
+                      <td className="px-2.5 py-2 text-secondary font-mono-tabular">{trigCond}</td>
+
+                      <td className="px-2.5 py-2">
+                        <span className="text-primary font-medium text-[11px]">
+                          {formatStatus(o.status)}
+                        </span>
+                      </td>
+
+                      <td className="px-2.5 py-2 text-right">
+                        <div className="inline-flex items-center gap-1 text-muted text-[10px] font-mono-tabular justify-end">
+                          <span>{shortOrderId}</span>
+                          <button
+                            onClick={() => copyToClipboard(orderIdStr, orderIdStr)}
+                            title="Copy full Order ID"
+                            className="hover:text-primary transition-colors p-0.5"
+                          >
+                            {copiedId === orderIdStr ? (
+                              <Check size={11} className="text-success" />
+                            ) : (
+                              <Copy size={11} />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
 
                 return (
                   <tr

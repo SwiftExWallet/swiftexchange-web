@@ -43,9 +43,12 @@ function formatSplitDate(timestamp: number): { date: string; time: string } {
   };
 }
 
-function parseSymbol(rawSymbol: string): { base: string; quote: string; display: string } {
+function parseSymbol(
+  rawSymbol: string,
+  exchange: string = 'aster'
+): { base: string; quote: string; display: string } {
   const clean = (rawSymbol || '').replace('-', '').toUpperCase();
-  let quote = 'USDT';
+  let quote = exchange === 'hyperliquid' ? 'USDC' : 'USDT';
   let base = clean;
   if (clean.endsWith('USDT')) {
     quote = 'USDT';
@@ -219,7 +222,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
                   <div>
                     <span className="text-secondary block">Amount</span>
                     <span className="text-primary font-mono-tabular">
-                      {formatNum(qtyNum, 2, 4)} {symInfo.base}
+                      {formatNum(qtyNum, 2, 6)} {symInfo.base}
                     </span>
                   </div>
                   <div>
@@ -272,24 +275,38 @@ export const TradeHistoryTab: React.FC<Props> = ({
         <div className="hidden md:block">
           <table className="w-full text-left whitespace-nowrap border-collapse">
             <thead className="text-secondary border-b border-white/[0.04] sticky top-0 bg-secondary z-10 text-[11px] font-medium">
-              <tr>
-                <th className="px-2.5 py-1.5 font-medium">Time</th>
-                <th className="px-2.5 py-1.5 font-medium">Symbol</th>
-                <th className="px-2.5 py-1.5 font-medium">Side</th>
-                <th className="px-2.5 py-1.5 font-medium">Order price</th>
-                <th className="px-2.5 py-1.5 font-medium">Executed amount</th>
-                <th className="px-2.5 py-1.5 font-medium">Executed value</th>
-                <th className="px-2.5 py-1.5 font-medium">Fee</th>
-                <th className="px-2.5 py-1.5 font-medium">Realized profit</th>
-                <th className="px-2.5 py-1.5 font-medium text-right">Role</th>
-              </tr>
+              {currentExchange === 'hyperliquid' ? (
+                <tr>
+                  <th className="px-2.5 py-1.5 font-medium">Time</th>
+                  <th className="px-2.5 py-1.5 font-medium">Market</th>
+                  <th className="px-2.5 py-1.5 font-medium">Direction</th>
+                  <th className="px-2.5 py-1.5 font-medium">Price</th>
+                  <th className="px-2.5 py-1.5 font-medium">Size</th>
+                  <th className="px-2.5 py-1.5 font-medium">Trade Value</th>
+                  <th className="px-2.5 py-1.5 font-medium">Fee</th>
+                  <th className="px-2.5 py-1.5 font-medium text-right">Closed PNL</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th className="px-2.5 py-1.5 font-medium">Time</th>
+                  <th className="px-2.5 py-1.5 font-medium">Symbol</th>
+                  <th className="px-2.5 py-1.5 font-medium">Side</th>
+                  <th className="px-2.5 py-1.5 font-medium">Order price</th>
+                  <th className="px-2.5 py-1.5 font-medium">Executed amount</th>
+                  <th className="px-2.5 py-1.5 font-medium">Executed value</th>
+                  <th className="px-2.5 py-1.5 font-medium">Fee</th>
+                  <th className="px-2.5 py-1.5 font-medium">Realized profit</th>
+                  <th className="px-2.5 py-1.5 font-medium text-right">Role</th>
+                </tr>
+              )}
             </thead>
             <tbody className="text-[11px]">
               {filteredTrades.map(t => {
-                const symInfo = parseSymbol(t.symbol);
+                const symInfo = parseSymbol(t.symbol, currentExchange);
                 const isBuy = (t.side || '').toUpperCase() === 'BUY';
                 const priceNum = parseFloat(t.price || '0');
-                const qtyNum = parseFloat(t.qty || '0');
+                const rawQty = t.qty || (t as any).size || '0';
+                const qtyNum = parseFloat(rawQty);
                 const quoteQtyNum = parseFloat(t.quoteQty || '0') || priceNum * qtyNum;
                 const pnlNum = parseFloat(t.realizedPnl || '0');
                 const isPnlPositive = pnlNum > 0;
@@ -298,7 +315,88 @@ export const TradeHistoryTab: React.FC<Props> = ({
                 const role = t.maker ? 'Maker' : 'Taker';
                 const marginUnit =
                   currentExchange === 'hyperliquid' ? 'USDC' : t.marginAsset || 'USDT';
-                const dateInfo = formatSplitDate(t.time);
+                const tradeTime = t.time || (t as any).timestamp || 0;
+                const dateInfo = formatSplitDate(tradeTime);
+
+                const dirText =
+                  (t as any).dir ||
+                  (currentExchange === 'hyperliquid'
+                    ? isBuy
+                      ? 'Open Long'
+                      : 'Close Long'
+                    : isBuy
+                      ? 'Buy'
+                      : 'Sell');
+                const isLongDir = dirText.includes('Long') || (!dirText.includes('Short') && isBuy);
+
+                if (currentExchange === 'hyperliquid') {
+                  const feeVal = Math.abs(parseFloat(t.commission || (t as any).fee || '0'));
+                  return (
+                    <tr
+                      key={t.id}
+                      className="border-b border-white/[0.03] hover:bg-hover/60 transition-colors"
+                    >
+                      <td className="px-2.5 py-2">
+                        <div className="flex flex-col gap-0.5 font-mono-tabular">
+                          <span className="text-secondary text-[11px] leading-tight">
+                            {dateInfo.date}
+                          </span>
+                          <span className="text-muted text-[10px] leading-tight">
+                            {dateInfo.time}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary font-medium">{symInfo.base}</td>
+
+                      <td
+                        className={`px-2.5 py-2 font-medium ${isLongDir ? 'text-success' : 'text-danger'}`}
+                      >
+                        {dirText}
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary font-mono-tabular">
+                        {formatNum(priceNum, 2, 4)}
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary font-mono-tabular">
+                        {formatNum(qtyNum, 2, 6)} {symInfo.base}
+                      </td>
+
+                      <td className="px-2.5 py-2 text-primary font-mono-tabular">
+                        {formatNum(quoteQtyNum, 2, 2)} USDC
+                      </td>
+
+                      <td className="px-2.5 py-2 text-secondary font-mono-tabular">
+                        {formatNum(feeVal, 2, 4)} USDC
+                      </td>
+
+                      <td className="px-2.5 py-2 font-mono-tabular text-right">
+                        <div className="inline-flex items-center gap-1.5 justify-end">
+                          <span
+                            className={`font-medium ${
+                              isPnlPositive
+                                ? 'text-success'
+                                : isPnlNegative
+                                  ? 'text-danger'
+                                  : 'text-secondary'
+                            }`}
+                          >
+                            {isPnlPositive ? '+' : ''}
+                            {formatNum(pnlNum, 2, 2)} USDC
+                          </span>
+                          <button
+                            onClick={() => setActiveShareTrade(t)}
+                            title="Share PnL"
+                            className="text-secondary hover:text-brand transition-colors p-0.5"
+                          >
+                            <ExternalLink size={11} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
 
                 return (
                   <tr
@@ -329,7 +427,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
                     </td>
 
                     <td className="px-2.5 py-2 text-primary font-mono-tabular">
-                      {formatNum(qtyNum, 2, 4)} {symInfo.base}
+                      {formatNum(qtyNum, 2, 6)} {symInfo.base}
                     </td>
 
                     <td className="px-2.5 py-2 text-primary font-mono-tabular">
@@ -337,12 +435,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
                     </td>
 
                     <td className="px-2.5 py-2 text-secondary font-mono-tabular">
-                      {formatFee(
-                        t.commission,
-                        currentExchange === 'hyperliquid'
-                          ? t.commissionAsset || 'USDC'
-                          : t.commissionAsset || 'ASTER'
-                      )}
+                      {formatFee(t.commission, t.commissionAsset || 'ASTER')}
                     </td>
 
                     <td className="px-2.5 py-2 font-mono-tabular">
