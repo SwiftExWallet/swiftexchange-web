@@ -93,8 +93,8 @@ export const TESTNET_VAULT_CONFIG: NetworkVaultEnvironment = {
       description:
         'Curated single-asset vault deployed via DeFindex factory with fixed strategy allocation into Blend Protocol.',
       poolLabel: 'Fixed Allocation',
-      vaultAddress: 'CDZJD4Z7TUTGFMPQ5DROVIFQ345CZCNKUBUAYLIX52ZF2ALOGVLEKN2F',
-      strategyAddress: 'CABCCWDDICY2X77KOH2AQFDSRT4DEOLFJFZM3XTNW6FDHGKXZCJPEQHC',
+      vaultAddress: 'CDA5DNXIPKEIKCIO2ELJ64KAOLYXKDBU6KHFGHMNWGFLCNMX2MBABXJZ',
+      strategyAddress: 'CDVQ6PS2G33N2I5TFQWECFS4LOBAPOS37NXSTTKGI2YXSATYMOC3JPXS',
       strategyName: 'Euro Money Market Yield Strategy',
       underlyingProtocol: 'Blend Protocol',
       targetApyPercent: 5.2,
@@ -105,8 +105,8 @@ export const TESTNET_VAULT_CONFIG: NetworkVaultEnvironment = {
         symbol: 'EURC',
         name: 'Euro Coin',
         decimals: 7,
-        contractId: 'CDOIV56NSBNVNZN4XPTOT7JVRK6AW4RUISEPYUZYIIKMVIY7X3OH4S5X',
-        issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        contractId: 'CCUUDM434BMZMYWYDITHFXHDMIVTGGD6T2I5UKNX5BSLXLW7HVR4MCGZ',
+        issuer: 'GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO',
         oraclePriceUsd: 1.08,
       },
       roles: {
