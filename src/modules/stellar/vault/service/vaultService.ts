@@ -445,84 +445,105 @@ export class VaultService {
     if (!userAddress) return { records: [], isDone: true };
     try {
       const horizon = getHorizonServer(network);
-      let callBuilder = horizon.operations().forAccount(userAddress).order('desc').limit(limit);
-
-      if (cursor) {
-        callBuilder = callBuilder.cursor(cursor);
-      }
-
-      const res = await callBuilder.call();
-      const records = res.records || [];
-      const isDone = records.length < limit;
-      const nextCursor = records.length > 0 ? records[records.length - 1].paging_token : undefined;
+      let currentCursor = cursor;
+      let isDone = false;
       const vaultActivities: VaultActivityRecord[] = [];
+      let batchCount = 0;
+      const MAX_BATCHES = 4; // Scan up to 100 Horizon operations per call to find vault events
 
-      for (const op of records) {
-        if (op.type !== 'invoke_host_function') continue;
+      while (batchCount < MAX_BATCHES && !isDone && vaultActivities.length < limit) {
+        batchCount++;
+        let callBuilder = horizon.operations().forAccount(userAddress).order('desc').limit(limit);
 
-        const anyOp = op as any;
-        if (!Array.isArray(anyOp.parameters) || anyOp.parameters.length < 2) continue;
+        if (currentCursor) {
+          callBuilder = callBuilder.cursor(currentCursor);
+        }
 
-        try {
-          const raw0 = anyOp.parameters[0]?.value || anyOp.parameters[0];
-          let contractAddress = '';
-          if (raw0 && typeof raw0 === 'string') {
-            const sc0 = StellarSDK.xdr.ScVal.fromXDR(raw0, 'base64');
-            const v0 = StellarSDK.scValToNative(sc0);
-            contractAddress = typeof v0 === 'string' ? v0 : (v0 as any)?.toString?.() || '';
-          }
+        const res = await callBuilder.call();
+        const records = res.records || [];
+        if (records.length === 0) {
+          isDone = true;
+          break;
+        }
 
-          if (contractAddress !== vault.vaultAddress) continue;
+        const lastRecordCursor = records[records.length - 1].paging_token;
+        if (!lastRecordCursor || lastRecordCursor === currentCursor) {
+          isDone = true;
+          break;
+        }
+        currentCursor = lastRecordCursor;
 
-          const raw1 = anyOp.parameters[1]?.value || anyOp.parameters[1];
-          let fnName = '';
-          if (raw1 && typeof raw1 === 'string') {
-            const sc1 = StellarSDK.xdr.ScVal.fromXDR(raw1, 'base64');
-            const v1 = StellarSDK.scValToNative(sc1);
-            fnName = typeof v1 === 'string' ? v1 : (v1 as any)?.toString?.() || '';
-          }
+        if (records.length < limit) {
+          isDone = true;
+        }
 
-          if (fnName !== 'deposit' && fnName !== 'withdraw') continue;
+        for (const op of records) {
+          if (op.type !== 'invoke_host_function') continue;
 
-          let parsedAmount = '';
-          if (anyOp.parameters.length >= 3) {
-            try {
-              const raw2 = anyOp.parameters[2]?.value || anyOp.parameters[2];
-              if (raw2 && typeof raw2 === 'string') {
-                const sc2 = StellarSDK.xdr.ScVal.fromXDR(raw2, 'base64');
-                const v2 = StellarSDK.scValToNative(sc2);
-                if (Array.isArray(v2) && v2.length > 0) {
-                  const valItem = v2[0];
-                  if (typeof valItem === 'bigint' || typeof valItem === 'number') {
-                    parsedAmount = (Number(valItem) / 1e7).toFixed(2);
-                  }
-                } else if (typeof v2 === 'bigint' || typeof v2 === 'number') {
-                  parsedAmount = (Number(v2) / 1e7).toFixed(2);
-                }
-              }
-            } catch {
-              // fallback
+          const anyOp = op as any;
+          if (!Array.isArray(anyOp.parameters) || anyOp.parameters.length < 2) continue;
+
+          try {
+            const raw0 = anyOp.parameters[0]?.value || anyOp.parameters[0];
+            let contractAddress = '';
+            if (raw0 && typeof raw0 === 'string') {
+              const sc0 = StellarSDK.xdr.ScVal.fromXDR(raw0, 'base64');
+              const v0 = StellarSDK.scValToNative(sc0);
+              contractAddress = typeof v0 === 'string' ? v0 : (v0 as any)?.toString?.() || '';
             }
-          }
 
-          vaultActivities.push({
-            id: op.id,
-            type: fnName === 'withdraw' ? 'withdraw' : 'deposit',
-            vaultId: vault.id,
-            vaultName: vault.name,
-            vaultAddress: vault.vaultAddress,
-            amount: parsedAmount || '0.00',
-            symbol: vault.underlyingAsset.symbol,
-            txHash: op.transaction_hash,
-            timestamp: new Date(op.created_at).getTime(),
-            status: 'confirmed',
-          });
-        } catch {
-          // ignore corrupted operation entries
+            if (contractAddress !== vault.vaultAddress) continue;
+
+            const raw1 = anyOp.parameters[1]?.value || anyOp.parameters[1];
+            let fnName = '';
+            if (raw1 && typeof raw1 === 'string') {
+              const sc1 = StellarSDK.xdr.ScVal.fromXDR(raw1, 'base64');
+              const v1 = StellarSDK.scValToNative(sc1);
+              fnName = typeof v1 === 'string' ? v1 : (v1 as any)?.toString?.() || '';
+            }
+
+            if (fnName !== 'deposit' && fnName !== 'withdraw') continue;
+
+            let parsedAmount = '';
+            if (anyOp.parameters.length >= 3) {
+              try {
+                const raw2 = anyOp.parameters[2]?.value || anyOp.parameters[2];
+                if (raw2 && typeof raw2 === 'string') {
+                  const sc2 = StellarSDK.xdr.ScVal.fromXDR(raw2, 'base64');
+                  const v2 = StellarSDK.scValToNative(sc2);
+                  if (Array.isArray(v2) && v2.length > 0) {
+                    const valItem = v2[0];
+                    if (typeof valItem === 'bigint' || typeof valItem === 'number') {
+                      parsedAmount = (Number(valItem) / 1e7).toFixed(2);
+                    }
+                  } else if (typeof v2 === 'bigint' || typeof v2 === 'number') {
+                    parsedAmount = (Number(v2) / 1e7).toFixed(2);
+                  }
+                }
+              } catch {
+                // fallback
+              }
+            }
+
+            vaultActivities.push({
+              id: op.id,
+              type: fnName === 'withdraw' ? 'withdraw' : 'deposit',
+              vaultId: vault.id,
+              vaultName: vault.name,
+              vaultAddress: vault.vaultAddress,
+              amount: parsedAmount || '0.00',
+              symbol: vault.underlyingAsset.symbol,
+              txHash: op.transaction_hash,
+              timestamp: new Date(op.created_at).getTime(),
+              status: 'confirmed',
+            });
+          } catch {
+            // ignore corrupted operation entries
+          }
         }
       }
 
-      return { records: vaultActivities, nextCursor, isDone };
+      return { records: vaultActivities, nextCursor: currentCursor, isDone };
     } catch (err) {
       console.warn('[VaultService] Failed to fetch vault history from Horizon:', err);
       return { records: [], isDone: true };

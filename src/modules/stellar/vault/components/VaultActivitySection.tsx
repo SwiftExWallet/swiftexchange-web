@@ -417,7 +417,7 @@ export const VaultActivitySection: React.FC<VaultActivitySectionProps> = ({
                 </table>
               </div>
 
-              {hasMore && (
+              {hasMore && activities.length > 0 && (
                 <div
                   ref={sentinelRef}
                   className="py-3 px-4 flex items-center justify-center border-t border-(--color-border)/40"
@@ -431,7 +431,8 @@ export const VaultActivitySection: React.FC<VaultActivitySectionProps> = ({
                     <button
                       type="button"
                       onClick={() => fetchMore()}
-                      className="text-[11px] font-semibold text-(--color-text-secondary) hover:text-brand-primary transition-colors cursor-pointer"
+                      disabled={isLoadingMore}
+                      className="text-[11px] font-semibold text-(--color-text-secondary) hover:text-brand-primary disabled:opacity-50 transition-colors cursor-pointer"
                     >
                       Load More
                     </button>

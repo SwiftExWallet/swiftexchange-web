@@ -13,8 +13,8 @@ interface VaultRateModelProps {
 
 export const VaultRateModel: React.FC<VaultRateModelProps> = ({
   data,
-  utilizationPercent = 52.76,
-  currentApr = 8.75,
+  utilizationPercent = 0,
+  currentApr = 0,
   baseApr = 2.5,
   targetUtil = 80.0,
   maxUtil = 90.0,

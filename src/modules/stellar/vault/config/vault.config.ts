@@ -86,6 +86,36 @@ export const TESTNET_VAULT_CONFIG: NetworkVaultEnvironment = {
         feeReceiver: 'GBGTSXNXED7NYEDCHVQZ7FF3J2QHPYFI3DA5UOZIFIHBQ444RA6NOTPY',
       },
     },
+    {
+      id: 'swiftex-eurc-vault',
+      name: 'SwiftEx EURC Vault',
+      symbol: 'swEURC',
+      description:
+        'Curated single-asset vault deployed via DeFindex factory with fixed strategy allocation into Blend Protocol.',
+      poolLabel: 'Fixed Allocation',
+      vaultAddress: 'CDZJD4Z7TUTGFMPQ5DROVIFQ345CZCNKUBUAYLIX52ZF2ALOGVLEKN2F',
+      strategyAddress: 'CABCCWDDICY2X77KOH2AQFDSRT4DEOLFJFZM3XTNW6FDHGKXZCJPEQHC',
+      strategyName: 'Euro Money Market Yield Strategy',
+      underlyingProtocol: 'Blend Protocol',
+      targetApyPercent: 5.2,
+      isUpgradable: false,
+      expectedApyBps: 520,
+      underlyingAsset: {
+        code: 'EURC',
+        symbol: 'EURC',
+        name: 'Euro Coin',
+        decimals: 7,
+        contractId: 'CDOIV56NSBNVNZN4XPTOT7JVRK6AW4RUISEPYUZYIIKMVIY7X3OH4S5X',
+        issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        oraclePriceUsd: 1.08,
+      },
+      roles: {
+        vaultManager: 'GBGTSXNXED7NYEDCHVQZ7FF3J2QHPYFI3DA5UOZIFIHBQ444RA6NOTPY',
+        rebalanceManager: 'GBGTSXNXED7NYEDCHVQZ7FF3J2QHPYFI3DA5UOZIFIHBQ444RA6NOTPY',
+        emergencyManager: 'GBGTSXNXED7NYEDCHVQZ7FF3J2QHPYFI3DA5UOZIFIHBQ444RA6NOTPY',
+        feeReceiver: 'GBGTSXNXED7NYEDCHVQZ7FF3J2QHPYFI3DA5UOZIFIHBQ444RA6NOTPY',
+      },
+    },
   ],
 };
 

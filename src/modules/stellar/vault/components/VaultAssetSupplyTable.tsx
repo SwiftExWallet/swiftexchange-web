@@ -59,7 +59,7 @@ export const VaultAssetSupplyTable: React.FC<VaultAssetSupplyTableProps> = ({
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-9 h-9 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-400 flex items-center justify-center font-bold text-sm shrink-0 font-mono">
-                  $
+                  {vault.underlyingAsset.symbol === 'EURC' ? '€' : '$'}
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
