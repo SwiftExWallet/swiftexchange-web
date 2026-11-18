@@ -22,7 +22,13 @@ export const useVaultData = () => {
   const [error, setError] = useState<string | null>(null);
 
   const refreshData = useCallback(async () => {
-    setIsLoading(true);
+    // Only trigger full loading state on initial fetch to avoid flickering UI during 20s polling
+    setMetrics(prev => {
+      if (Object.keys(prev).length === 0) {
+        setIsLoading(true);
+      }
+      return prev;
+    });
     setError(null);
     try {
       const activeEnv = getVaultEnvironment(currentNetwork);

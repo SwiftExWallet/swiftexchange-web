@@ -20,7 +20,7 @@ import { VaultActivitySection } from './components/VaultActivitySection';
 import { VaultAssetSupplyTable } from './components/VaultAssetSupplyTable';
 import { VaultRateModel } from './components/VaultRateModel';
 import { useVaultData } from './hook/useVaultData';
-import { formatCompactNumber, formatCurrency } from './utils/vaultFormatters';
+import { formatCompactNumber } from './utils/vaultFormatters';
 
 export const VaultPage: React.FC = () => {
   const {
@@ -30,7 +30,6 @@ export const VaultPage: React.FC = () => {
     metrics,
     positions,
     walletBalances,
-    totalTvlUsd,
     isLoading,
     error,
     refreshData,
@@ -53,9 +52,11 @@ export const VaultPage: React.FC = () => {
   const apy =
     currentMetrics?.realizedApyPercent && currentMetrics.realizedApyPercent > 0
       ? currentMetrics.realizedApyPercent
-      : selectedVault?.targetApyPercent || 8.75;
+      : selectedVault?.targetApyPercent || 0;
 
   const totalAssetsNum = currentMetrics ? Number(currentMetrics.totalAssets) / 1e7 : 0;
+  const selectedVaultTvlUsd =
+    totalAssetsNum * (selectedVault?.underlyingAsset?.oraclePriceUsd || 1);
   const utilization = currentMetrics?.utilizationPercent || 0;
   const hasDeposit = currentPosition && currentPosition.shares > 0n;
   const hasYield = Boolean(currentPosition && currentPosition.accruedYield > 0n);
@@ -80,8 +81,8 @@ export const VaultPage: React.FC = () => {
   const statCells = [
     {
       title: 'Total Value Locked',
-      value: `$${totalTvlUsd > 0 ? totalTvlUsd.toFixed(2) : '72.77'}`,
-      subtext: 'Live across Soroban protocols',
+      value: `${totalAssetsNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${selectedVault.underlyingAsset.symbol}`,
+      subtext: `≈ $${selectedVaultTvlUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`,
       icon: <Coins size={18} className="text-brand-primary" />,
       highlight: false,
     },
@@ -168,16 +169,25 @@ export const VaultPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="space-y-0.5 sm:space-y-1 mt-2 sm:mt-3">
-                  <h3
-                    className={`text-lg sm:text-2xl font-black font-mono tracking-tight truncate ${
-                      c.highlight ? 'text-emerald-400' : 'text-(--color-text-primary)'
-                    }`}
-                  >
-                    {c.value}
-                  </h3>
-                  <p className="text-[10px] sm:text-[11px] text-(--color-text-muted) truncate">
-                    {c.subtext}
-                  </p>
+                  {isLoading && !currentMetrics ? (
+                    <div className="space-y-2 py-0.5">
+                      <div className="h-6 sm:h-7 w-28 bg-(--color-bg-tertiary) rounded-md animate-pulse" />
+                      <div className="h-3 w-36 bg-(--color-bg-tertiary)/60 rounded animate-pulse" />
+                    </div>
+                  ) : (
+                    <>
+                      <h3
+                        className={`text-lg sm:text-2xl font-black font-mono tracking-tight truncate ${
+                          c.highlight ? 'text-emerald-400' : 'text-(--color-text-primary)'
+                        }`}
+                      >
+                        {c.value}
+                      </h3>
+                      <p className="text-[10px] sm:text-[11px] text-(--color-text-muted) truncate">
+                        {c.subtext}
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -254,10 +264,16 @@ export const VaultPage: React.FC = () => {
                       <Flame className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
                     </div>
                     <div className="flex items-baseline gap-2 mt-1">
-                      <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono">
-                        {apy.toFixed(2)}%
-                      </span>
-                      <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      {isLoading && !currentMetrics ? (
+                        <div className="h-8 w-24 bg-(--color-bg-tertiary) rounded-md animate-pulse" />
+                      ) : (
+                        <>
+                          <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono">
+                            {apy.toFixed(2)}%
+                          </span>
+                          <TrendingUp className="w-4 h-4 text-emerald-400" />
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -265,19 +281,27 @@ export const VaultPage: React.FC = () => {
                 <div className="grid grid-cols-2 divide-x divide-(--color-border) bg-(--color-bg-tertiary)/15">
                   <div className="p-3.5 sm:p-4 sm:px-6">
                     <div className="text-[11px] text-(--color-text-secondary)">Total TVL</div>
-                    <div className="text-xs font-bold text-(--color-text-primary) font-mono mt-0.5 truncate">
-                      {totalAssetsNum > 1000
-                        ? `${formatCompactNumber(totalAssetsNum)} ${selectedVault.underlyingAsset.symbol}`
-                        : `${formatCurrency(totalAssetsNum)} ${selectedVault.underlyingAsset.symbol}`}
-                    </div>
+                    {isLoading && !currentMetrics ? (
+                      <div className="h-4 w-20 bg-(--color-bg-tertiary) rounded animate-pulse mt-1" />
+                    ) : (
+                      <div className="text-xs font-bold text-(--color-text-primary) font-mono mt-0.5 truncate">
+                        {totalAssetsNum > 1000
+                          ? `${formatCompactNumber(totalAssetsNum)} ${selectedVault.underlyingAsset.symbol}`
+                          : `${totalAssetsNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${selectedVault.underlyingAsset.symbol}`}
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-3.5 sm:p-4 sm:px-6 flex items-center justify-between">
                     <div>
                       <div className="text-[11px] text-(--color-text-secondary)">Utilization</div>
-                      <div className="text-xs font-bold text-brand-primary font-mono mt-0.5">
-                        {utilization.toFixed(2)}%
-                      </div>
+                      {isLoading && !currentMetrics ? (
+                        <div className="h-4 w-14 bg-(--color-bg-tertiary) rounded animate-pulse mt-1" />
+                      ) : (
+                        <div className="text-xs font-bold text-brand-primary font-mono mt-0.5">
+                          {utilization.toFixed(2)}%
+                        </div>
+                      )}
                     </div>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-(--color-bg-tertiary) text-(--color-text-secondary) border border-(--color-border)">
                       {selectedVault.underlyingProtocol}
@@ -288,7 +312,7 @@ export const VaultPage: React.FC = () => {
                 <div>
                   <VaultRateModel
                     data={currentMetrics?.interestRateModel}
-                    utilizationPercent={currentMetrics?.utilizationPercent ?? 52.76}
+                    utilizationPercent={currentMetrics?.utilizationPercent ?? 0}
                     currentApr={apy}
                     baseApr={currentMetrics?.interestRateModel?.baseApr ?? 2.5}
                     targetUtil={currentMetrics?.interestRateModel?.targetUtilization ?? 80.0}
@@ -324,28 +348,34 @@ export const VaultPage: React.FC = () => {
                       Current Position Value
                     </div>
                     <div className="flex flex-wrap items-baseline gap-2.5 mt-1">
-                      <div className="text-2xl sm:text-3xl font-extrabold text-(--color-text-primary) font-mono truncate">
-                        {currentPosition?.formatted?.underlying || '0.00'}{' '}
-                        <span className="text-sm font-normal text-(--color-text-secondary)">
-                          {selectedVault.underlyingAsset.symbol}
-                        </span>
-                      </div>
-                      {hasDeposit && (
-                        <div className="flex items-center gap-1.5 font-mono text-xs">
-                          <span className="text-(--color-text-muted)">
-                            ≈ ${positionValueNum.toFixed(2)}
-                          </span>
-                          {pnlUsdc !== 0 && (
-                            <span
-                              className={`font-semibold ${
-                                pnlUsdc >= 0 ? 'text-emerald-400' : 'text-red-400'
-                              }`}
-                            >
-                              ({pnlUsdc >= 0 ? '+' : ''}
-                              {pnlPct.toFixed(2)}%)
+                      {isLoading && !currentPosition && Boolean(stellarAddress) ? (
+                        <div className="h-8 w-28 bg-(--color-bg-tertiary) rounded-md animate-pulse" />
+                      ) : (
+                        <>
+                          <div className="text-2xl sm:text-3xl font-extrabold text-(--color-text-primary) font-mono truncate">
+                            {currentPosition?.formatted?.underlying || '0.00'}{' '}
+                            <span className="text-sm font-normal text-(--color-text-secondary)">
+                              {selectedVault.underlyingAsset.symbol}
                             </span>
+                          </div>
+                          {hasDeposit && (
+                            <div className="flex items-center gap-1.5 font-mono text-xs">
+                              <span className="text-(--color-text-muted)">
+                                ≈ ${positionValueNum.toFixed(2)}
+                              </span>
+                              {pnlUsdc !== 0 && (
+                                <span
+                                  className={`font-semibold ${
+                                    pnlUsdc >= 0 ? 'text-emerald-400' : 'text-red-400'
+                                  }`}
+                                >
+                                  ({pnlUsdc >= 0 ? '+' : ''}
+                                  {pnlPct.toFixed(2)}%)
+                                </span>
+                              )}
+                            </div>
                           )}
-                        </div>
+                        </>
                       )}
                     </div>
                   </div>

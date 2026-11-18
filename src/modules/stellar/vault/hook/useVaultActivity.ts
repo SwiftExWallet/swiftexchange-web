@@ -51,11 +51,22 @@ export function useVaultActivity(
 
   const hasMore = useMemo(() => {
     if (!vaultKey) return false;
-    return !isDoneByVault[vaultKey];
-  }, [isDoneByVault, vaultKey]);
+    return Boolean(
+      hasFetchedOnce[vaultKey] &&
+      !isDoneByVault[vaultKey] &&
+      (activitiesByVault[vaultKey] || []).length > 0
+    );
+  }, [hasFetchedOnce, isDoneByVault, vaultKey, activitiesByVault]);
 
   const fetchMore = useCallback(async () => {
-    if (!userAddress || !vault || !vaultKey || fetchingRef.current || isDoneByVault[vaultKey])
+    if (
+      !userAddress ||
+      !vault ||
+      !vaultKey ||
+      fetchingRef.current ||
+      isLoadingMore ||
+      isDoneByVault[vaultKey]
+    )
       return;
 
     fetchingRef.current = true;
@@ -70,9 +81,11 @@ export function useVaultActivity(
         currentCursor,
         25
       );
-      appendActivities(vaultKey, res.records, res.nextCursor, res.isDone);
+      const isActuallyDone = res.isDone || !res.nextCursor || res.nextCursor === currentCursor;
+      appendActivities(vaultKey, res.records, res.nextCursor, isActuallyDone);
     } catch (e) {
       console.warn('[useVaultActivity] Fetch more failed:', e);
+      appendActivities(vaultKey, [], undefined, true);
     } finally {
       fetchingRef.current = false;
       setLoadingMore(false);
@@ -84,12 +97,14 @@ export function useVaultActivity(
     vaultKey,
     cursorByVault,
     isDoneByVault,
+    isLoadingMore,
     appendActivities,
     setLoadingMore,
   ]);
 
   const refreshHistory = useCallback(async () => {
-    if (!userAddress || !vault || !vaultKey) return;
+    if (!userAddress || !vault || !vaultKey || fetchingRef.current) return;
+    fetchingRef.current = true;
     setLoading(true);
     resetVault(vaultKey);
     try {
@@ -100,11 +115,14 @@ export function useVaultActivity(
         undefined,
         25
       );
-      appendActivities(vaultKey, res.records, res.nextCursor, res.isDone);
+      const isActuallyDone = res.isDone || !res.nextCursor;
+      appendActivities(vaultKey, res.records, res.nextCursor, isActuallyDone);
       markFetched(vaultKey);
     } catch (e) {
       console.warn('[useVaultActivity] Refresh failed:', e);
+      markFetched(vaultKey);
     } finally {
+      fetchingRef.current = false;
       setLoading(false);
     }
   }, [
@@ -118,30 +136,11 @@ export function useVaultActivity(
     setLoading,
   ]);
 
-  // Initial fetch only once per user/vault connection - NO background interval polling!
+  // Initial fetch strictly once per user/vault connection - NO background interval polling!
   useEffect(() => {
-    if (!vaultKey || hasFetchedOnce[vaultKey]) return;
+    if (!vaultKey || hasFetchedOnce[vaultKey] || fetchingRef.current) return;
     refreshHistory();
   }, [vaultKey, hasFetchedOnce, refreshHistory]);
-
-  // Infinite scroll IntersectionObserver on sentinel
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || !hasMore || isLoading || isLoadingMore) return;
-
-    const observer = new IntersectionObserver(
-      entries => {
-        const [entry] = entries;
-        if (entry.isIntersecting && !fetchingRef.current && hasMore) {
-          fetchMore();
-        }
-      },
-      { rootMargin: '250px' }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, isLoading, isLoadingMore, fetchMore]);
 
   return {
     activities,
