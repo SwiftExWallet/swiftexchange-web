@@ -61,10 +61,10 @@ describe('ConfirmationModal', () => {
 
   it('calls onCancel when clicking on the background backdrop', async () => {
     const onCancelMock = vi.fn();
-    const { container } = render(<ConfirmationModal {...defaultProps} onCancel={onCancelMock} />);
+    render(<ConfirmationModal {...defaultProps} onCancel={onCancelMock} />);
 
-    // The first child is the backdrop container div
-    const backdrop = container.firstChild as HTMLElement;
+    // The dialog is rendered via portal into document.body; its parent is the backdrop
+    const backdrop = screen.getByRole('dialog').parentElement as HTMLElement;
     fireEvent.click(backdrop);
 
     expect(onCancelMock).toHaveBeenCalledTimes(1);
