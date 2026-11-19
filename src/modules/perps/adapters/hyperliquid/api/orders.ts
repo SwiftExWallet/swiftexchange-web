@@ -11,6 +11,7 @@ import type { Wallet } from 'ethers';
 
 import type { HyperliquidIsolatedSigner } from '../../../../walletconnect/services/hyperliquidAgentKeyManager';
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import { toHyperliquidCoin } from '../../../utils/symbol';
 
 export interface HyperliquidOrderRequest {
   symbol: string;
@@ -56,10 +57,7 @@ export async function getHyperliquidUniverse(
 }
 
 export async function getHyperliquidAssetId(symbol: string, isTestnet: boolean): Promise<number> {
-  const coin = symbol
-    .split('-')[0]
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toUpperCase();
+  const coin = toHyperliquidCoin(symbol).toUpperCase();
   const universe = await getHyperliquidUniverse(isTestnet);
   const index = universe.findIndex(u => u.name.toUpperCase() === coin);
   if (index === -1) {
@@ -117,20 +115,30 @@ export async function placeHyperliquidOrder(
   let orderTypeObj: any;
 
   if (req.type === 'MARKET') {
-    let curPx =
-      req.currentPrice || (typeof req.price === 'string' ? parseFloat(req.price) : req.price);
-    if (!curPx || curPx <= 0 || isNaN(curPx)) {
-      try {
-        const mids: any = await transport.request('info', { type: 'allMids' });
-        const coin = universeItem?.name;
-        if (coin && mids && mids[coin]) {
-          curPx = parseFloat(mids[coin]);
-        }
-      } catch {
-        void 0;
+    let curPx = 0;
+    try {
+      const mids: any = await transport.request('info', { type: 'allMids' });
+      const coin = universeItem?.name;
+      if (coin && mids && mids[coin]) {
+        curPx = parseFloat(mids[coin]);
       }
+    } catch {
+      void 0;
     }
-    const slipPrice = isBuy ? curPx * 1.05 : curPx * 0.95;
+
+    if (!curPx || curPx <= 0 || isNaN(curPx)) {
+      curPx =
+        req.currentPrice ||
+        (typeof req.price === 'string' ? parseFloat(req.price) : req.price) ||
+        0;
+    }
+
+    if (!curPx || curPx <= 0 || isNaN(curPx)) {
+      throw new Error(`Unable to determine execution price for ${req.symbol}`);
+    }
+
+    const slippageMultiplier = isBuy ? 1.02 : 0.98;
+    const slipPrice = curPx * slippageMultiplier;
     limitPx = formatHyperliquidPrice(slipPrice, szDecimals);
     orderTypeObj = { limit: { tif: 'FrontendMarket' } };
   } else if (req.type === 'POST_ONLY') {

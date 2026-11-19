@@ -4,6 +4,7 @@ import React, { memo, useMemo, useState } from 'react';
 import BigNumber from 'bignumber.js';
 
 import { ConfirmationModal } from '../../../../../components/common/ConfirmationModal';
+import { useNotificationStore } from '../../../../../store/notificationStore';
 import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
@@ -78,12 +79,7 @@ const PositionRow = memo(
         state.assetCtxByMarket[position.symbol.replace('-', '')] ||
         state.assetCtxByMarket[position.symbol.replace('USDT', '-USDT')]
     );
-    const {
-      isReady,
-      loading: isProcessing,
-      closePosition,
-      reversePosition,
-    } = useUnifiedExecution();
+    const { isReady, closePosition, reversePosition } = useUnifiedExecution();
 
     const market = useMarketStore(
       state =>
@@ -98,8 +94,19 @@ const PositionRow = memo(
         const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
         await closePosition(position.symbol, position.size, isLong, curPx);
         setCloseModalOpen(false);
-      } catch (err) {
+        useNotificationStore.getState().showToast({
+          type: 'success',
+          title: 'Position Closed',
+          message: `Closed ${position.symbol.replace('-', '')} position successfully`,
+        });
+      } catch (err: any) {
         console.error('Failed to close position:', err);
+        const errMsg = err?.message || 'Failed to close position';
+        useNotificationStore.getState().showToast({
+          type: 'error',
+          title: 'Close Position Failed',
+          message: errMsg,
+        });
       } finally {
         setIsClosingThis(false);
       }
@@ -113,8 +120,19 @@ const PositionRow = memo(
         const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
         await reversePosition(position.symbol, position.size, isLong, curPx);
         setReverseModalOpen(false);
-      } catch (err) {
+        useNotificationStore.getState().showToast({
+          type: 'success',
+          title: 'Position Reversed',
+          message: `Reversed ${position.symbol.replace('-', '')} position successfully`,
+        });
+      } catch (err: any) {
         console.error('Failed to reverse position:', err);
+        const errMsg = err?.message || 'Failed to reverse position';
+        useNotificationStore.getState().showToast({
+          type: 'error',
+          title: 'Reverse Position Failed',
+          message: errMsg,
+        });
       } finally {
         setIsReversingThis(false);
       }
@@ -295,21 +313,21 @@ const PositionRow = memo(
         <td className="px-2.5 py-1.5">
           <button
             onClick={() => setReverseModalOpen(true)}
-            disabled={isProcessing || !isReady}
+            disabled={isReversingThis || !isReady}
             className="text-warning hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed text-[11px] font-medium cursor-pointer"
             title={!isReady ? 'Trading session not active' : 'Reverse position'}
           >
-            Reverse
+            {isReversingThis ? '...' : 'Reverse'}
           </button>
         </td>
         <td className="px-2.5 py-1.5 text-right">
           <button
             onClick={() => setCloseModalOpen(true)}
-            disabled={isProcessing || !isReady}
+            disabled={isClosingThis || !isReady}
             className="text-secondary hover:text-danger hover:bg-danger/10 p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center cursor-pointer"
             title={!isReady ? 'Trading session not active' : 'Close Position'}
           >
-            {isProcessing ? (
+            {isClosingThis ? (
               <span className="text-[10px]">...</span>
             ) : (
               <svg
@@ -481,8 +499,19 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
     try {
       await closeAllPositions(positionList);
       setCloseAllModalOpen(false);
-    } catch (err) {
+      useNotificationStore.getState().showToast({
+        type: 'success',
+        title: 'All Positions Closed',
+        message: 'All open positions were closed successfully',
+      });
+    } catch (err: any) {
       console.error('Failed to close all positions:', err);
+      const errMsg = err?.message || 'Failed to close all positions';
+      useNotificationStore.getState().showToast({
+        type: 'error',
+        title: 'Close All Positions Failed',
+        message: errMsg,
+      });
     } finally {
       setIsClosingAllLocal(false);
     }
