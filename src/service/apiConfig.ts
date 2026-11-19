@@ -62,7 +62,7 @@ export function getCurrentNetwork(): 'mainnet' | 'testnet' {
 export function getServerUrl(): string {
   const network = getCurrentNetwork();
   if (network === 'testnet') {
-    return import.meta.env.VITE_BASE_SERVER_URL_TEST || 'https://hackathon.swiftexchange.io/api/v1';
+    return import.meta.env.VITE_BASE_SERVER_URL_TEST || 'https://dev.swiftexchange.io/api/v1';
   }
   return import.meta.env.VITE_BASE_SERVER_URL_PROD || 'https://beta-v2.swiftexchange.io/api/v1';
 }

@@ -40,6 +40,12 @@ export interface UseSwapValidationParams {
   missingWallets?: string[];
   isStellarAccountActive?: boolean | null;
   currentNetwork?: 'mainnet' | 'testnet';
+  sellAssetSymbol?: string;
+  isWrongChain?: boolean;
+  targetChainName?: string;
+  isApprovalNeeded?: boolean;
+  isUnsupportedPair?: boolean;
+  isWalletConnected?: boolean;
 }
 
 export function useSwapValidation(params: UseSwapValidationParams) {
@@ -67,6 +73,12 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     missingWallets,
     isStellarAccountActive,
     currentNetwork,
+    sellAssetSymbol,
+    isWrongChain,
+    targetChainName,
+    isApprovalNeeded,
+    isUnsupportedPair,
+    isWalletConnected,
   } = params;
 
   const isWalletMissing = !!(missingWallets && missingWallets.length > 0);
@@ -235,6 +247,12 @@ export function useSwapValidation(params: UseSwapValidationParams) {
       nativeSymbol,
       missingWallets,
       isStellarAccountActive,
+      sellAssetSymbol,
+      isWrongChain,
+      targetChainName,
+      isApprovalNeeded,
+      isUnsupportedPair,
+      isWalletConnected,
     });
   }, [
     isFetchingSwapAssets,
@@ -253,6 +271,12 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     nativeSymbol,
     missingWallets,
     isStellarAccountActive,
+    sellAssetSymbol,
+    isWrongChain,
+    targetChainName,
+    isApprovalNeeded,
+    isUnsupportedPair,
+    isWalletConnected,
   ]);
 
   const isErrorState = useMemo(() => {
@@ -370,11 +394,27 @@ export function useSwapValidation(params: UseSwapValidationParams) {
     }
 
     if (
+      buttonLabel === 'Connect Wallet' ||
+      buttonLabel.startsWith('Connect ') ||
+      buttonLabel.startsWith('Switch to ') ||
+      buttonLabel.startsWith('Approve ') ||
       buttonLabel === 'ACTIVATE ACCOUNT' ||
       buttonLabel === 'ADD TRUSTLINE' ||
-      buttonLabel === 'ADD TRUSTLINE & SWAP'
+      buttonLabel === 'ADD TRUSTLINE & SWAP' ||
+      buttonLabel === 'Activate Account' ||
+      buttonLabel === 'Add Trustline' ||
+      buttonLabel === 'Add Trustline & Swap'
     ) {
       return false;
+    }
+
+    if (
+      buttonLabel === 'Pair not available' ||
+      buttonLabel === 'Not available on testnet' ||
+      buttonLabel === 'Enter amount' ||
+      buttonLabel.toLowerCase().includes('insufficient')
+    ) {
+      return true;
     }
 
     if (isWalletMissing) {

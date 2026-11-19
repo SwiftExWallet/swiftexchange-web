@@ -8,6 +8,9 @@ import type {
 } from '../types/swap.types';
 import { isStellar } from './swapAssetUtils';
 
+export { selectProvider, isProxyProvider } from './swapRoutingUtils';
+export type { SwapProvider } from './swapRoutingUtils';
+
 export function getCalculatedBuyAmount(params: BuyAmountParams): string {
   const {
     actionType,
@@ -183,49 +186,77 @@ export function getButtonLabel(params: ButtonLabelParams): string {
     nativeSymbol,
     missingWallets,
     isStellarAccountActive,
+    sellAssetSymbol,
+    isWrongChain,
+    targetChainName,
+    isApprovalNeeded,
+    isUnsupportedPair,
+    isWalletConnected,
   } = params;
 
-  if (isSameAssetSelected) return 'SELECT DIFFERENT ASSET';
-
-  if (missingWallets && missingWallets.length > 0) {
-    if (missingWallets.length === 1) {
+  // 1. Not connected
+  if (isWalletConnected === false || (missingWallets && missingWallets.length > 0)) {
+    if (missingWallets && missingWallets.length === 1 && missingWallets[0] !== 'wallet') {
       const missing = String(missingWallets[0]).toLowerCase();
-      if (missing === 'stellar') return 'CONNECT STELLAR WALLET';
-      if (missing === 'evm') return 'CONNECT EVM WALLET';
-      if (missing === 'cosmos') return 'CONNECT COSMOS WALLET';
-      return `CONNECT ${String(missingWallets[0]).toUpperCase()} WALLET`;
+      if (missing === 'stellar') return 'Connect Stellar Wallet';
+      if (missing === 'evm') return 'Connect EVM Wallet';
     }
-    return 'CONNECT WALLETS';
+    return 'Connect Wallet';
   }
 
+  // 2. Empty amount
+  if (!sellAmount || parseFloat(sellAmount) <= 0) {
+    return 'Enter amount';
+  }
+
+  if (isSameAssetSelected) return 'Select different asset';
+
+  // 3. Unsupported
+  const lowerErr = errorMessage ? errorMessage.toLowerCase() : '';
   if (
-    errorMessage &&
-    (errorMessage.toLowerCase().includes('not supported on testnet') ||
-      errorMessage.toLowerCase().includes('unsupported on testnet') ||
-      errorMessage.toLowerCase().includes('testnet'))
+    isUnsupportedPair ||
+    (lowerErr &&
+      (lowerErr.includes('not available') ||
+        lowerErr.includes("isn't available") ||
+        lowerErr.includes('available yet') ||
+        lowerErr.includes('pair not supported') ||
+        lowerErr.includes('pair not available') ||
+        lowerErr.includes('unsupported')))
   ) {
-    return 'UNSUPPORTED ON TESTNET';
-  }
-
-  if (isFetchingSwapAssets || isQuoteLoading || isFetchingStellarAssets)
-    return 'FETCHING QUOTES...';
-  if (!sellAmount || parseFloat(sellAmount) <= 0) return 'ENTER AMOUNT';
-
-  if (isInsufficientBalance) return 'INSUFFICIENT BALANCE';
-  if (isAmountLessThanFee) return 'AMOUNT LESS THAN FEE';
-  if (hasInsufficientStellarGas) return 'INSUFFICIENT XLM FOR FEE';
-  if (hasInsufficientEvmGas) {
-    return `INSUFFICIENT ${nativeSymbol} FOR GAS`;
-  }
-
-  if (errorMessage) {
-    if (errorMessage.includes('4 XLM')) {
-      return 'INCREASE AMOUNT';
+    if (lowerErr.includes('testnet')) {
+      return 'Not available on testnet';
     }
+    return 'Pair not available';
+  }
+
+  // Loading states
+  if (isFetchingSwapAssets || isQuoteLoading || isFetchingStellarAssets) {
+    return 'Fetching quotes...';
+  }
+
+  // 4. Insufficient balance
+  if (isInsufficientBalance) {
+    return sellAssetSymbol ? `Insufficient ${sellAssetSymbol} balance` : 'Insufficient balance';
+  }
+
+  if (isAmountLessThanFee) return 'Amount less than fee';
+  if (hasInsufficientStellarGas) return 'Insufficient XLM for fee';
+  if (hasInsufficientEvmGas) {
+    return `Insufficient ${nativeSymbol} for gas`;
+  }
+
+  // 5. Wrong chain
+  if (isWrongChain) {
+    return `Switch to ${targetChainName || 'network'}`;
+  }
+
+  // 6. Approval needed
+  if (isApprovalNeeded) {
+    return `Approve ${sellAssetSymbol || 'token'}`;
   }
 
   if (isStellar(toChainId) && isStellarAccountActive === false) {
-    return 'ACTIVATE ACCOUNT';
+    return 'Activate Account';
   }
 
   const isBuyClassic =
@@ -250,17 +281,21 @@ export function getButtonLabel(params: ButtonLabelParams): string {
     isBuyClassic &&
     !selectedBuyAsset.hasTrustline
   ) {
-    return isStellar(fromChainId) ? 'ADD TRUSTLINE & SWAP' : 'ADD TRUSTLINE';
+    return isStellar(fromChainId) ? 'Add Trustline & Swap' : 'Add Trustline';
   }
 
   if (errorMessage) {
+    if (errorMessage.includes('4 XLM')) {
+      return 'Increase amount';
+    }
     // Never show raw wallet error codes or overly long messages on the button
     const isRawCode = /^USER_REJECTED$|^ACTION_REJECTED$|^4001$/.test(errorMessage.trim());
-    if (isRawCode) return 'SWAP FAILED';
-    return errorMessage.length > 45 ? 'SWAP FAILED' : errorMessage.toUpperCase();
+    if (isRawCode) return 'Swap failed';
+    return errorMessage.length > 45 ? 'Swap failed' : errorMessage;
   }
 
-  return 'SWAP';
+  // 7. Ready
+  return 'Swap';
 }
 
 export function getErrorMessage(params: ErrorParams): string | null {
