@@ -72,6 +72,7 @@ const Topbar: React.FC = () => {
               { label: 'Perps', href: ROUTES.TRADING_PERPS, isHot: true },
               { label: 'Swap', href: ROUTES.TRADING_EVM_SWAP },
               { label: 'Markets', href: ROUTES.MARKETS },
+              { label: 'Earn', href: ROUTES.EARN, emoji: '💵' },
             ].map(tab => {
               const isActive = loc.pathname === tab.href;
               return (
@@ -90,6 +91,10 @@ const Topbar: React.FC = () => {
                       size={13}
                       className="text-orange-500 fill-orange-500 drop-shadow-[0_0_6px_rgba(249,115,22,0.8)] animate-pulse shrink-0"
                     />
+                  ) : (tab as any).emoji ? (
+                    <span className="text-[11px] leading-none select-none">
+                      {(tab as any).emoji}
+                    </span>
                   ) : null}
                 </button>
               );

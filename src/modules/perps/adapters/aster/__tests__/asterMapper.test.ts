@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
+import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { AsterMapper } from '../mapper';
 
 describe('AsterMapper', () => {
+  beforeEach(() => {
+    useExchangeManager.getState().setNetwork('mainnet');
+    useLeverageStore.setState({ bracketsBySymbol: {} });
+  });
+
   describe('mapMarket', () => {
     it('maps exchange info symbol with filters to Market model', () => {
       const asterSymbol = {

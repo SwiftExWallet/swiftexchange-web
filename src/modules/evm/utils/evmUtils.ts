@@ -21,15 +21,26 @@ export type NetworkKey = number | string;
 
 export function isValidEVMNetwork(networkKey: unknown): networkKey is NetworkKey {
   const currentNetwork = useWalletStore.getState().network;
+  const inCurrent =
+    (typeof networkKey === 'number' || typeof networkKey === 'string') &&
+    getEVMChains(currentNetwork).some(c => String(c.chainId) === String(networkKey));
+  if (inCurrent) return true;
+
+  const fallbackNetwork = currentNetwork === 'mainnet' ? 'testnet' : 'mainnet';
   return (
     (typeof networkKey === 'number' || typeof networkKey === 'string') &&
-    getEVMChains(currentNetwork).some(c => String(c.chainId) === String(networkKey))
+    getEVMChains(fallbackNetwork).some(c => String(c.chainId) === String(networkKey))
   );
 }
 
 export function getEVMNetworkConfig(networkKey: NetworkKey): EVMNetworkConfig {
   const currentNetwork = useWalletStore.getState().network;
-  const cfg = getEVMChains(currentNetwork).find(c => String(c.chainId) === String(networkKey));
+  let cfg = getEVMChains(currentNetwork).find(c => String(c.chainId) === String(networkKey));
+
+  if (!cfg) {
+    const fallbackNetwork = currentNetwork === 'mainnet' ? 'testnet' : 'mainnet';
+    cfg = getEVMChains(fallbackNetwork).find(c => String(c.chainId) === String(networkKey));
+  }
 
   if (!cfg) {
     throw new Error(`Unsupported EVM network: ${networkKey}`);

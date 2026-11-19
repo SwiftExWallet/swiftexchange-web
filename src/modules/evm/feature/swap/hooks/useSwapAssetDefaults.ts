@@ -12,6 +12,16 @@ import {
 import { switchOrAddChain } from '../../../utils/evmChainUtils';
 import { isStellar } from '../utils/swapAssetUtils';
 
+const isZeroOrNativeAddress = (address?: string | null): boolean => {
+  if (!address) return true;
+  const low = address.toLowerCase().trim();
+  return (
+    low === 'native' ||
+    low === '0x0000000000000000000000000000000000000000' ||
+    low === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  );
+};
+
 export function useSwapAssetDefaults(params: {
   connectedWallets: any;
   currentChainId: number | null;
@@ -90,9 +100,13 @@ export function useSwapAssetDefaults(params: {
       if (fromParam) setFromChainId(parseChainId(fromParam));
       if (toParam) setToChainId(parseChainId(toParam));
       if (sellAssetParam) setSellAssetSymbol(sellAssetParam);
-      if (sellAddressParam) setSellAssetAddress(sellAddressParam);
+      if (sellAddressParam && !isZeroOrNativeAddress(sellAddressParam)) {
+        setSellAssetAddress(sellAddressParam);
+      }
       if (buyAssetParam) setBuyAssetSymbol(buyAssetParam);
-      if (buyAddressParam) setBuyAssetAddress(buyAddressParam);
+      if (buyAddressParam && !isZeroOrNativeAddress(buyAddressParam)) {
+        setBuyAssetAddress(buyAddressParam);
+      }
       urlParamsApplied.current = true;
       hasInitializedDefaults.current = true;
       return;
@@ -157,9 +171,13 @@ export function useSwapAssetDefaults(params: {
     params.set('fromChainId', String(fromChainId));
     params.set('toChainId', String(toChainId));
     if (sellAssetSymbol) params.set('sellAsset', sellAssetSymbol);
-    if (sellAssetAddress) params.set('sellAddress', sellAssetAddress);
+    if (sellAssetAddress && !isZeroOrNativeAddress(sellAssetAddress)) {
+      params.set('sellAddress', sellAssetAddress);
+    }
     if (buyAssetSymbol) params.set('buyAsset', buyAssetSymbol);
-    if (buyAssetAddress) params.set('buyAddress', buyAssetAddress);
+    if (buyAssetAddress && !isZeroOrNativeAddress(buyAssetAddress)) {
+      params.set('buyAddress', buyAssetAddress);
+    }
     setSearchParams(params, { replace: true });
   }, [
     fromChainId,

@@ -101,39 +101,55 @@ export class AsterWebSocket {
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        if (
-          !this.intentionalClose &&
-          (!this.ws ||
+        if (!this.intentionalClose) {
+          const isStale =
+            !this.ws ||
             this.ws.readyState !== WebSocket.OPEN ||
-            Date.now() - this.lastMessageTime > this.staleThresholdMs)
-        ) {
-          if (this.ws) {
-            try {
-              this.ws.close();
-            } catch {
-              void 0;
-            }
+            Date.now() - this.lastMessageTime > this.staleThresholdMs;
+
+          if (isStale) {
+            this.reconnectAttempt = 0;
+            this.closeWs();
+            this.connect();
           }
-          this.reconnectAttempt = 0;
-          this.connect();
         }
       }
     });
   }
 
-  private refCount = 0;
+  private closeWs(): void {
+    if (this.ws) {
+      const socket = this.ws;
+      this.ws = null;
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onerror = null;
+      socket.onclose = null;
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        try {
+          socket.close();
+        } catch {
+          void 0;
+        }
+      }
+    }
+  }
 
   public connect(network?: import('../../core/config/networks').PerpNetwork): Promise<void> {
     if (network && this.network !== network) {
       this.setNetwork(network);
     }
-    this.refCount++;
+    this.intentionalClose = false;
+    this.clearReconnect();
+
     if (
       this.ws &&
       (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
     ) {
       return Promise.resolve();
     }
+
+    this.closeWs();
 
     return new Promise(resolve => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -146,7 +162,6 @@ export class AsterWebSocket {
       const url = `${baseUrl}?streams=${ASTER_WS_STREAMS.TICKER}/${ASTER_WS_STREAMS.MARK_PRICE}`;
       const ws = new WebSocket(url);
       this.ws = ws;
-      this.intentionalClose = false;
       let hasResolved = false;
 
       const connectTimeout = setTimeout(() => {
@@ -155,12 +170,7 @@ export class AsterWebSocket {
           hasResolved = true;
           resolve();
           if (this.ws === ws) {
-            this.ws = null;
-            try {
-              ws.close();
-            } catch {
-              void 0;
-            }
+            this.closeWs();
             if (!this.intentionalClose) this.scheduleReconnect();
           }
         }
@@ -212,18 +222,11 @@ export class AsterWebSocket {
     });
   }
 
-  public disconnect(force: boolean = false): void {
-    if (!force) {
-      this.refCount--;
-      if (this.refCount > 0) return;
-    }
-    this.refCount = 0;
-
+  public disconnect(): void {
     this.intentionalClose = true;
     this.clearReconnect();
     this.stopHeartbeat();
-    this.ws?.close();
-    this.ws = null;
+    this.closeWs();
     this.engines.forEach(engine => engine.dispose());
     this.engines.clear();
     this.orderBookSubscribers.clear();
@@ -252,11 +255,8 @@ export class AsterWebSocket {
           console.warn(
             `[AsterWebSocket] No messages for ${Math.round(this.staleThresholdMs / 1000)}s. Reconnecting...`
           );
-          try {
-            this.ws.close();
-          } catch {
-            void 0;
-          }
+          this.closeWs();
+          if (!this.intentionalClose) this.scheduleReconnect();
         }
       }
     }, 10_000);

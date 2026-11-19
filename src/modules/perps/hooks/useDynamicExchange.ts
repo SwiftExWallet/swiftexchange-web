@@ -12,6 +12,7 @@ import { resetPerpStores } from '../core/stores/resetPerpStores';
 
 let activeExchangeClient: PerpExchange | null = null;
 let activeExchangeKey = '';
+let activeSubscriberCount = 0;
 
 export function useDynamicExchange() {
   const currentExchange = useExchangeManager(state => state.currentExchange);
@@ -21,6 +22,21 @@ export function useDynamicExchange() {
   const clientRef = useRef<PerpExchange | null>(null);
   const isFirstRender = useRef(true);
   const [activeClient, setActiveClient] = useState<PerpExchange | null>(() => activeExchangeClient);
+
+  useEffect(() => {
+    activeSubscriberCount++;
+    return () => {
+      activeSubscriberCount--;
+      if (activeSubscriberCount <= 0) {
+        activeSubscriberCount = 0;
+        if (activeExchangeClient) {
+          activeExchangeClient.disconnect().catch(() => {});
+          activeExchangeClient = null;
+          activeExchangeKey = '';
+        }
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (globalAppNetwork && currentNetwork !== globalAppNetwork) {
@@ -36,6 +52,11 @@ export function useDynamicExchange() {
       if (activeExchangeClient && activeExchangeKey === configKey) {
         clientRef.current = activeExchangeClient;
         setActiveClient(activeExchangeClient);
+        await activeExchangeClient.connect();
+        const currentSym = marketStore.getSelectedSymbol();
+        if (currentSym) {
+          subscribeToSymbol(activeExchangeClient, currentSym);
+        }
         return;
       }
 
@@ -55,12 +76,8 @@ export function useDynamicExchange() {
         activeExchangeClient = null;
         activeExchangeKey = '';
       }
-
-      if (clientRef.current) {
-        await clientRef.current.disconnect();
-        clientRef.current = null;
-        setActiveClient(null);
-      }
+      clientRef.current = null;
+      setActiveClient(null);
 
       const client: PerpExchange =
         currentExchange === 'aster'
@@ -174,11 +191,6 @@ export function useDynamicExchange() {
 
     return () => {
       cancelled = true;
-      if (clientRef.current && clientRef.current !== activeExchangeClient) {
-        clientRef.current.disconnect();
-      }
-      clientRef.current = null;
-      setActiveClient(null);
       useExchangeManager.getState().setIsSwitching(false);
     };
   }, [currentExchange, currentNetwork]);
@@ -189,7 +201,7 @@ export function useDynamicExchange() {
 
     const unsubscribe = useMarketStore.subscribe(state => {
       const symbol = state.selectedSymbol;
-      const client = clientRef.current;
+      const client = clientRef.current || activeExchangeClient;
       if (!client || symbol === prevSymbol) return;
 
       if (prevSymbol) {

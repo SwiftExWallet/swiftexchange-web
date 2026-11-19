@@ -530,6 +530,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     stellarAddress,
     isStellarAccountActive,
     currentNetwork,
+    isGasless,
   });
 
   const { executeDeposit: executeNearIntentDeposit } = useNearIntentCrossChain({
@@ -618,6 +619,29 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
   showFusionScreenRef.current = showFusionScreen;
 
+  const isSameChainEvm = useMemo(() => {
+    return (
+      isEvmChain(fromChainId) && isEvmChain(toChainId) && String(fromChainId) === String(toChainId)
+    );
+  }, [fromChainId, toChainId]);
+
+  const isWrongChain = useMemo(() => {
+    return Boolean(
+      isEvmChain(fromChainId) &&
+      evmWallet &&
+      currentChainId !== null &&
+      Number(currentChainId) !== Number(fromChainId)
+    );
+  }, [fromChainId, evmWallet, currentChainId]);
+
+  const targetChainName = fromChainConfig?.name || 'network';
+
+  useEffect(() => {
+    if (!isSameChainEvm && isGasless) {
+      setIsGasless(false);
+    }
+  }, [fromChainId, toChainId, isSameChainEvm, isGasless, setIsGasless]);
+
   const {
     isInsufficientBalance,
     buttonLabel,
@@ -651,6 +675,12 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     missingWallets,
     isStellarAccountActive,
     currentNetwork,
+    sellAssetSymbol,
+    isWrongChain,
+    targetChainName,
+    isApprovalNeeded: executionApprovalRequired === true,
+    isUnsupportedPair: currentQuote.error === "This pair isn't available yet",
+    isWalletConnected: isConnected,
   });
 
   useEffect(() => {
@@ -1227,12 +1257,14 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
               <label className="text-xs font-black uppercase tracking-[0.15em] text-muted opacity-90">
                 You Pay
               </label>
-              <button
-                onClick={handleMaxAmount}
-                className="text-[10px] font-black text-brand hover:scale-110 active:scale-95 transition-all px-3 py-1 bg-brand/10 border border-brand/20 rounded-full"
-              >
-                MAX
-              </button>
+              {isSellWalletConnected && (
+                <button
+                  onClick={handleMaxAmount}
+                  className="text-[10px] font-black text-brand hover:scale-110 active:scale-95 transition-all px-3 py-1 bg-brand/10 border border-brand/20 rounded-full"
+                >
+                  MAX
+                </button>
+              )}
             </div>
 
             <div className="flex items-center gap-3 sm:gap-4">
@@ -1332,29 +1364,35 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
             <div className="mt-4 sm:mt-6 flex flex-wrap justify-between items-center gap-2 text-[10px] sm:text-[11px] font-bold">
               <div className="flex items-center gap-1.5 sm:gap-2 text-muted">
-                <button
-                  onClick={handleRefreshBalances}
-                  disabled={isRefreshing}
-                  className={`p-1 sm:p-1.5 hover:bg-white/5 rounded-full transition-all ${isRefreshing ? 'animate-spin text-brand' : ''}`}
-                >
-                  <RefreshCw size={12} />
-                </button>
-                <span>Balance:</span>
-                <span className="text-primary font-black">
-                  {!isSellWalletConnected ? (
-                    <span>--</span>
-                  ) : isRefreshing || (selectedSellAsset as any)?.balance === undefined ? (
-                    <span className="inline-block w-14 h-3.5 bg-brand/30 animate-pulse rounded-full align-middle ml-1" />
-                  ) : (
-                    <Tooltip
-                      content={`${toPlainString((selectedSellAsset as any)?.balance)} ${sellAssetSymbol}`}
-                      unstyled
+                {!isSellWalletConnected ? (
+                  <span className="text-muted text-[10px] sm:text-[11px] font-medium">
+                    Connect wallet to see balance
+                  </span>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleRefreshBalances}
+                      disabled={isRefreshing}
+                      className={`p-1 sm:p-1.5 hover:bg-white/5 rounded-full transition-all ${isRefreshing ? 'animate-spin text-brand' : ''}`}
                     >
-                      {portfolioUtils.formatBalance((selectedSellAsset as any)?.balance || '0')}{' '}
-                      {sellAssetSymbol}
-                    </Tooltip>
-                  )}
-                </span>
+                      <RefreshCw size={12} />
+                    </button>
+                    <span>Balance:</span>
+                    <span className="text-primary font-black">
+                      {isRefreshing || (selectedSellAsset as any)?.balance === undefined ? (
+                        <span className="inline-block w-14 h-3.5 bg-brand/30 animate-pulse rounded-full align-middle ml-1" />
+                      ) : (
+                        <Tooltip
+                          content={`${toPlainString((selectedSellAsset as any)?.balance)} ${sellAssetSymbol}`}
+                          unstyled
+                        >
+                          {portfolioUtils.formatBalance((selectedSellAsset as any)?.balance || '0')}{' '}
+                          {sellAssetSymbol}
+                        </Tooltip>
+                      )}
+                    </span>
+                  </>
+                )}
               </div>
               {isInsufficientBalance && (
                 <span className="text-red-500 bg-red-500/10 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full font-black flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[11px] transition-all">
@@ -1463,10 +1501,10 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                       <div className="flex flex-col items-end gap-1.5 py-1">
                         <div className="w-32 sm:w-44 h-8 sm:h-9 rounded-xl animate-shimmer-brand" />
                       </div>
-                    ) : currentQuote.data || isSameAssetSelected ? (
+                    ) : currentQuote.data && !currentQuote.error && !isSameAssetSelected ? (
                       <span>{calculatedBuyAmount}</span>
                     ) : (
-                      '0.00'
+                      '--'
                     )}
                   </div>
                 </div>
@@ -1778,19 +1816,21 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                                   )}
                                 </div>
 
-                                <div className="flex items-center justify-between py-2 border-b border-white/5">
-                                  <span className="text-[10px] font-black uppercase tracking-widest text-muted">
-                                    Gasless Swap
-                                  </span>
-                                  <button
-                                    onClick={() => setIsGasless(!isGasless)}
-                                    className={`relative w-8 h-4 rounded-full transition-colors ${isGasless ? 'bg-green-500' : 'bg-white/10'}`}
-                                  >
-                                    <div
-                                      className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${isGasless ? 'translate-x-4' : 'translate-x-0'}`}
-                                    />
-                                  </button>
-                                </div>
+                                {isSameChainEvm && (
+                                  <div className="flex items-center justify-between py-2 border-b border-white/5">
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-muted">
+                                      Gasless Swap
+                                    </span>
+                                    <button
+                                      onClick={() => setIsGasless(!isGasless)}
+                                      className={`relative w-8 h-4 rounded-full transition-colors ${isGasless ? 'bg-green-500' : 'bg-white/10'}`}
+                                    >
+                                      <div
+                                        className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${isGasless ? 'translate-x-4' : 'translate-x-0'}`}
+                                      />
+                                    </button>
+                                  </div>
+                                )}
                               </>
                             )}
                           </>
@@ -2077,6 +2117,10 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                   );
                 }
 
+                if (!isConnected || (missingWallets && missingWallets.length > 0)) {
+                  return null;
+                }
+
                 return (
                   <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 mb-3">
                     <div className="mt-0.5 text-red-500">
@@ -2105,7 +2149,18 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                 isLoading={isLoadingExecution}
                 isDisabled={isSwapDisabled}
                 isError={!!isErrorState && !isLoadingExecution}
-                onClick={handleUnifiedSwap}
+                onClick={
+                  isWrongChain
+                    ? async () => {
+                        try {
+                          const provider = getProvider(WalletType.EVM);
+                          if (provider) await switchOrAddChain(provider, fromChainId);
+                        } catch (e) {
+                          console.warn('[SwapAssets] Chain switch failed:', e);
+                        }
+                      }
+                    : handleUnifiedSwap
+                }
                 icon={
                   isGasless && actionType === 'SWAP' ? (
                     <Zap size={20} className="fill-white" />

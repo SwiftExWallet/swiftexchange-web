@@ -2,6 +2,7 @@ import {
   Infinity as InfinityIcon,
   BarChart2,
   CandlestickChart,
+  Coins,
   Flame,
   History,
   Landmark,
@@ -29,6 +30,7 @@ interface NavItem {
   badge?: string;
   badgeColor?: string;
   isHot?: boolean;
+  emoji?: string;
 }
 
 interface NavSection {
@@ -114,6 +116,12 @@ const Sidebar: FC = () => {
           isRestricted: isDydxRestricted,
           isHot: true,
         },
+        {
+          href: ROUTES.EARN,
+          label: 'Earn',
+          icon: <Coins className="w-[17px] h-[17px]" />,
+          emoji: '💵',
+        },
       ],
     },
     {
@@ -166,6 +174,10 @@ const Sidebar: FC = () => {
             <span className="absolute top-1 right-1 leading-none text-orange-400">
               <Flame className="w-3 h-3 fill-orange-400 text-orange-400" />
             </span>
+          ) : item.emoji && !item.isRestricted ? (
+            <span className="absolute top-1 right-1 text-[10px] leading-none drop-shadow-sm select-none">
+              {item.emoji}
+            </span>
           ) : item.badge && !item.isRestricted ? (
             <span className="absolute top-1 right-1 text-[8px] font-mono font-medium px-1 py-0.5 rounded leading-none bg-blue-500/15 text-blue-400 border border-blue-500/25">
               {item.badge}
@@ -212,6 +224,10 @@ const Sidebar: FC = () => {
         {item.isHot && !item.isRestricted ? (
           <span className="absolute top-1 right-1 leading-none text-orange-500 drop-shadow-[0_0_6px_rgba(249,115,22,0.8)] animate-pulse">
             <Flame className="w-3.5 h-3.5 fill-orange-500 text-orange-500" />
+          </span>
+        ) : item.emoji && !item.isRestricted ? (
+          <span className="absolute top-1 right-1 text-[10px] leading-none drop-shadow-sm select-none">
+            {item.emoji}
           </span>
         ) : item.badge && !item.isRestricted ? (
           <span

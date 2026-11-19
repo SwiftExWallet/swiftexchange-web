@@ -372,7 +372,128 @@ export function parseWalletError(error: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
+function stripProviderNames(msg: string): string {
+  return msg
+    .replace(/\b1inch\b/gi, '')
+    .replace(/\bNEAR\s+Intents?\b/gi, '')
+    .replace(/\bFusion\s*Plus\b/gi, '')
+    .replace(/\bFusion\b/gi, '')
+    .replace(/\bUniswap\b/gi, '')
+    .replace(/\bSoroswap\b/gi, '')
+    .replace(/\bAquarius\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * Standard user-facing error mapper for swap quotes & execution.
+ * Ensures internal provider names are NEVER shown in UI.
+ */
+export function mapSwapError(error: any): string {
+  if (!error) return 'Swap failed. Please try again.';
+
+  const statusCode =
+    error?.status ||
+    error?.statusCode ||
+    error?.response?.status ||
+    error?.response?.statusCode ||
+    error?.code;
+
+  const rawStr =
+    typeof error === 'string'
+      ? error
+      : error?.message || error?.error?.message || error?.description || JSON.stringify(error);
+
+  const clean = extractCleanMessage(rawStr);
+  const lower = clean.toLowerCase();
+
+  // 1. 401 Session expired
+  if (
+    statusCode === 401 ||
+    statusCode === '401' ||
+    /\b401\b/.test(lower) ||
+    lower.includes('unauthorized') ||
+    lower.includes('session expired') ||
+    lower.includes('token expired') ||
+    lower.includes('jwt expired')
+  ) {
+    return 'Session expired. Reconnect your wallet';
+  }
+
+  // 2. Testnet unsupported (check before generic unsupported)
+  if (
+    (lower.includes('testnet') &&
+      (lower.includes('not supported') ||
+        lower.includes('unsupported') ||
+        lower.includes('mainnet') ||
+        lower.includes('only available'))) ||
+    lower.includes('only available on mainnet') ||
+    lower.includes('not available on testnet')
+  ) {
+    return 'Not available on testnet';
+  }
+
+  // 3. 5xx / Network / Timeout / Service Unavailable
+  if (
+    (typeof statusCode === 'number' && statusCode >= 500 && statusCode < 600) ||
+    /\b50[0-4]\b/.test(lower) ||
+    lower.includes('timeout') ||
+    lower.includes('timed out') ||
+    lower.includes('etimedout') ||
+    lower.includes('gateway timeout') ||
+    lower.includes('bad gateway') ||
+    lower.includes('service unavailable') ||
+    lower.includes('network error') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('network provider error')
+  ) {
+    return 'Service unavailable. Try again';
+  }
+
+  // 4. No liquidity / No route
+  if (
+    lower.includes('insufficient liquidity') ||
+    lower.includes('no liquidity') ||
+    lower.includes('no route') ||
+    lower.includes('no swap route') ||
+    lower.includes('no pool') ||
+    lower.includes('cannot find route') ||
+    lower.includes('route not found') ||
+    lower.includes('liquidity pool not found')
+  ) {
+    return 'No route found for this amount';
+  }
+
+  // 5. Unsupported pair
+  if (
+    lower.includes('pair not supported') ||
+    lower.includes('not supported') ||
+    lower.includes('unsupported pair') ||
+    lower.includes('unsupported') ||
+    lower.includes('pair not available') ||
+    lower.includes("pair isn't available")
+  ) {
+    return "This pair isn't available yet";
+  }
+
+  // For other errors, translate and strip any provider names
+  const translated = translateErrorMessage(clean);
+  const stripped = stripProviderNames(translated || clean);
+  return stripped || 'Swap failed. Please try again.';
+}
+
 export function parseSwapError(error: any): string {
+  // First run through mapSwapError to capture standard mappings
+  const mapped = mapSwapError(error);
+  if (
+    mapped === 'Session expired. Reconnect your wallet' ||
+    mapped === 'Service unavailable. Try again' ||
+    mapped === 'Not available on testnet' ||
+    mapped === 'No route found for this amount' ||
+    mapped === "This pair isn't available yet"
+  ) {
+    return mapped;
+  }
   console.error('[SwapError]', error);
   const rawMsg: string = error?.message || error?.originalError?.message || '';
   const errCode =
