@@ -310,6 +310,12 @@ export interface ButtonLabelParams {
   nativeSymbol: string;
   missingWallets?: string[];
   isStellarAccountActive?: boolean | null;
+  sellAssetSymbol?: string;
+  isWrongChain?: boolean;
+  targetChainName?: string;
+  isApprovalNeeded?: boolean;
+  isUnsupportedPair?: boolean;
+  isWalletConnected?: boolean;
 }
 
 export interface ErrorParams {

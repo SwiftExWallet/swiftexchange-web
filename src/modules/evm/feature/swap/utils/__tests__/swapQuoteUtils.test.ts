@@ -202,66 +202,66 @@ describe('getButtonLabel', () => {
     nativeSymbol: 'ETH',
   };
 
-  it('returns "FETCHING QUOTES..." when loading assets', () => {
+  it('returns "Fetching quotes..." when loading assets', () => {
     expect(getButtonLabel({ ...baseParams, isFetchingSwapAssets: true })).toBe(
-      'FETCHING QUOTES...'
+      'Fetching quotes...'
     );
   });
 
-  it('returns "FETCHING QUOTES..." when quote is loading', () => {
-    expect(getButtonLabel({ ...baseParams, isQuoteLoading: true })).toBe('FETCHING QUOTES...');
+  it('returns "Fetching quotes..." when quote is loading', () => {
+    expect(getButtonLabel({ ...baseParams, isQuoteLoading: true })).toBe('Fetching quotes...');
   });
 
-  it('returns "ENTER AMOUNT" when sell amount is empty', () => {
-    expect(getButtonLabel({ ...baseParams, sellAmount: '' })).toBe('ENTER AMOUNT');
+  it('returns "Enter amount" when sell amount is empty', () => {
+    expect(getButtonLabel({ ...baseParams, sellAmount: '' })).toBe('Enter amount');
   });
 
-  it('returns "ENTER AMOUNT" when sell amount is zero', () => {
-    expect(getButtonLabel({ ...baseParams, sellAmount: '0' })).toBe('ENTER AMOUNT');
+  it('returns "Enter amount" when sell amount is zero', () => {
+    expect(getButtonLabel({ ...baseParams, sellAmount: '0' })).toBe('Enter amount');
   });
 
-  it('returns "SELECT DIFFERENT ASSET" when same asset is selected', () => {
+  it('returns "Select different asset" when same asset is selected', () => {
     expect(getButtonLabel({ ...baseParams, isSameAssetSelected: true })).toBe(
-      'SELECT DIFFERENT ASSET'
+      'Select different asset'
     );
   });
 
-  it('returns "INSUFFICIENT BALANCE" for balance error', () => {
+  it('returns "Insufficient balance" for balance error', () => {
     expect(getButtonLabel({ ...baseParams, isInsufficientBalance: true })).toBe(
-      'INSUFFICIENT BALANCE'
+      'Insufficient balance'
     );
   });
 
-  it('returns "AMOUNT LESS THAN FEE"', () => {
+  it('returns "Amount less than fee"', () => {
     expect(getButtonLabel({ ...baseParams, isAmountLessThanFee: true })).toBe(
-      'AMOUNT LESS THAN FEE'
+      'Amount less than fee'
     );
   });
 
-  it('returns "INSUFFICIENT XLM FOR FEE" for Stellar gas error', () => {
+  it('returns "Insufficient XLM for fee" for Stellar gas error', () => {
     expect(getButtonLabel({ ...baseParams, hasInsufficientStellarGas: true })).toBe(
-      'INSUFFICIENT XLM FOR FEE'
+      'Insufficient XLM for fee'
     );
   });
 
   it('returns dynamic gas error for insufficient EVM gas', () => {
     expect(getButtonLabel({ ...baseParams, hasInsufficientEvmGas: true })).toBe(
-      'INSUFFICIENT ETH FOR GAS'
+      'Insufficient ETH for gas'
     );
   });
 
-  it('returns short error message uppercased when under 45 chars', () => {
+  it('returns short error message when under 45 chars', () => {
     expect(getButtonLabel({ ...baseParams, errorMessage: 'price impact too high' })).toBe(
-      'PRICE IMPACT TOO HIGH'
+      'price impact too high'
     );
   });
 
-  it('returns "SWAP FAILED" when error message is longer than 45 chars', () => {
+  it('returns "Swap failed" when error message is longer than 45 chars', () => {
     const longMsg = 'This is a very long error message that exceeds the character limit';
-    expect(getButtonLabel({ ...baseParams, errorMessage: longMsg })).toBe('SWAP FAILED');
+    expect(getButtonLabel({ ...baseParams, errorMessage: longMsg })).toBe('Swap failed');
   });
 
-  it('returns "ADD TRUSTLINE & SWAP" when Stellar destination asset is missing a trustline (Stellar to Stellar)', () => {
+  it('returns "Add Trustline & Swap" when Stellar destination asset is missing a trustline (Stellar to Stellar)', () => {
     const stellarParams = {
       ...baseParams,
       fromChainId: 'pubnet',
@@ -274,10 +274,10 @@ describe('getButtonLabel', () => {
         hasTrustline: false,
       } as any,
     };
-    expect(getButtonLabel(stellarParams)).toBe('ADD TRUSTLINE & SWAP');
+    expect(getButtonLabel(stellarParams)).toBe('Add Trustline & Swap');
   });
 
-  it('returns "ADD TRUSTLINE" when Stellar destination asset is missing a trustline (Cross-chain to Stellar)', () => {
+  it('returns "Add Trustline" when Stellar destination asset is missing a trustline (Cross-chain to Stellar)', () => {
     const crossChainParams = {
       ...baseParams,
       fromChainId: 1,
@@ -290,10 +290,10 @@ describe('getButtonLabel', () => {
         hasTrustline: false,
       } as any,
     };
-    expect(getButtonLabel(crossChainParams)).toBe('ADD TRUSTLINE');
+    expect(getButtonLabel(crossChainParams)).toBe('Add Trustline');
   });
 
-  it('returns "SWAP" when Stellar destination asset already has a trustline', () => {
+  it('returns "Swap" when Stellar destination asset already has a trustline', () => {
     const stellarParams = {
       ...baseParams,
       fromChainId: 'pubnet',
@@ -306,10 +306,10 @@ describe('getButtonLabel', () => {
         hasTrustline: true,
       } as any,
     };
-    expect(getButtonLabel(stellarParams)).toBe('SWAP');
+    expect(getButtonLabel(stellarParams)).toBe('Swap');
   });
 
-  it('returns "SWAP" when Stellar destination asset is native XLM even without trustline flag', () => {
+  it('returns "Swap" when Stellar destination asset is native XLM even without trustline flag', () => {
     const stellarParams = {
       ...baseParams,
       fromChainId: 'pubnet',
@@ -321,20 +321,20 @@ describe('getButtonLabel', () => {
         hasTrustline: false,
       } as any,
     };
-    expect(getButtonLabel(stellarParams)).toBe('SWAP');
+    expect(getButtonLabel(stellarParams)).toBe('Swap');
   });
 
-  it('returns "ACTIVATE ACCOUNT" when Stellar account is not activated', () => {
+  it('returns "Activate Account" when Stellar account is not activated', () => {
     const stellarParams = {
       ...baseParams,
       toChainId: 'pubnet',
       isStellarAccountActive: false,
     };
-    expect(getButtonLabel(stellarParams)).toBe('ACTIVATE ACCOUNT');
+    expect(getButtonLabel(stellarParams)).toBe('Activate Account');
   });
 
-  it('returns "SWAP" when everything is valid', () => {
-    expect(getButtonLabel(baseParams)).toBe('SWAP');
+  it('returns "Swap" when everything is valid', () => {
+    expect(getButtonLabel(baseParams)).toBe('Swap');
   });
 });
 
