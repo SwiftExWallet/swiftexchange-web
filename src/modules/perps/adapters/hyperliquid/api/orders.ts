@@ -93,13 +93,12 @@ export function formatHyperliquidSize(size: number | string, szDecimals: number 
   return str.includes('.') ? str.replace(/\.?0+$/, '') : str;
 }
 
-/**
- * Places an authentic order on Hyperliquid AppChain via @nktkas/hyperliquid
- */
-export async function placeHyperliquidOrder(
+let hlOrderQueue: Promise<any> = Promise.resolve();
+
+async function executePlaceHyperliquidOrder(
   wallet: HyperliquidIsolatedSigner | Wallet | any,
   req: HyperliquidOrderRequest,
-  isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
+  isTestnet: boolean
 ): Promise<any> {
   const transport = new HttpTransport({ isTestnet });
   const universe = await getHyperliquidUniverse(isTestnet);
@@ -260,6 +259,17 @@ export async function placeHyperliquidOrder(
   }
 
   return response;
+}
+
+export async function placeHyperliquidOrder(
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
+  req: HyperliquidOrderRequest,
+  isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
+): Promise<any> {
+  const runner = () => executePlaceHyperliquidOrder(wallet, req, isTestnet);
+  const resultPromise = hlOrderQueue.then(runner, runner);
+  hlOrderQueue = resultPromise.catch(() => {});
+  return resultPromise;
 }
 
 /**

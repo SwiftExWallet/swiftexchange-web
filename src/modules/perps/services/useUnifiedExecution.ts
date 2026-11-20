@@ -254,23 +254,48 @@ export function useUnifiedExecution() {
       const absSize = Math.abs(parseFloat(size));
       if (isNaN(absSize) || absSize <= 0) return;
 
-      const res = await executeOrder({
-        symbol,
-        side: oppositeSide,
-        type: 'MARKET',
-        price: currentPrice || 0,
-        size: absSize,
-        reduceOnly: true,
-        currentPrice,
-      });
+      let remaining = absSize;
+      let lastRes: any = null;
 
-      usePositionStore.getState().removePosition(symbol);
-      usePositionStore.getState().removePosition(toAsterSymbol(symbol));
-      usePositionStore.getState().removePosition(normalizeSymbol(symbol));
+      for (let attempt = 0; attempt < 3 && remaining > 0; attempt++) {
+        const res = await executeOrder({
+          symbol,
+          side: oppositeSide,
+          type: 'MARKET',
+          price: currentPrice || 0,
+          size: remaining,
+          reduceOnly: true,
+          currentPrice,
+        });
+        lastRes = res;
 
-      return res;
+        if (currentExchange === 'hyperliquid') {
+          const filled = res?.response?.data?.statuses?.[0]?.filled;
+          if (filled?.totalSz) {
+            const filledAmount = parseFloat(filled.totalSz) || 0;
+            remaining = Math.max(0, remaining - filledAmount);
+          } else {
+            break;
+          }
+        } else {
+          remaining = 0;
+          break;
+        }
+      }
+
+      if (remaining <= 0) {
+        usePositionStore.getState().removePosition(symbol);
+        usePositionStore.getState().removePosition(toAsterSymbol(symbol));
+        usePositionStore.getState().removePosition(normalizeSymbol(symbol));
+      }
+
+      return {
+        ...lastRes,
+        fullyClosed: remaining <= 0,
+        remainingSize: remaining,
+      };
     },
-    [executeOrder]
+    [executeOrder, currentExchange]
   );
 
   const closeAllPositions = useCallback(

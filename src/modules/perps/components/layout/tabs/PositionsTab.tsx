@@ -92,13 +92,21 @@ const PositionRow = memo(
       try {
         const isLong = parseFloat(position.size) > 0;
         const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
-        await closePosition(position.symbol, position.size, isLong, curPx);
+        const res: any = await closePosition(position.symbol, position.size, isLong, curPx);
         setCloseModalOpen(false);
-        useNotificationStore.getState().showToast({
-          type: 'success',
-          title: 'Position Closed',
-          message: `Closed ${position.symbol.replace('-', '')} position successfully`,
-        });
+        if (res && res.fullyClosed === false && res.remainingSize > 0) {
+          useNotificationStore.getState().showToast({
+            type: 'warning',
+            title: 'Partially Closed',
+            message: `Filled market liquidity. Remaining size: ${res.remainingSize} ${position.symbol.replace('-', '')}`,
+          });
+        } else {
+          useNotificationStore.getState().showToast({
+            type: 'success',
+            title: 'Position Closed',
+            message: `Closed ${position.symbol.replace('-', '')} position successfully`,
+          });
+        }
       } catch (err: any) {
         console.error('Failed to close position:', err);
         const errMsg = err?.message || 'Failed to close position';

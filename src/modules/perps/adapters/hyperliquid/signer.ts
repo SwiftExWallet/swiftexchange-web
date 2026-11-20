@@ -12,9 +12,16 @@ import type {
  */
 export class HyperliquidSigner implements PerpSigner {
   private wallet?: any;
+  private lastNonce = 0;
 
   constructor(wallet?: any) {
     this.wallet = wallet;
+  }
+
+  private getMonotonicNonce(): number {
+    const now = Date.now();
+    this.lastNonce = now > this.lastNonce ? now : this.lastNonce + 1;
+    return this.lastNonce;
   }
 
   public setWallet(wallet: any): void {
@@ -45,7 +52,7 @@ export class HyperliquidSigner implements PerpSigner {
       grouping: 'na',
     };
 
-    const nonce = Date.now();
+    const nonce = this.getMonotonicNonce();
     const sig = await signL1Action({ wallet: this.wallet, action, nonce });
 
     return {
@@ -69,7 +76,7 @@ export class HyperliquidSigner implements PerpSigner {
       ],
     };
 
-    const nonce = Date.now();
+    const nonce = this.getMonotonicNonce();
     const sig = await signL1Action({ wallet: this.wallet, action, nonce });
 
     return {
