@@ -89,12 +89,17 @@ export class HyperliquidClient implements PerpExchange {
     startTime: number,
     endTime: number
   ): Promise<import('../../core/models').Candle[]> {
-    return this.marketsApi.getCandles(coin, interval, startTime, endTime);
+    const cleanCoin = this.extractCoinFromSymbol(coin);
+    return this.marketsApi.getCandles(cleanCoin, interval, startTime, endTime);
   }
 
   private extractCoinFromSymbol(symbol: string): string {
     if (!symbol) return '';
-    const normalized = symbol.replace('_', '-').toUpperCase();
-    return normalized.split('-')[0] || normalized;
+    return (
+      symbol
+        .replace(/[-_]/g, '')
+        .toUpperCase()
+        .replace(/(USDT|USDC|USD)+$/g, '') || symbol
+    );
   }
 }

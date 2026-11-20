@@ -170,6 +170,19 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
       deriveError?.message?.includes('offline') ||
       deriveError?.message?.includes('Unavailable'));
 
+  useEffect(() => {
+    if (currentExchange === 'hyperliquid') {
+      const currentType = useOrderEntryStore.getState().orderType;
+      if (
+        currentType === 'SCALED' ||
+        currentType === 'CHASE' ||
+        currentType === 'TRAILING_STOP_MARKET'
+      ) {
+        useOrderEntryStore.getState().setOrderType('LIMIT');
+      }
+    }
+  }, [currentExchange]);
+
   // Sync store for symbol
   useEffect(() => {
     if (selectedSymbol) {
@@ -887,7 +900,15 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
 
                 <div className="space-y-1.5">
-                  {ADVANCED_ORDER_TYPES.map(item => {
+                  {(currentExchange === 'hyperliquid'
+                    ? ADVANCED_ORDER_TYPES.filter(
+                        item =>
+                          item.value !== 'SCALED' &&
+                          item.value !== 'CHASE' &&
+                          item.value !== 'TRAILING_STOP_MARKET'
+                      )
+                    : ADVANCED_ORDER_TYPES
+                  ).map(item => {
                     const isSelected = store.orderType === item.value;
                     return (
                       <button

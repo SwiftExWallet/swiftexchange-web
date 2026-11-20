@@ -43,14 +43,7 @@ export function mapHyperliquidBalances(
   const perpTotalRawUsd =
     parseFloat(marginSummary?.totalRawUsd || marginSummary?.accountValue || '0') || 0;
 
-  const perpWithdrawable =
-    marginSummary?.withdrawable !== undefined && marginSummary?.withdrawable !== null
-      ? parseFloat(marginSummary.withdrawable) || 0
-      : ch?.withdrawable !== undefined && ch?.withdrawable !== null
-        ? parseFloat(ch.withdrawable) || 0
-        : Math.max(0, perpAccountValue - perpMarginUsed);
-
-  const perpUnrealizedPnl = perpAccountValue - perpTotalRawUsd;
+  const perpAvailable = Math.max(0, perpAccountValue - perpMarginUsed);
 
   const spotBalances = Array.isArray(spot?.balances) ? spot.balances : [];
   const spotUsdc = spotBalances.find((b: any) => b.coin === 'USDC');
@@ -58,11 +51,23 @@ export function mapHyperliquidBalances(
   const spotUsdcHold = parseFloat(spotUsdc?.hold || '0') || 0;
   const spotUsdcAvailable = Math.max(0, spotUsdcTotal - spotUsdcHold);
 
-  const combinedTotal = (perpTotalRawUsd + spotUsdcTotal).toFixed(2);
-  const combinedAvailable = (perpWithdrawable + spotUsdcAvailable).toFixed(2);
+  const combinedTotal =
+    perpTotalRawUsd >= 0
+      ? (perpTotalRawUsd + spotUsdcTotal).toFixed(2)
+      : Math.max(0, spotUsdcTotal - spotUsdcHold + perpAccountValue).toFixed(2);
+
+  const combinedAvailable = (perpAvailable + spotUsdcAvailable).toFixed(2);
+
   const combinedLocked = (perpMarginUsed + spotUsdcHold).toFixed(2);
   const combinedMarginBalance = (perpAccountValue + spotUsdcTotal).toFixed(2);
-  const unrealizedPnlStr = perpUnrealizedPnl.toFixed(2);
+
+  const assetPositions = Array.isArray(ch?.assetPositions) ? ch.assetPositions : [];
+  const totalUnrealizedPnl = assetPositions.reduce((acc: number, p: any) => {
+    return acc + (parseFloat(p?.position?.unrealizedPnl || '0') || 0);
+  }, 0);
+  const unrealizedPnlStr = (
+    totalUnrealizedPnl !== 0 ? totalUnrealizedPnl : perpAccountValue - perpTotalRawUsd
+  ).toFixed(2);
 
   const resultBalances: AccountBalance[] = [
     {

@@ -70,17 +70,17 @@ const OrderbookRow = memo(function OrderbookRow({
         style={{ width: `calc((var(--row-size) / var(--max-size)) * 100%)` }}
       />
       <span
-        className={`font-mono-tabular text-[11px] font-medium z-10 ${
+        className={`font-mono-tabular text-[12px] font-medium z-10 ${
           isAsk ? 'text-danger' : 'text-success'
         }`}
       >
         {formatPrice(price)}
       </span>
       <div className="flex items-center z-10">
-        <span className="font-mono-tabular text-[11px] text-primary opacity-85 w-[68px] text-right">
+        <span className="font-mono-tabular text-[12px] text-primary opacity-90 w-[72px] text-right">
           {formatVal(displaySize, isQuoteUnit)}
         </span>
-        <span className="font-mono-tabular text-[11px] text-secondary w-[68px] text-right">
+        <span className="font-mono-tabular text-[12px] text-secondary w-[72px] text-right">
           {formatVal(displayCumTotal, isQuoteUnit)}
         </span>
       </div>
@@ -167,9 +167,21 @@ export const OrderbookPanel: React.FC = () => {
 
   const orderbook = useOrderbook();
   const trades = useTrades();
-  const market = useMarketStore(state => state.markets[state.selectedSymbol]);
   const symbol = useMarketStore(state => state.selectedSymbol);
-  const [base, quote] = symbol.split('-');
+  const cleanSymbol = symbol.includes('-')
+    ? symbol
+    : symbol.endsWith('USDC')
+      ? symbol.replace(/USDC$/, '-USDC')
+      : symbol.endsWith('USDT')
+        ? symbol.replace(/USDT$/, '-USDT')
+        : `${symbol}-USDC`;
+  const market = useMarketStore(
+    state =>
+      state.markets[symbol] || state.markets[cleanSymbol] || state.markets[symbol.replace('-', '')]
+  );
+  const [base, quote] = (cleanSymbol.includes('-') ? cleanSymbol : `${cleanSymbol}-USDC`).split(
+    '-'
+  );
 
   const tickSize = market?.tickSize || 0.1;
   const precisionOptions = useMemo(() => {
@@ -187,7 +199,7 @@ export const OrderbookPanel: React.FC = () => {
   useOnClickOutside(unitDropdownRef, () => setIsUnitOpen(false));
   useOnClickOutside(precisionDropdownRef, () => setIsPrecisionOpen(false));
 
-  const rowsPerSide = viewMode === 'both' ? 14 : 35;
+  const rowsPerSide = viewMode === 'both' ? 11 : 30;
 
   const rawAsks = useMemo(() => {
     const sliced = (orderbook.asks || []).slice(0, viewMode === 'bids' ? 0 : rowsPerSide * 2);
@@ -397,29 +409,31 @@ export const OrderbookPanel: React.FC = () => {
           </div>
 
           {/* Bid/Ask Imbalance Ratio Indicator */}
-          <div className="flex h-[2px] w-full shrink-0">
+          <div className="flex h-[3px] w-full shrink-0">
             <div
-              className="bg-danger/60 transition-all duration-300"
+              className="bg-danger/80 transition-all duration-300"
               style={{ width: `${askPercent}%` }}
               title={`Asks: ${askPercent}%`}
             />
             <div
-              className="bg-success/60 transition-all duration-300"
+              className="bg-success/80 transition-all duration-300"
               style={{ width: `${bidPercent}%` }}
               title={`Bids: ${bidPercent}%`}
             />
           </div>
 
-          {/* Column Headers */}
           <div className="flex items-center justify-between px-2 py-1 text-[10px] text-secondary/70 font-medium shrink-0 h-[20px]">
-            <span>Price({quote})</span>
+            <span>Price({quote || 'USDC'})</span>
             <div className="flex">
-              <span className="w-[68px] text-right">Size({unit === 'QUOTE' ? quote : base})</span>
-              <span className="w-[68px] text-right">Total({unit === 'QUOTE' ? quote : base})</span>
+              <span className="w-[72px] text-right">
+                Size({unit === 'QUOTE' ? quote || 'USDC' : base})
+              </span>
+              <span className="w-[72px] text-right">
+                Total({unit === 'QUOTE' ? quote || 'USDC' : base})
+              </span>
             </div>
           </div>
 
-          {/* Orderbook Rows Container */}
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             {viewMode !== 'bids' && (
               <div
@@ -459,8 +473,7 @@ export const OrderbookPanel: React.FC = () => {
               </div>
             )}
 
-            {/* Dynamic Mid-Market Price & Spread Row */}
-            <div className="flex items-center justify-between px-2 py-0.5 border-y border-color shrink-0 h-[26px] bg-tertiary/20">
+            <div className="flex items-center justify-between px-2.5 py-1.5 shrink-0 select-none">
               <div
                 className="flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={() =>
@@ -470,27 +483,33 @@ export const OrderbookPanel: React.FC = () => {
                 title="Click to fill price"
               >
                 <span
-                  className={`font-mono-tabular text-[12px] font-bold ${
+                  className={`font-mono-tabular text-[14px] font-bold ${
                     isPriceUp ? 'text-success' : 'text-danger'
                   }`}
                 >
                   {lastPrice > 0 ? formatPrice(lastPrice) : '—'}
                 </span>
                 {isPriceUp ? (
-                  <ArrowUp size={11} strokeWidth={2.5} className="text-success" />
+                  <ArrowUp size={13} strokeWidth={2.5} className="text-success" />
                 ) : (
-                  <ArrowDown size={11} strokeWidth={2.5} className="text-danger" />
+                  <ArrowDown size={13} strokeWidth={2.5} className="text-danger" />
                 )}
               </div>
 
-              <div className="flex items-center gap-1 text-[10px]">
-                <span className="text-secondary/70">Spread</span>
-                <span className="font-mono-tabular text-primary font-medium">
-                  {spread > 0 ? formatPrice(spread) : '—'}
-                </span>
-                <span className="font-mono-tabular text-secondary/60">
-                  ({spreadPct.toFixed(2)}%)
-                </span>
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className="text-secondary/60">Spread</span>
+                {spread > 0 ? (
+                  <>
+                    <span className="font-mono-tabular text-secondary/80 font-medium">
+                      {formatPrice(spread)}
+                    </span>
+                    <span className="font-mono-tabular text-secondary/50">
+                      ({spreadPct.toFixed(2)}%)
+                    </span>
+                  </>
+                ) : (
+                  <span className="font-mono-tabular text-secondary/50">—</span>
+                )}
               </div>
             </div>
 
