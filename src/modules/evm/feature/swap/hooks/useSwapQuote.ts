@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import * as StellarSDK from '@stellar/stellar-sdk';
+
 import { getEffectiveAuthToken } from '../../../../../service/apiService';
 import { useTransactionModalStore } from '../../../../../store/transactionModalStore';
+import { AquariusService } from '../../../../stellar/service/aquariusService';
+import { SoroswapService } from '../../../../stellar/service/soroswapService';
+import { getStellarConfig } from '../../../../walletconnect/config/chains';
 import { getAssetsForChain } from '../../../utils/Chainregistry';
 import { getSwapQuote } from '../services/evmSwapService';
 import { get1InchFusionQuote } from '../services/fusionOrderService';
@@ -17,7 +22,7 @@ import {
 import { useQuoteTimerStore } from '../store/quoteTimerStore';
 import type { UnifiedAsset, UnifiedQuote } from '../types/swap.types';
 import { isStellar } from '../utils/swapAssetUtils';
-import { mapSwapError } from '../utils/swapErrorHandler';
+import { mapSwapError, parseSwapError } from '../utils/swapErrorHandler';
 import { type SwapProvider, isProxyProvider, selectProvider } from '../utils/swapRoutingUtils';
 
 export interface UseSwapQuoteParams {
@@ -403,6 +408,127 @@ export function useSwapQuote(params: UseSwapQuoteParams) {
           source: 'NEAR_INTENT',
           data: null,
           error: mappedErr,
+          loading: false,
+        });
+      }
+      return;
+    }
+
+    // Rule 5: Stellar -> Stellar same network native swap (Soroswap -> Aquarius -> Classic Horizon AMM)
+    if (provider === 'stellar') {
+      try {
+        const fromContract =
+          (selectedSellAsset as any)?.contract ||
+          (selectedSellAsset as any)?.address ||
+          selectedSellAsset.asset;
+        const toContract =
+          (selectedBuyAsset as any)?.contract ||
+          (selectedBuyAsset as any)?.address ||
+          selectedBuyAsset.asset;
+
+        if (!fromContract || !toContract) return;
+
+        setCurrentQuote({ source: 'STELLAR_SWAP', data: null, error: null, loading: true });
+
+        const stellarCfg = getStellarConfig(currentNetwork || 'mainnet');
+        const horizonUrl = ammService?.horizonUrl || stellarCfg.horizonUrl;
+        const networkPassphrase = ammService?.networkPassphrase || stellarCfg.networkPassphrase;
+
+        let sq: any = null;
+        let soroQuoteError: string | null = null;
+
+        // 1. Try Soroswap Router (Soroban AMM / SDEX)
+        try {
+          const soroService = new SoroswapService(horizonUrl, networkPassphrase);
+          sq = await soroService.getQuote(selectedSellAsset, selectedBuyAsset, sellAmount, {
+            slippageTolerance: userSlippageTolerance,
+            userAddress: stellarAddress,
+          });
+          if (sq) {
+            sq.source = 'SOROSWAP';
+            sq.provider =
+              sq.platform?.toLowerCase() === 'sdex'
+                ? 'Soroswap Router (SDEX)'
+                : 'Soroswap Router (AMM)';
+          }
+        } catch (soroErr) {
+          console.warn('[useSwapQuote] Soroswap quote failed, checking Aquarius:', soroErr);
+          soroQuoteError = parseSwapError(soroErr);
+        }
+
+        const toClassicAsset = (a: any) => {
+          if (!a) return null;
+          if (a.asset && typeof a.asset.isNative === 'function') return a.asset;
+          if (a.isNative || a.symbol === 'XLM') return StellarSDK.Asset.native();
+          const issuer = a.issuer || (a.address?.startsWith('G') ? a.address : null);
+          if (issuer && issuer.startsWith('G')) {
+            try {
+              return new StellarSDK.Asset(a.symbol, issuer);
+            } catch {
+              return null;
+            }
+          }
+          return null;
+        };
+
+        const classicFrom = toClassicAsset(selectedSellAsset);
+        const classicTo = toClassicAsset(selectedBuyAsset);
+        const canUseClassicAmm = Boolean(classicFrom && classicTo);
+
+        const aquaFrom = classicFrom || selectedSellAsset;
+        const aquaTo = classicTo || selectedBuyAsset;
+
+        // 2. Try Aquarius Router
+        if (!sq && aquaFrom && aquaTo) {
+          try {
+            const aquaService = new AquariusService(horizonUrl, networkPassphrase);
+            sq = await aquaService.getQuote(aquaFrom, aquaTo, sellAmount, {
+              slippageTolerance: userSlippageTolerance,
+            });
+            if (sq) {
+              sq.source = 'AQUARIUS';
+              sq.provider = 'Aquarius Router';
+            }
+          } catch (aquaErr) {
+            console.warn(
+              '[useSwapQuote] Aquarius quote failed, falling back to Horizon AMM:',
+              aquaErr
+            );
+          }
+        }
+
+        // 3. Try Classic Horizon AMM
+        if (!sq && canUseClassicAmm && ammService) {
+          try {
+            sq = await ammService.getSwapQuote(classicFrom, classicTo, sellAmount, {
+              slippageTolerance: userSlippageTolerance,
+            });
+            if (sq) {
+              sq.source = 'STELLAR_AMM';
+              sq.provider = 'Classic Horizon AMM';
+            }
+          } catch (ammErr) {
+            console.warn('[useSwapQuote] Horizon AMM quote failed:', ammErr);
+          }
+        }
+
+        if (requestId !== latestRequestId.current) return;
+
+        setCurrentQuote({
+          source: 'STELLAR_SWAP',
+          data: sq,
+          error: sq
+            ? warningError
+            : warningError || soroQuoteError || 'No swap route or liquidity pool found',
+          loading: false,
+        });
+      } catch (err: any) {
+        if (requestId !== latestRequestId.current) return;
+        console.error('Stellar quote error:', err);
+        setCurrentQuote({
+          source: 'STELLAR_SWAP',
+          data: null,
+          error: parseSwapError(err),
           loading: false,
         });
       }
