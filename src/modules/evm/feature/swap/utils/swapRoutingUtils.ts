@@ -1,7 +1,8 @@
 import { getChainById, isEvmChain } from '../../../utils/Chainregistry';
 import { isStellar } from './swapAssetUtils';
 
-export type SwapProvider = 'uniswap' | 'fusion' | 'fusion_plus' | 'near_intent' | 'unsupported';
+export type SwapProvider =
+  'uniswap' | 'fusion' | 'fusion_plus' | 'near_intent' | 'stellar' | 'unsupported';
 
 export interface SelectProviderParams {
   fromChain?: number | string | null;
@@ -65,7 +66,12 @@ export function selectProvider(params: SelectProviderParams): SwapProvider {
     return 'near_intent';
   }
 
-  // 5. Default: unsupported
+  // 5. Stellar -> Stellar same network
+  if (isFromStellar && isToStellar && String(fromChain) === String(toChain)) {
+    return 'stellar';
+  }
+
+  // 6. Default: unsupported
   return 'unsupported';
 }
 
