@@ -9,11 +9,14 @@ import {
 } from 'lightweight-charts';
 
 import { getFundingRates } from '../../adapters/aster/api/funding';
+import { getHyperliquidFundingHistory } from '../../adapters/hyperliquid/api/funding';
+import { useExchangeManager } from '../../core/ExchangeManager';
 import { useMarketStore } from '../../core/stores/marketStore';
 
 type TimeFrame = '1h' | '8h' | '1y';
 
 const FundingChart: React.FC = () => {
+  const currentExchange = useExchangeManager(state => state.currentExchange);
   const symbol = useMarketStore(state => state.selectedSymbol);
   const asterSymbol = symbol.replace('-', '');
 
@@ -33,8 +36,12 @@ const FundingChart: React.FC = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const historicalData = await getFundingRates(asterSymbol, 500);
-        // Aster API returns an array of { fundingRate, fundingTime }
+        let historicalData: any[] = [];
+        if (currentExchange === 'hyperliquid') {
+          historicalData = await getHyperliquidFundingHistory(symbol, 500);
+        } else {
+          historicalData = await getFundingRates(asterSymbol, 500);
+        }
         const sorted = historicalData.sort((a, b) => a.fundingTime - b.fundingTime);
         setData(sorted);
       } catch (error) {
@@ -45,7 +52,7 @@ const FundingChart: React.FC = () => {
     };
 
     fetchData();
-  }, [asterSymbol]);
+  }, [asterSymbol, symbol, currentExchange]);
 
   useEffect(() => {
     if (!chartContainerRef.current || data.length === 0) return;

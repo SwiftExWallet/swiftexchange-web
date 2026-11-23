@@ -5,10 +5,12 @@ import {
   userFills,
   userFillsByTime,
   userFunding,
+  userNonFundingLedgerUpdates,
 } from '@nktkas/hyperliquid/api/info';
 import BigNumber from 'bignumber.js';
 
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import type { DepositWithdrawRecord } from '../../aster/api/account';
 import type { AsterUserTrade } from '../../aster/types/account';
 import type { AsterOrderResponse, OrderSide, OrderType } from '../../aster/types/orders';
 
@@ -270,6 +272,67 @@ export const getHyperliquidFundingHistory = async (
     return list;
   } catch (err) {
     console.error('getHyperliquidFundingHistory error', err);
+    return [];
+  }
+};
+
+export const getHyperliquidDepositWithdrawHistory = async (
+  userAddr: string,
+  options?: { limit?: number; type?: 'DEPOSIT' | 'WITHDRAW' }
+): Promise<DepositWithdrawRecord[]> => {
+  try {
+    const isTestnet = useExchangeManager.getState().currentNetwork === 'testnet';
+    const transport = getTransport();
+    const updates = await userNonFundingLedgerUpdates(
+      { transport },
+      { user: userAddr as `0x${string}` }
+    );
+    if (!Array.isArray(updates)) return [];
+
+    const chainId = isTestnet ? 421614 : 42161;
+    let list: DepositWithdrawRecord[] = updates
+      .map((item: any, idx: number) => {
+        const delta = item.delta || {};
+        const rawType = (delta.type || '').toLowerCase();
+        let recordType: 'DEPOSIT' | 'WITHDRAW' = 'DEPOSIT';
+        if (rawType.includes('withdraw') || rawType === 'send') {
+          recordType = 'WITHDRAW';
+        } else if (rawType.includes('deposit')) {
+          recordType = 'DEPOSIT';
+        } else {
+          return null;
+        }
+
+        const amount = String(delta.usdc || delta.amount || '0');
+        const fee = delta.fee ? String(delta.fee) : undefined;
+
+        return {
+          id: item.hash || `hl_${item.time}_${idx}`,
+          txHash: item.hash || '',
+          chainId,
+          asset: 'USDC',
+          amount,
+          fee,
+          state: 'SUCCESS' as const,
+          type: recordType,
+          time: Number(item.time || Date.now()),
+          accountType: 'perp',
+          address: delta.destination || userAddr,
+        };
+      })
+      .filter((r): r is DepositWithdrawRecord => r !== null);
+
+    list.sort((a, b) => b.time - a.time);
+
+    if (options?.type) {
+      list = list.filter(r => r.type === options.type);
+    }
+    if (options?.limit) {
+      list = list.slice(0, options.limit);
+    }
+    return list;
+  } catch (err) {
+    console.error('getHyperliquidDepositWithdrawHistory error', err);
     return [];
   }
 };

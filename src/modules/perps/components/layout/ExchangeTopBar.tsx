@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
 import { getAsterOpenInterest, getRealTimeFundingRate } from '../../adapters/aster/api/funding';
+import { getHyperliquidFundingRate } from '../../adapters/hyperliquid/api/funding';
 import { useExchangeManager } from '../../core/ExchangeManager';
 import { useLeverageStore } from '../../core/stores/leverageStore';
 import { useMarketStore } from '../../core/stores/marketStore';
@@ -21,6 +22,7 @@ function formatPrice(px: number): string {
   const dec = px < 10 ? (px < 0.001 ? 6 : 4) : 2;
   return safeFormatNumber(px, dec, dec, '—');
 }
+
 export const ExchangeTopBar: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -35,10 +37,18 @@ export const ExchangeTopBar: React.FC = () => {
     return market?.maxLeverage && market.maxLeverage > 0 ? market.maxLeverage : 100;
   }, [bracketsBySymbol, symbol, market]);
 
-  const assetCtx = useTickerStore(state => state.assetCtxByMarket[symbol]);
+  const cleanSymbol = symbol.replace(/[-_/]/g, '');
+  const baseSymbol = symbol.split('-')[0];
+  const assetCtx = useTickerStore(
+    state =>
+      state.assetCtxByMarket[symbol] ||
+      state.assetCtxByMarket[cleanSymbol] ||
+      state.assetCtxByMarket[`${baseSymbol}-USDC`] ||
+      state.assetCtxByMarket[`${baseSymbol}-USDT`] ||
+      state.assetCtxByMarket[baseSymbol]
+  );
   const currentExchange = useExchangeManager(state => state.currentExchange);
 
-  // Mark price from backend ticker; fall back to orderbook mid-price if unavailable
   const markPxFromTicker = parseFloat(assetCtx?.markPx || '0');
   const orderbook = useOrderbookStore(state => state.books[symbol]);
   const midPrice =
@@ -53,37 +63,57 @@ export const ExchangeTopBar: React.FC = () => {
   const openInterest = parseFloat(assetCtx?.openInterest || '0');
 
   const [liveFundingRate, setLiveFundingRate] = useState<number>(0);
-  const [fundingIntervalHours, setFundingIntervalHours] = useState<number>(8);
-  const [nextFundingTime, setNextFundingTime] = useState<number | null>(null);
+  const [fundingIntervalHours, setFundingIntervalHours] = useState<number>(
+    currentExchange === 'hyperliquid' ? 1 : 8
+  );
+  const [nextFundingTime, setNextFundingTime] = useState<number | null>(
+    currentExchange === 'hyperliquid' ? Math.ceil(Date.now() / 3600000) * 3600000 : null
+  );
   const [countdown, setCountdown] = useState<string>('--:--:--');
   const [liveOpenInterest, setLiveOpenInterest] = useState<number>(0);
 
   const fetchFundingInfo = React.useCallback(async () => {
     try {
-      if (currentExchange !== 'aster') return;
-
-      const asterSymbol = symbol.replace('-', '');
-      const [info, oiResult] = await Promise.allSettled([
-        getRealTimeFundingRate(asterSymbol),
-        getAsterOpenInterest(asterSymbol),
-      ]);
-
-      if (info.status === 'fulfilled' && info.value) {
-        setLiveFundingRate(parseFloat(info.value.lastFundingRate));
-        setFundingIntervalHours(info.value.fundingIntervalHours);
-        setNextFundingTime(info.value.nextFundingTime);
+      if (currentExchange === 'hyperliquid') {
+        setFundingIntervalHours(1);
+        const nextTime = Math.ceil(Date.now() / 3600000) * 3600000;
+        setNextFundingTime(nextTime);
+        const hlInfo = await getHyperliquidFundingRate(symbol);
+        if (hlInfo) {
+          const rate = parseFloat(hlInfo.lastFundingRate);
+          if (!isNaN(rate)) setLiveFundingRate(rate);
+          setFundingIntervalHours(hlInfo.fundingIntervalHours);
+          setNextFundingTime(hlInfo.nextFundingTime);
+          const oiVal = parseFloat(hlInfo.openInterest);
+          if (!isNaN(oiVal) && oiVal > 0) setLiveOpenInterest(oiVal);
+        }
+        return;
       }
 
-      if (oiResult.status === 'fulfilled') {
-        const oiVal = parseFloat(oiResult.value);
-        if (!isNaN(oiVal) && oiVal > 0) {
-          setLiveOpenInterest(oiVal);
-          const currentCtx = useTickerStore.getState().getAssetCtx(symbol);
-          if (currentCtx) {
-            useTickerStore.getState().setAssetCtx(symbol, {
-              ...currentCtx,
-              openInterest: String(oiVal),
-            });
+      if (currentExchange === 'aster') {
+        const asterSymbol = symbol.replace('-', '');
+        const [info, oiResult] = await Promise.allSettled([
+          getRealTimeFundingRate(asterSymbol),
+          getAsterOpenInterest(asterSymbol),
+        ]);
+
+        if (info.status === 'fulfilled' && info.value) {
+          setLiveFundingRate(parseFloat(info.value.lastFundingRate));
+          setFundingIntervalHours(info.value.fundingIntervalHours);
+          setNextFundingTime(info.value.nextFundingTime);
+        }
+
+        if (oiResult.status === 'fulfilled') {
+          const oiVal = parseFloat(oiResult.value);
+          if (!isNaN(oiVal) && oiVal > 0) {
+            setLiveOpenInterest(oiVal);
+            const currentCtx = useTickerStore.getState().getAssetCtx(symbol);
+            if (currentCtx) {
+              useTickerStore.getState().setAssetCtx(symbol, {
+                ...currentCtx,
+                openInterest: String(oiVal),
+              });
+            }
           }
         }
       }
@@ -97,17 +127,49 @@ export const ExchangeTopBar: React.FC = () => {
   }, [fetchFundingInfo]);
 
   React.useEffect(() => {
-    if (!nextFundingTime) {
+    if (currentExchange === 'hyperliquid') {
+      setFundingIntervalHours(1);
+      const nextTime = Math.ceil(Date.now() / 3600000) * 3600000;
+      setNextFundingTime(nextTime);
+      if (assetCtx?.funding) {
+        const rate = parseFloat(assetCtx.funding);
+        if (!isNaN(rate)) {
+          setLiveFundingRate(rate);
+        }
+      }
+      if (assetCtx?.openInterest) {
+        const oiVal = parseFloat(assetCtx.openInterest);
+        if (!isNaN(oiVal) && oiVal > 0) {
+          setLiveOpenInterest(oiVal);
+        }
+      }
+    }
+  }, [currentExchange, assetCtx?.funding, assetCtx?.openInterest]);
+
+  React.useEffect(() => {
+    if (!nextFundingTime && currentExchange === 'hyperliquid') {
+      const hlNext = Math.ceil(Date.now() / 3600000) * 3600000;
+      setNextFundingTime(hlNext);
+    }
+
+    if (!nextFundingTime && currentExchange !== 'hyperliquid') {
       setCountdown('--:--:--');
       return;
     }
 
     const updateCountdown = () => {
       const now = Date.now();
-      const diff = nextFundingTime - now;
+      const targetTime =
+        currentExchange === 'hyperliquid' && (!nextFundingTime || nextFundingTime <= now)
+          ? Math.ceil(now / 3600000) * 3600000
+          : nextFundingTime!;
+
+      const diff = targetTime - now;
       if (diff <= 0) {
         setCountdown('00:00:00');
-        // Countdown hit zero, refresh funding info
+        if (currentExchange === 'hyperliquid') {
+          setNextFundingTime(Math.ceil((now + 1000) / 3600000) * 3600000);
+        }
         fetchFundingInfo();
       } else {
         const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -122,7 +184,7 @@ export const ExchangeTopBar: React.FC = () => {
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [nextFundingTime, fetchFundingInfo]);
+  }, [nextFundingTime, fetchFundingInfo, currentExchange]);
 
   const changePct = prevDayPx > 0 ? ((markPrice - prevDayPx) / prevDayPx) * 100 : 0;
   const isChangePositive = changePct >= 0;
@@ -132,8 +194,16 @@ export const ExchangeTopBar: React.FC = () => {
       : '--';
 
   const isFundingPositive = liveFundingRate >= 0;
+  const formattedFundingRate = React.useMemo(() => {
+    if (isNaN(liveFundingRate) || !isFinite(liveFundingRate)) return '--';
+    const pct = liveFundingRate * 100;
+    const absPct = Math.abs(pct);
+    const decimals = absPct > 0 && absPct < 0.001 ? 5 : 4;
+    return `${pct >= 0 ? '+' : ''}${pct.toFixed(decimals)}%`;
+  }, [liveFundingRate]);
 
-  // Open Interest in quote asset (USDT) value, exactly like Aster's "Open Interest (USDT)"
+  const quoteAsset = market?.quoteAsset || (currentExchange === 'hyperliquid' ? 'USDC' : 'USDT');
+
   const rawOiBase = liveOpenInterest > 0 ? liveOpenInterest : openInterest;
   const oiQuoteValue = rawOiBase > 0 && markPrice > 0 ? rawOiBase * markPrice : 0;
 
@@ -147,9 +217,6 @@ export const ExchangeTopBar: React.FC = () => {
           >
             <div className="relative shrink-0 flex flex-col items-center">
               <CoinIcon symbol={symbol} size={28} />
-              {/* <span className="absolute -bottom-1.5 text-warning bg-warning/15 border border-warning/30 text-[7.5px] leading-tight px-1 py-[0.5px] rounded font-bold uppercase tracking-wider shadow-xs z-10 pointer-events-none">
-                BETA
-              </span> */}
             </div>
 
             <div className="flex flex-col items-start gap-0.5">
@@ -194,7 +261,6 @@ export const ExchangeTopBar: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-5 sm:gap-6 md:gap-7 overflow-x-auto [&::-webkit-scrollbar]:hidden whitespace-nowrap flex-1 min-w-0 h-full px-1 mask-edges">
-          {/* Mark Price */}
           <div className="flex flex-col gap-0.5">
             <span className="text-muted text-[10px] tracking-tight font-medium">Mark</span>
             <span className="text-primary text-[12px] font-semibold font-mono-tabular">
@@ -205,7 +271,6 @@ export const ExchangeTopBar: React.FC = () => {
             </span>
           </div>
 
-          {/* Index Price */}
           <div className="flex flex-col gap-0.5">
             <span className="text-muted text-[10px] tracking-tight font-medium">Index</span>
             <span className="text-secondary text-[12px] font-semibold font-mono-tabular">
@@ -213,7 +278,6 @@ export const ExchangeTopBar: React.FC = () => {
             </span>
           </div>
 
-          {/* 24h Change */}
           <div className="flex flex-col gap-0.5">
             <span className="text-muted text-[10px] tracking-tight font-medium">24h Change</span>
             <span
@@ -223,7 +287,6 @@ export const ExchangeTopBar: React.FC = () => {
             </span>
           </div>
 
-          {/* Funding(8h) / Countdown */}
           <div className="flex flex-col gap-0.5">
             <span className="text-muted text-[10px] tracking-tight font-medium">
               Funding({fundingIntervalHours}h)/Countdown
@@ -232,28 +295,24 @@ export const ExchangeTopBar: React.FC = () => {
               <span
                 className={`text-[12px] font-semibold ${isFundingPositive ? 'text-success' : 'text-danger'}`}
               >
-                {!isNaN(liveFundingRate) && isFinite(liveFundingRate)
-                  ? (liveFundingRate * 100).toFixed(4) + '%'
-                  : '--'}
+                {formattedFundingRate}
               </span>
               <span className="text-muted text-[12px] font-medium">/ {countdown}</span>
             </div>
           </div>
 
-          {/* 24h Volume (USDT) */}
           <div className="flex flex-col gap-0.5">
             <span className="text-muted text-[10px] tracking-tight font-medium">
-              24h Volume (USDT)
+              24h Volume ({quoteAsset})
             </span>
             <span className="text-primary text-[12px] font-semibold font-mono-tabular">
               {formatExactNumber(dayNtlVlm)}
             </span>
           </div>
 
-          {/* Open Interest (USDT) */}
           <div className="flex flex-col gap-0.5 pr-2">
             <span className="text-muted text-[10px] tracking-tight font-medium">
-              Open Interest (USDT)
+              Open Interest ({quoteAsset})
             </span>
             <span className="text-primary text-[12px] font-semibold font-mono-tabular">
               {formatExactNumber(oiQuoteValue > 0 ? oiQuoteValue : rawOiBase)}

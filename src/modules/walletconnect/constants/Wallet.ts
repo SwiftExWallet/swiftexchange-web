@@ -149,7 +149,7 @@ export const WALLET_METADATA_MAP: Record<string, WalletMetadata> = {
     wcListingId: 'a4604022bf9199ca6d762c5663d8a6186a9ca4b607b9dcb29bcb81054d6f1091',
     homepage: 'https://swiftexchange.io/',
     redirects: {
-      native: 'swiftEx://app.swiftexchange.io',
+      native: 'swiftEx://',
       universal: 'https://app.swiftexchange.io/',
     },
   },
