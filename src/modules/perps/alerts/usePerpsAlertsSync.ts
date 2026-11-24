@@ -9,16 +9,19 @@ import { useAlertSettingsStore } from './alertSettingsStore';
 import { alertsApi } from './api';
 import { buildAlertSnapshotPayload, normalizeSymbol } from './snapshotBuilder';
 
-const THROTTLE_INTERVAL_MS = 15_000;
-const MAX_UNCHANGED_INTERVAL_MS = 5 * 60_000;
+const MIN_GAP_MS = 2_000;
 
 function computePositionsSignature(positions: Record<string, any>): string {
-  const keys = Object.keys(positions).sort();
-  return keys
+  if (!positions || typeof positions !== 'object') return '';
+  return Object.keys(positions)
+    .sort()
     .map(k => {
       const p = positions[k];
-      return `${normalizeSymbol(p.symbol)}:${p.size}:${p.marginType}`;
+      const sizeNum = parseFloat(String(p?.size || '0'));
+      if (Math.abs(sizeNum) === 0) return '';
+      return `${normalizeSymbol(p.symbol)}:${sizeNum}:${p.marginType || 'cross'}`;
     })
+    .filter(Boolean)
     .join('|');
 }
 
@@ -39,52 +42,46 @@ export function usePerpsAlertsSync() {
 
   const positions = usePositionStore(state => state.positions);
   const multiAssetsMargin = useAccountStore(state => state.multiAssetsMargin);
-  const balances = useAccountStore(state => state.balances);
-
-  const getSettings = useAlertSettingsStore(state => state.getSettings);
-  const cleanupClosedPositionMutedKeys = useAlertSettingsStore(
-    state => state.cleanupClosedPositionMutedKeys
-  );
 
   const lastSentTimeRef = useRef<number>(0);
   const lastSentSigRef = useRef<string>('');
   const lastTokenRef = useRef<string | null>(null);
   const isSyncingRef = useRef<boolean>(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const syncSnapshot = useCallback(
     async (isImmediate = false) => {
-      if (currentExchange !== 'aster') return;
+      const activeExchange = useExchangeManager.getState().currentExchange;
+      if (activeExchange !== 'aster') return;
       if (!wallet || !fcmToken) return;
 
-      const settings = getSettings(wallet);
+      const settings = useAlertSettingsStore.getState().getSettings(wallet);
       if (!settings.enabled) return;
 
       const now = Date.now();
-      const currentSig = computePositionsSignature(positions);
+      const currentPositions = usePositionStore.getState().positions;
+      const currentSig = computePositionsSignature(currentPositions);
       const isSigChanged = currentSig !== lastSentSigRef.current;
 
-      if (
-        !isImmediate &&
-        !isSigChanged &&
-        now - lastSentTimeRef.current < MAX_UNCHANGED_INTERVAL_MS
-      ) {
-        return;
-      }
+      // Rate limit check: don't call faster than MIN_GAP_MS
+      if (now - lastSentTimeRef.current < MIN_GAP_MS) return;
 
-      if (!isImmediate && now - lastSentTimeRef.current < THROTTLE_INTERVAL_MS) {
-        return;
-      }
+      // For automatic calls, only send if the position signature has actually changed
+      if (!isImmediate && !isSigChanged) return;
 
       if (isSyncingRef.current) return;
       isSyncingRef.current = true;
 
       try {
+        const isMulti = useAccountStore.getState().multiAssetsMargin;
+        const currentBalances = useAccountStore.getState().balances;
+
         let assetIndexes: any[] = [];
-        if (multiAssetsMargin) {
+        if (isMulti) {
           assetIndexes = await getAsterAssetIndex().catch(() => []);
         }
 
-        const positionRisksList = Object.values(positions).map(p => ({
+        const positionRisksList = Object.values(currentPositions).map(p => ({
           symbol: p.symbol,
           positionAmt: String(p.size || '0'),
           entryPrice: String(p.entryPrice || '0'),
@@ -104,7 +101,7 @@ export function usePerpsAlertsSync() {
           updateTime: now,
         }));
 
-        const accountAssetsList = Object.values(balances).map(b => ({
+        const accountAssetsList = Object.values(currentBalances).map(b => ({
           asset: b.asset,
           walletBalance: b.total || '0',
           unrealizedProfit: b.unrealizedPnl || '0',
@@ -122,25 +119,22 @@ export function usePerpsAlertsSync() {
         const payload = buildAlertSnapshotPayload({
           fcmToken,
           wallet,
-          accountInfo: {
-            assets: accountAssetsList,
-            positions: positionRisksList,
-          } as any,
+          accountInfo: { assets: accountAssetsList, positions: positionRisksList } as any,
           positionRisks: positionRisksList,
-          isMultiAsset: multiAssetsMargin,
+          isMultiAsset: isMulti,
           assetIndexes,
           savedMutedKeys: settings.mutedKeys,
         });
 
         const res = await alertsApi.postSnapshot(payload);
         if (res && res.ok) {
-          lastSentTimeRef.current = now;
+          lastSentTimeRef.current = Date.now();
           lastSentSigRef.current = currentSig;
 
           const activeIsoKeys = payload.account.positions
             .filter(p => p.marginType === 'isolated')
             .map(p => `iso:${p.symbol}:${parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT'}`);
-          cleanupClosedPositionMutedKeys(wallet, activeIsoKeys);
+          useAlertSettingsStore.getState().cleanupClosedPositionMutedKeys(wallet, activeIsoKeys);
         }
       } catch (err) {
         console.warn('[alertsSync] Error syncing snapshot:', err);
@@ -148,18 +142,13 @@ export function usePerpsAlertsSync() {
         isSyncingRef.current = false;
       }
     },
-    [
-      currentExchange,
-      wallet,
-      fcmToken,
-      positions,
-      multiAssetsMargin,
-      balances,
-      getSettings,
-      cleanupClosedPositionMutedKeys,
-    ]
+    [wallet, fcmToken]
   );
 
+  const syncSnapshotRef = useRef(syncSnapshot);
+  syncSnapshotRef.current = syncSnapshot;
+
+  // Cleanup old FCM token if device changes
   useEffect(() => {
     if (fcmToken && lastTokenRef.current && lastTokenRef.current !== fcmToken) {
       alertsApi.deleteDevice({ fcmToken: lastTokenRef.current }).catch(() => {});
@@ -167,35 +156,50 @@ export function usePerpsAlertsSync() {
     lastTokenRef.current = fcmToken;
   }, [fcmToken]);
 
+  // Clean device if user disables master switch
   useEffect(() => {
     if (wallet && fcmToken) {
-      const settings = getSettings(wallet);
+      const settings = useAlertSettingsStore.getState().getSettings(wallet);
       if (!settings.enabled) {
         alertsApi.deleteDevice({ fcmToken }).catch(() => {});
       }
     }
-  }, [wallet, fcmToken, getSettings]);
+  }, [wallet, fcmToken]);
 
-  useEffect(() => {
-    if (!wallet || !fcmToken) return;
-    const isSigChanged = computePositionsSignature(positions) !== lastSentSigRef.current;
-    syncSnapshot(isSigChanged);
-  }, [positions, syncSnapshot, wallet, fcmToken]);
+  // Compute positions signature directly from positions in render
+  const positionsSig = computePositionsSignature(positions);
 
+  // Trigger sync ONLY when positions signature changes (open / close / resize)
   useEffect(() => {
-    if (!wallet || !fcmToken) return;
-    syncSnapshot(true);
-  }, [multiAssetsMargin, syncSnapshot, wallet, fcmToken]);
+    if (currentExchange !== 'aster' || !wallet || !fcmToken) return;
 
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        syncSnapshot(false);
+    if (positionsSig === lastSentSigRef.current) return;
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      syncSnapshotRef.current(false);
+    }, 600);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
       }
     };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [syncSnapshot]);
+  }, [positionsSig, currentExchange, wallet, fcmToken]);
+
+  // Sync when multiAssetsMargin mode changes
+  const prevMultiAssetRef = useRef(multiAssetsMargin);
+  useEffect(() => {
+    if (currentExchange !== 'aster' || !wallet || !fcmToken) return;
+
+    if (prevMultiAssetRef.current !== multiAssetsMargin) {
+      prevMultiAssetRef.current = multiAssetsMargin;
+      syncSnapshotRef.current(false);
+    }
+  }, [multiAssetsMargin, currentExchange, wallet, fcmToken]);
 
   return {
     isSwiftExConnected: Boolean(fcmToken),

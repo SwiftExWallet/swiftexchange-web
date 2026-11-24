@@ -15,6 +15,7 @@ describe('usePerpsAlertsSync', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(alertsApi, 'getHealth').mockResolvedValue({ ok: true });
     useExchangeManager.setState({ currentExchange: 'aster' });
     useWalletStore.setState({
       connectedWallets: {
@@ -135,5 +136,35 @@ describe('usePerpsAlertsSync', () => {
     expect(postSnapshotSpy).toHaveBeenCalledTimes(1);
     const sentPayload = postSnapshotSpy.mock.calls[0][0];
     expect(sentPayload.account.positions).toEqual([]);
+  });
+
+  it('still sends snapshot even if health endpoint is down (non-blocking)', async () => {
+    vi.spyOn(alertsApi, 'getHealth').mockResolvedValue({ ok: false, error: 'Stale prices (503)' });
+    const postSnapshotSpy = vi.spyOn(alertsApi, 'postSnapshot').mockResolvedValue({ ok: true });
+
+    useWalletStore.setState({
+      connectedWallets: {
+        evm: { address: mockWallet } as any,
+      },
+      session: {
+        peer: {
+          metadata: {
+            name: 'SwiftEx Mobile',
+            userDevice: {
+              fcmToken: mockFcmToken,
+            },
+          },
+        },
+      } as any,
+    });
+
+    const { result } = renderHook(() => usePerpsAlertsSync());
+
+    await act(async () => {
+      await result.current.syncSnapshot(true);
+    });
+
+    // Health check is informational only — snapshot must still be sent
+    expect(postSnapshotSpy).toHaveBeenCalledTimes(1);
   });
 });
