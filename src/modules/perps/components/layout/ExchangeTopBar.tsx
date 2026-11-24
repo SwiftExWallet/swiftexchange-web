@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 
 import { getAsterOpenInterest, getRealTimeFundingRate } from '../../adapters/aster/api/funding';
 import { getHyperliquidFundingRate } from '../../adapters/hyperliquid/api/funding';
+import { AlertsBellButton } from '../../alerts/components/AlertsBellButton';
 import { useExchangeManager } from '../../core/ExchangeManager';
 import { useLeverageStore } from '../../core/stores/leverageStore';
 import { useMarketStore } from '../../core/stores/marketStore';
@@ -320,7 +321,8 @@ export const ExchangeTopBar: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center pl-1.5 shrink-0 z-20 bg-secondary h-full ml-auto">
+        <div className="flex items-center pl-1.5 shrink-0 z-20 bg-secondary h-full ml-auto gap-1">
+          <AlertsBellButton />
           <div className="flex items-center pl-1.5 border-l border-color h-full">
             <ExchangeNetworkSelector />
           </div>

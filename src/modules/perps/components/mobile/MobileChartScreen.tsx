@@ -16,6 +16,7 @@ import { useWalletStore } from '../../../walletconnect/store/walletConnectStore'
 import { getSymbolDetail } from '../../adapters/aster/api/funding';
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
 import { useHyperliquidAgent } from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
+import { AlertsBellButton } from '../../alerts/components/AlertsBellButton';
 import { useExchangeManager } from '../../core/ExchangeManager';
 import { useAccountStore } from '../../core/stores/accountStore';
 import { useLeverageStore } from '../../core/stores/leverageStore';
@@ -229,22 +230,25 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
           </button>
         </div>
 
-        <div className="flex flex-col items-end justify-center leading-tight font-mono-tabular">
-          <span className="text-base font-extrabold text-primary tracking-tight">
-            $
-            {markPrice
-              ? safeFormatNumber(markPrice, markPrice < 10 ? 4 : 2, markPrice < 10 ? 4 : 2, '--')
-              : '--'}
-          </span>
-          <span
-            className={`text-[11px] font-semibold mt-0.5 ${
-              isPositive ? 'text-success' : 'text-danger'
-            }`}
-          >
-            {isPositive ? '+' : ''}
-            {changeDiff.toFixed(2)} ({isPositive ? '+' : ''}
-            {changePct.toFixed(2)}%)
-          </span>
+        <div className="flex items-center gap-2">
+          <div className="flex flex-col items-end justify-center leading-tight font-mono-tabular">
+            <span className="text-base font-extrabold text-primary tracking-tight">
+              $
+              {markPrice
+                ? safeFormatNumber(markPrice, markPrice < 10 ? 4 : 2, markPrice < 10 ? 4 : 2, '--')
+                : '--'}
+            </span>
+            <span
+              className={`text-[11px] font-semibold mt-0.5 ${
+                isPositive ? 'text-success' : 'text-danger'
+              }`}
+            >
+              {isPositive ? '+' : ''}
+              {changeDiff.toFixed(2)} ({isPositive ? '+' : ''}
+              {changePct.toFixed(2)}%)
+            </span>
+          </div>
+          <AlertsBellButton />
         </div>
       </div>
 

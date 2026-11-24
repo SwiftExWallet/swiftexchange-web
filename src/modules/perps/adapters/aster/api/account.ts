@@ -606,3 +606,29 @@ export async function getMigrateUserHistory(
     50
   );
 }
+
+export interface AsterAssetIndexItem {
+  symbol: string;
+  time?: number;
+  index: string;
+  bidBuffer: string;
+  askBuffer: string;
+  bidRate?: string;
+  askRate?: string;
+}
+
+export async function getAsterAssetIndex(): Promise<AsterAssetIndexItem[]> {
+  try {
+    const restUrl = getAsterRestUrl();
+    const url = `${restUrl}${ASTER_ENDPOINTS.ASSET_INDEX}`;
+    const data = await asterHttpClient.request<AsterAssetIndexItem[]>(url, {
+      method: 'GET',
+      weight: 1,
+      ttlMs: 30_000,
+    });
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn('[Aster] Failed to fetch /fapi/v3/assetIndex:', e);
+    return [];
+  }
+}
