@@ -2,6 +2,7 @@ import { sendCustomNotification } from '@/service/notificationService';
 import { getAddress, verifyTypedData } from 'ethers';
 
 import { useNotificationStore } from '../../../store/notificationStore';
+import { generateMonotonicNonce, getSyncedServerTime } from '../../perps/adapters/aster/api/auth';
 import type { IAsterSigner } from '../../perps/adapters/aster/types/signer';
 import { useWalletStore } from '../store/walletConnectStore';
 import { destroyAESKey } from './keyVaultIndexedDB';
@@ -15,7 +16,7 @@ const BLOB_KEY_PREFIX = '_sx_aster_agentkey';
 const ADDR_KEY_PREFIX = '_sx_aster_agentaddr';
 const EXPIRY_KEY_PREFIX = '_sx_aster_agentexp';
 const ASTER_AES_KEY_ID = '_k_aster';
-const AGENT_NAME = '@swiftex-desktop';
+const AGENT_NAME = 'swiftex-desktop';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 export const AGENT_VALIDITY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -94,28 +95,9 @@ function cleanupLegacyStorage(network: string): void {
   destroyAESKey(ASTER_AES_KEY_ID).catch(() => {});
 }
 
-async function resolveChainId(
-  provider: EIP1193Provider | undefined,
-  isTestnet: boolean,
-  logContext?: string
-): Promise<number> {
-  const defaultChainId = isTestnet ? 97 : 56;
-  if (!provider?.request) return defaultChainId;
-
-  try {
-    const rawChainId = await provider.request({ method: 'eth_chainId' });
-    if (typeof rawChainId === 'number') return rawChainId;
-    if (typeof rawChainId === 'string') {
-      return rawChainId.startsWith('0x') ? parseInt(rawChainId, 16) : parseInt(rawChainId, 10);
-    }
-  } catch (err) {
-    const msg = logContext
-      ? `[aster] Failed to fetch active eth_chainId ${logContext}:`
-      : `[aster] Failed to fetch active eth_chainId, falling back to ${defaultChainId}`;
-    console.warn(msg, err);
-  }
-
-  return defaultChainId;
+function resolveChainId(isTestnet: boolean): number {
+  // Aster DEX EVM signature verification is protocol-fixed to BSC (56 mainnet, 97 testnet)
+  return isTestnet ? 97 : 56;
 }
 
 // ============================================================================
@@ -194,8 +176,8 @@ function buildApproveAgentSortedQuery(params: {
 function buildApproveAgentData(
   evmAddress: string,
   agentAddress: string,
-  nonce: number,
-  expired: number,
+  nonce: string | number,
+  expired: string | number,
   chainId: number,
   permissions?: AgentPermissions
 ) {
@@ -248,22 +230,21 @@ function assertWellFormedSignature(signature: string): void {
 
 export async function submitApproveAgent(params: SubmitApproveAgentParams): Promise<void> {
   const isTestnet = params.network === 'testnet' || TESTNET_CHAIN_IDS.has(params.signatureChainId);
+  const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
 
-  const queryParams = new URLSearchParams({
-    user: getAddress(params.user),
+  const sortedQs = buildApproveAgentSortedQuery({
+    user: params.user,
     agentName: params.agentName,
-    agentAddress: getAddress(params.agentAddress),
-    nonce: String(params.nonce),
-    expired: String(params.expired),
-    signatureChainId: String(params.signatureChainId),
-    canSpotTrade: String(params.canSpotTrade),
-    canPerpTrade: String(params.canPerpTrade),
-    canWithdraw: String(params.canWithdraw),
-    signature: params.signature,
+    agentAddress: params.agentAddress,
+    nonce: params.nonce,
+    expired: params.expired,
+    signatureChainId: params.signatureChainId,
+    canSpotTrade: params.canSpotTrade,
+    canPerpTrade: params.canPerpTrade,
+    canWithdraw: params.canWithdraw,
   });
 
-  const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
-  const url = `${baseUrl}/fapi/v3/registerAndApproveAgent?${queryParams.toString()}`;
+  const url = `${baseUrl}/fapi/v3/registerAndApproveAgent?${sortedQs}&signature=${params.signature}`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -529,7 +510,7 @@ export async function deriveAsterAgentKey(
   const currentNetwork = resolveNetwork(network) as NetworkType;
   const isTestnet = currentNetwork === 'testnet';
   const asterChain = isTestnet ? 'Testnet' : 'Mainnet';
-  const chainId = await resolveChainId(provider, isTestnet);
+  const chainId = resolveChainId(isTestnet);
 
   // Ensure isolated signer iframe is connected
   const isReady = await signerIframeBridge.initialize();
@@ -553,8 +534,10 @@ export async function deriveAsterAgentKey(
   // Generate and store key EXCLUSIVELY inside the isolated signer sandbox
   const agentAddress = await signerIframeBridge.getOrCreateAgentKey(evmAddress);
 
-  const nonce = Date.now() * 1000;
-  const expired = Date.now() + AGENT_VALIDITY_MS;
+  const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
+  const serverTime = await getSyncedServerTime(baseUrl);
+  const nonce = generateMonotonicNonce(serverTime);
+  const expired = serverTime + AGENT_VALIDITY_MS;
 
   const typedData = buildApproveAgentData(evmAddress, agentAddress, nonce, expired, chainId, {
     canSpotTrade: true,
@@ -581,7 +564,7 @@ export async function deriveAsterAgentKey(
 
   await submitApproveAgent({
     user: evmAddress,
-    nonce: nonce.toString(),
+    nonce,
     signature,
     agentName: AGENT_NAME,
     agentAddress,
@@ -603,7 +586,7 @@ export async function deriveAsterAgentKey(
   return {
     agentAddress,
     signature,
-    nonce: nonce.toString(),
+    nonce,
     expired: expired.toString(),
   };
 }
@@ -664,7 +647,7 @@ export async function revokeAsterAgentKey(
 ): Promise<void> {
   const currentNetwork = resolveNetwork(network) as NetworkType;
   const isTestnet = currentNetwork === 'testnet';
-  const chainId = await resolveChainId(provider, isTestnet, 'during revoke');
+  const chainId = resolveChainId(isTestnet);
 
   const agentAddress = getStoredAgentAddress(currentNetwork);
   if (!agentAddress || agentAddress === ZERO_ADDRESS) {
@@ -672,8 +655,10 @@ export async function revokeAsterAgentKey(
     return;
   }
 
-  const nonce = Date.now() * 1000;
-  const typedData = buildDelAgentData(evmAddress, agentAddress, nonce, chainId);
+  const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
+  const serverTime = await getSyncedServerTime(baseUrl);
+  const nonce = generateMonotonicNonce(serverTime);
+  const typedData = buildDelAgentData(evmAddress, agentAddress, Number(nonce), chainId);
 
   let userApprovedSignature = false;
   try {
