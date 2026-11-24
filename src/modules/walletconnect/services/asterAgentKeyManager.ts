@@ -2,6 +2,7 @@ import { sendCustomNotification } from '@/service/notificationService';
 import { getAddress, verifyTypedData } from 'ethers';
 
 import { useNotificationStore } from '../../../store/notificationStore';
+import { parseRawChainId, switchOrAddChain } from '../../evm/utils/evmChainUtils';
 import { generateMonotonicNonce, getSyncedServerTime } from '../../perps/adapters/aster/api/auth';
 import type { IAsterSigner } from '../../perps/adapters/aster/types/signer';
 import { useWalletStore } from '../store/walletConnectStore';
@@ -21,6 +22,8 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 export const AGENT_VALIDITY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+const MAINNET_ASTER_CHAINS = new Set([56, 1, 42161]);
+const TESTNET_ASTER_CHAINS = new Set([97, 11155111, 421614]);
 const TESTNET_CHAIN_IDS = new Set([97, 421614, 11155111]);
 
 export type NetworkType = 'mainnet' | 'testnet';
@@ -95,9 +98,46 @@ function cleanupLegacyStorage(network: string): void {
   destroyAESKey(ASTER_AES_KEY_ID).catch(() => {});
 }
 
-function resolveChainId(isTestnet: boolean): number {
-  // Aster DEX EVM signature verification is protocol-fixed to BSC (56 mainnet, 97 testnet)
-  return isTestnet ? 97 : 56;
+async function resolveAndEnsureAsterChain(
+  provider: EIP1193Provider | undefined,
+  isTestnet: boolean
+): Promise<number> {
+  const allowedChains = isTestnet ? TESTNET_ASTER_CHAINS : MAINNET_ASTER_CHAINS;
+  const defaultChainId = isTestnet ? 97 : 56;
+
+  if (!provider?.request) {
+    return defaultChainId;
+  }
+
+  let activeChainId: number | null = null;
+  try {
+    const raw = await provider.request({ method: 'eth_chainId' });
+    activeChainId = parseRawChainId(raw);
+  } catch (err) {
+    console.warn('[aster] Failed to fetch active eth_chainId:', err);
+  }
+
+  // If the user's active wallet chain is already one of the Aster-supported chains, use it directly!
+  if (activeChainId && allowedChains.has(activeChainId)) {
+    return activeChainId;
+  }
+
+  // If the user is on an unsupported chain (e.g. Polygon, Avalanche, Optimism, etc.),
+  // automatically prompt/switch the user's wallet to the default Aster chain (56 for mainnet, 97 for testnet).
+  try {
+    await switchOrAddChain(provider, defaultChainId);
+    return defaultChainId;
+  } catch (switchErr: any) {
+    if (switchErr?.code === 4001 || /rejected|denied/i.test(switchErr?.message || '')) {
+      throw new Error(
+        `Please switch your wallet to an Aster-supported network (${
+          isTestnet ? 'BNB Testnet, Sepolia, or Arb Sepolia' : 'BNB Chain, Ethereum, or Arbitrum'
+        }) to sign the Aster agent key.`
+      );
+    }
+    console.warn(`[aster] switchOrAddChain to ${defaultChainId} failed:`, switchErr);
+    return defaultChainId;
+  }
 }
 
 // ============================================================================
@@ -510,7 +550,7 @@ export async function deriveAsterAgentKey(
   const currentNetwork = resolveNetwork(network) as NetworkType;
   const isTestnet = currentNetwork === 'testnet';
   const asterChain = isTestnet ? 'Testnet' : 'Mainnet';
-  const chainId = resolveChainId(isTestnet);
+  const chainId = await resolveAndEnsureAsterChain(provider, isTestnet);
 
   // Ensure isolated signer iframe is connected
   const isReady = await signerIframeBridge.initialize();
@@ -647,7 +687,7 @@ export async function revokeAsterAgentKey(
 ): Promise<void> {
   const currentNetwork = resolveNetwork(network) as NetworkType;
   const isTestnet = currentNetwork === 'testnet';
-  const chainId = resolveChainId(isTestnet);
+  const chainId = await resolveAndEnsureAsterChain(provider, isTestnet);
 
   const agentAddress = getStoredAgentAddress(currentNetwork);
   if (!agentAddress || agentAddress === ZERO_ADDRESS) {
