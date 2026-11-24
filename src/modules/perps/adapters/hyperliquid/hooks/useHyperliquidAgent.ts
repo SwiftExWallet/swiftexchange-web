@@ -204,6 +204,12 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
 
   const lastRestoredKeyRef = useRef<string | null>(null);
 
+  // Stable refs for store actions to avoid adding them to useEffect deps
+  const restoreKeyRef = useRef(restoreKey);
+  const purgeStoreRef = useRef(purgeStore);
+  restoreKeyRef.current = restoreKey;
+  purgeStoreRef.current = purgeStore;
+
   useEffect(() => {
     if (currentExchange !== 'hyperliquid') {
       lastRestoredKeyRef.current = null;
@@ -214,15 +220,17 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
     if (userAddr) {
       if (lastRestoredKeyRef.current !== key) {
         lastRestoredKeyRef.current = key;
-        restoreKey();
+        restoreKeyRef.current();
       }
     } else {
       lastRestoredKeyRef.current = null;
-      if (hyperliquidSigner) {
-        purgeStore();
+      // Read via store snapshot — avoids adding hyperliquidSigner to deps
+      if (useHyperliquidAgentStore.getState().hyperliquidSigner) {
+        purgeStoreRef.current();
       }
     }
-  }, [userAddr, network, currentExchange, restoreKey, purgeStore, hyperliquidSigner]);
+    // hyperliquidSigner intentionally NOT in deps — prevents signer set → re-run loop
+  }, [userAddr, network, currentExchange]);
 
   const deriveAgentKey = useCallback(async () => {
     if (!userAddr) throw new Error('EVM wallet not connected');

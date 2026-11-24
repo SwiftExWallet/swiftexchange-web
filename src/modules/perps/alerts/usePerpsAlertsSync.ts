@@ -27,6 +27,7 @@ function computePositionsSignature(positions: Record<string, any>): string {
 
 export function usePerpsAlertsSync() {
   const currentExchange = useExchangeManager(state => state.currentExchange);
+  const network = useWalletStore(state => state.network);
 
   const session = useWalletStore(state => state.session);
   const evmAddress = useWalletStore(state => state.connectedWallets.evm?.address);
@@ -51,6 +52,10 @@ export function usePerpsAlertsSync() {
 
   const syncSnapshot = useCallback(
     async (isImmediate = false) => {
+      // Do not sync liquidation alert snapshots on testnet
+      const currentNetwork = useWalletStore.getState().network;
+      if (currentNetwork === 'testnet') return;
+
       const activeExchange = useExchangeManager.getState().currentExchange;
       if (activeExchange !== 'aster') return;
       if (!wallet || !fcmToken) return;
@@ -171,7 +176,7 @@ export function usePerpsAlertsSync() {
 
   // Trigger sync ONLY when positions signature changes (open / close / resize)
   useEffect(() => {
-    if (currentExchange !== 'aster' || !wallet || !fcmToken) return;
+    if (network === 'testnet' || currentExchange !== 'aster' || !wallet || !fcmToken) return;
 
     if (positionsSig === lastSentSigRef.current) return;
 
@@ -188,18 +193,18 @@ export function usePerpsAlertsSync() {
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [positionsSig, currentExchange, wallet, fcmToken]);
+  }, [network, positionsSig, currentExchange, wallet, fcmToken]);
 
   // Sync when multiAssetsMargin mode changes
   const prevMultiAssetRef = useRef(multiAssetsMargin);
   useEffect(() => {
-    if (currentExchange !== 'aster' || !wallet || !fcmToken) return;
+    if (network === 'testnet' || currentExchange !== 'aster' || !wallet || !fcmToken) return;
 
     if (prevMultiAssetRef.current !== multiAssetsMargin) {
       prevMultiAssetRef.current = multiAssetsMargin;
       syncSnapshotRef.current(false);
     }
-  }, [multiAssetsMargin, currentExchange, wallet, fcmToken]);
+  }, [network, multiAssetsMargin, currentExchange, wallet, fcmToken]);
 
   return {
     isSwiftExConnected: Boolean(fcmToken),

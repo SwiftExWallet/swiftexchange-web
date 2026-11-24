@@ -322,6 +322,13 @@ export function useAsterAgent(): UseAsterAgentResult {
 
   const lastRestoredKeyRef = useRef<string | null>(null);
 
+  // Stable refs for store actions — Zustand functions are stable but adding them
+  // to deps can still cause re-runs when asterSigner toggles null/non-null.
+  const restoreKeyRef = useRef(restoreKey);
+  const purgeStoreRef = useRef(purgeStore);
+  restoreKeyRef.current = restoreKey;
+  purgeStoreRef.current = purgeStore;
+
   useEffect(() => {
     if (currentExchange !== 'aster') {
       lastRestoredKeyRef.current = null;
@@ -332,15 +339,18 @@ export function useAsterAgent(): UseAsterAgentResult {
     if (userAddr) {
       if (lastRestoredKeyRef.current !== key) {
         lastRestoredKeyRef.current = key;
-        restoreKey();
+        restoreKeyRef.current();
       }
     } else {
       lastRestoredKeyRef.current = null;
-      if (asterSigner) {
-        purgeStore();
+      // Read asterSigner via store snapshot to avoid adding it as a dep
+      if (useAsterAgentStore.getState().asterSigner) {
+        purgeStoreRef.current();
       }
     }
-  }, [userAddr, network, currentExchange, restoreKey, purgeStore, asterSigner]);
+    // asterSigner intentionally NOT in deps — reading it via store.getState() above
+    // prevents the set→re-trigger loop when signer becomes non-null after restoreKey()
+  }, [userAddr, network, currentExchange]);
 
   const deriveAgentKey = useCallback(async () => {
     if (!userAddr) return;

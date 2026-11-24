@@ -136,7 +136,10 @@ class SignerIframeBridge implements IAsterSigner {
         this.clearHandshakeTimers();
         this.initResolver = null;
         if (!result) {
-          this.initPromise = null;
+          // 15-second cooldown on failed handshake to prevent concurrent caller loops
+          setTimeout(() => {
+            this.initPromise = null;
+          }, 15000);
         }
         resolve(result);
       };
@@ -150,12 +153,27 @@ class SignerIframeBridge implements IAsterSigner {
         }
 
         const origin = getSignerOrigin();
+
+        // Guard against recursive self-embedding
+        if (typeof window !== 'undefined') {
+          if (window.parent && window.parent !== window) {
+            console.warn('[SignerIframeBridge] Skipping iframe creation inside nested frame.');
+            finish(false);
+            return;
+          }
+          if (window.location.origin === origin) {
+            console.error('[SignerIframeBridge] Signer origin cannot be the same as app origin.');
+            finish(false);
+            return;
+          }
+        }
+
         let frame = document.getElementById('sx-isolated-signer-frame') as HTMLIFrameElement | null;
 
         if (!frame) {
           frame = document.createElement('iframe');
           frame.id = 'sx-isolated-signer-frame';
-          frame.src = `${origin}/index.html`;
+          frame.src = `${origin}/`;
           frame.style.display = 'none';
           frame.setAttribute('aria-hidden', 'true');
           frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');

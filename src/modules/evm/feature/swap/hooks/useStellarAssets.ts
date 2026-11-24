@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { isSoroswapTestnetSupported } from '../../../../stellar/service/soroswapService';
 import { getGlobalAssetMetadata } from '../../../utils/Chainregistry';
@@ -51,6 +50,28 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
 
   const [stellarAssets, setStellarAssets] = useState<any[]>([]);
   const [isFetchingStellarAssets, setIsFetchingStellarAssets] = useState(false);
+
+  // Stable refs for setter callbacks — prevents them from being in useEffect deps
+  // and causing infinite re-fetch when setSellAssetSymbol etc. change identity.
+  const setSellAssetSymbolRef = useRef(setSellAssetSymbol);
+  const setSellAssetAddressRef = useRef(setSellAssetAddress);
+  const setBuyAssetSymbolRef = useRef(setBuyAssetSymbol);
+  const setBuyAssetAddressRef = useRef(setBuyAssetAddress);
+  setSellAssetSymbolRef.current = setSellAssetSymbol;
+  setSellAssetAddressRef.current = setSellAssetAddress;
+  setBuyAssetSymbolRef.current = setBuyAssetSymbol;
+  setBuyAssetAddressRef.current = setBuyAssetAddress;
+
+  // Stable refs for current asset symbols — read inside effect without being deps.
+  // This breaks the feedback loop: effect sets symbol → symbol in dep → effect re-runs → …
+  const sellAssetSymbolRef = useRef(sellAssetSymbol);
+  const sellAssetAddressRef = useRef(sellAssetAddress);
+  const buyAssetSymbolRef = useRef(buyAssetSymbol);
+  const buyAssetAddressRef = useRef(buyAssetAddress);
+  sellAssetSymbolRef.current = sellAssetSymbol;
+  sellAssetAddressRef.current = sellAssetAddress;
+  buyAssetSymbolRef.current = buyAssetSymbol;
+  buyAssetAddressRef.current = buyAssetAddress;
 
   useEffect(() => {
     if (
@@ -116,15 +137,21 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
           setStellarAssets(finalMapped);
 
           // Default asset selection for Stellar-to-Stellar swaps
+          // Read current values via refs to avoid adding them to deps (would cause infinite loop)
           if (actionType === 'SWAP' && isStellar(fromChainId)) {
-            const currentSellInStellar = sellAssetAddress
-              ? finalMapped.find((t: any) => matchesAddress(t, sellAssetAddress))
-              : finalMapped.find((t: any) => t.symbol === sellAssetSymbol);
-            const currentBuyInStellar = buyAssetAddress
-              ? finalMapped.find((t: any) => matchesAddress(t, buyAssetAddress))
-              : finalMapped.find((t: any) => t.symbol === buyAssetSymbol);
+            const currentSellSymbol = sellAssetSymbolRef.current;
+            const currentSellAddress = sellAssetAddressRef.current;
+            const currentBuySymbol = buyAssetSymbolRef.current;
+            const currentBuyAddress = buyAssetAddressRef.current;
 
-            let finalSellSymbol = sellAssetSymbol;
+            const currentSellInStellar = currentSellAddress
+              ? finalMapped.find((t: any) => matchesAddress(t, currentSellAddress))
+              : finalMapped.find((t: any) => t.symbol === currentSellSymbol);
+            const currentBuyInStellar = currentBuyAddress
+              ? finalMapped.find((t: any) => matchesAddress(t, currentBuyAddress))
+              : finalMapped.find((t: any) => t.symbol === currentBuySymbol);
+
+            let finalSellSymbol = currentSellSymbol;
 
             if (!currentSellInStellar && finalMapped.length > 0) {
               const defaultSell = isTestnetSwap
@@ -133,13 +160,13 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
               const effAddr = defaultSell.isNative
                 ? 'native'
                 : defaultSell.contract || defaultSell.address || defaultSell.issuer || '';
-              setSellAssetSymbol(defaultSell.symbol);
-              setSellAssetAddress(effAddr);
+              setSellAssetSymbolRef.current(defaultSell.symbol);
+              setSellAssetAddressRef.current(effAddr);
               finalSellSymbol = defaultSell.symbol;
             }
 
             if (
-              (!currentBuyInStellar || finalSellSymbol === buyAssetSymbol) &&
+              (!currentBuyInStellar || finalSellSymbol === currentBuySymbol) &&
               finalMapped.length > 1
             ) {
               const defaultBuy = isTestnetSwap
@@ -153,8 +180,8 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
                 const effAddr = defaultBuy.isNative
                   ? 'native'
                   : defaultBuy.contract || defaultBuy.address || defaultBuy.issuer || '';
-                setBuyAssetSymbol(defaultBuy.symbol);
-                setBuyAssetAddress(effAddr);
+                setBuyAssetSymbolRef.current(defaultBuy.symbol);
+                setBuyAssetAddressRef.current(effAddr);
               }
             }
           }
@@ -172,18 +199,13 @@ export function useStellarAssets(params: UseStellarAssetsParams): UseStellarAsse
     toChainId,
     stellarAddress,
     ammService,
-    sellAssetSymbol,
-    sellAssetAddress,
-    buyAssetSymbol,
-    buyAssetAddress,
+    // NOTE: sellAssetSymbol/buyAssetSymbol intentionally NOT in deps — they are read
+    // via refs above to prevent the set→re-trigger→set infinite loop.
+    // Only structural/identity deps that should genuinely re-fetch data go here:
     actionType,
     isStellarAccountActive,
     bridgeTxStatus,
     trustlineRefreshNonce,
-    setSellAssetSymbol,
-    setSellAssetAddress,
-    setBuyAssetSymbol,
-    setBuyAssetAddress,
   ]);
 
   return { stellarAssets, isFetchingStellarAssets };

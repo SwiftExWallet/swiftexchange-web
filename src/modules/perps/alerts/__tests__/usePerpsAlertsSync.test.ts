@@ -18,6 +18,7 @@ describe('usePerpsAlertsSync', () => {
     vi.spyOn(alertsApi, 'getHealth').mockResolvedValue({ ok: true });
     useExchangeManager.setState({ currentExchange: 'aster' });
     useWalletStore.setState({
+      network: 'mainnet',
       connectedWallets: {
         evm: { address: mockWallet } as any,
       },
@@ -50,6 +51,36 @@ describe('usePerpsAlertsSync', () => {
 
     const { result } = renderHook(() => usePerpsAlertsSync());
     expect(result.current.isSwiftExConnected).toBe(false);
+
+    await act(async () => {
+      await result.current.syncSnapshot(true);
+    });
+
+    expect(postSnapshotSpy).not.toHaveBeenCalled();
+  });
+
+  it('bypasses API sync on testnet even when connected via SwiftEx app', async () => {
+    const postSnapshotSpy = vi.spyOn(alertsApi, 'postSnapshot').mockResolvedValue({ ok: true });
+
+    useWalletStore.setState({
+      network: 'testnet',
+      connectedWallets: {
+        evm: { address: mockWallet } as any,
+      },
+      session: {
+        peer: {
+          metadata: {
+            name: 'SwiftEx Mobile',
+            userDevice: {
+              fcmToken: mockFcmToken,
+              model: 'iPhone 15 Pro',
+            },
+          },
+        },
+      } as any,
+    });
+
+    const { result } = renderHook(() => usePerpsAlertsSync());
 
     await act(async () => {
       await result.current.syncSnapshot(true);
