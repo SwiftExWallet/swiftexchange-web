@@ -3,7 +3,6 @@ import { getAddress, isAddress } from 'ethers';
 
 import { asterHttpClient } from '../client/asterHttpClient';
 import {
-  ASTER_CHAIN_ID,
   ASTER_ENDPOINTS,
   getAsterBapiUrl,
   getAsterRestUrl,
@@ -532,29 +531,31 @@ export async function submitWithdraw(
   const baseUrl = params.accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
   const serverTime = await getSyncedServerTime(baseUrl);
 
-  const corePayload: Record<string, string> = {
+  const allParams: Record<string, string> = {
     user: checksummedUser,
     signer: checksummedUser,
     chainId: String(params.chainId),
+    signatureChainId: String(params.chainId),
     asset: params.asset,
     amount: params.amount,
     fee: params.fee,
     receiver: checksummedReceiver,
     userNonce: params.userNonce,
+    userSignature: params.userSignature,
     nonce: params.userNonce,
+    timestamp: String(serverTime),
+    recvWindow: '5000',
   };
 
-  const sortedCoreQs = buildSortedQueryString(corePayload);
-  const msgToSign = `${sortedCoreQs}&userSignature=${params.userSignature}`;
-
-  const requestTypedData = buildTypedData(msgToSign, ASTER_CHAIN_ID);
+  const sortedQs = buildSortedQueryString(allParams);
+  const requestTypedData = buildTypedData(sortedQs, params.chainId);
   const requestSignature = await userWalletSigner.signTypedData(
     requestTypedData.domain,
     EIP712_TYPES,
     requestTypedData.message
   );
 
-  const finalBody = `${msgToSign}&signature=${requestSignature}&timestamp=${serverTime}&recvWindow=5000`;
+  const finalBody = `${sortedQs}&signature=${requestSignature}`;
 
   const data = await asterHttpClient.request<{ success: boolean; id?: string; msg?: string }>(
     `${baseUrl}${ASTER_ENDPOINTS.ASTER_USER_WITHDRAW}`,
