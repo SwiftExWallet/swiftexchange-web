@@ -2,6 +2,8 @@ import { Check, ChevronDown, Copy, KeyRound, Loader2, Plus, ShieldOff, X } from 
 import React, { useRef, useState } from 'react';
 
 import { useAsterAgent } from '../../perps/adapters/aster/hooks/useAsterAgent';
+import { useHyperliquidAgent } from '../../perps/adapters/hyperliquid/hooks/useHyperliquidAgent';
+import { useExchangeManager } from '../../perps/core/ExchangeManager';
 import { EVM_WALLETS, STELLAR_WALLETS, WalletType } from '../constants/Wallet';
 import { useWalletConnect } from '../hooks/useWalletConnect';
 
@@ -20,7 +22,10 @@ function getWalletIcon(walletId: string, type: string, peerIcon?: string): strin
 
 export const ConnectWalletButton: React.FC = () => {
   const { connectedWallets, openModal, disconnect, disconnectAll } = useWalletConnect();
+  const currentExchange = useExchangeManager(s => s.currentExchange);
   const asterAgent = useAsterAgent();
+  const hyperliquidAgent = useHyperliquidAgent();
+  const activeAgent = currentExchange === 'hyperliquid' ? hyperliquidAgent : asterAgent;
   const [showDropdown, setShowDropdown] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [disconnectHint, setDisconnectHint] = useState<string | null>(null);
@@ -272,12 +277,13 @@ export const ConnectWalletButton: React.FC = () => {
                       style={{ color: 'var(--color-text-primary)' }}
                       className="text-xs font-semibold"
                     >
-                      1-Click Trading Session
+                      1-Click Trading ({currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}
+                      )
                     </span>
                   </div>
-                  {asterAgent.isReady ? (
+                  {activeAgent.isReady ? (
                     <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      Active (30d)
+                      {currentExchange === 'hyperliquid' ? 'Active' : 'Active (30d)'}
                     </span>
                   ) : (
                     <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">
@@ -286,29 +292,34 @@ export const ConnectWalletButton: React.FC = () => {
                   )}
                 </div>
 
-                {asterAgent.isReady ? (
+                {activeAgent.isReady ? (
                   <div className="flex items-center justify-between pt-0.5">
                     <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                      {asterAgent.timeRemaining ? (
+                      {currentExchange === 'aster' && asterAgent.timeRemaining ? (
                         <span>Expires in {asterAgent.timeRemaining}</span>
+                      ) : currentExchange === 'hyperliquid' ? (
+                        <span>Agent Key Active</span>
                       ) : (
                         <span>30-day validity</span>
                       )}
                     </div>
                     <button
                       type="button"
-                      disabled={asterAgent.isRevoking}
+                      disabled={activeAgent.isRevoking}
                       onClick={async () => {
                         setRevokeError(null);
                         try {
-                          await asterAgent.revokeSession();
+                          await activeAgent.revokeSession();
                         } catch (err: any) {
-                          setRevokeError(err?.message || 'Failed to revoke session on Aster');
+                          setRevokeError(
+                            err?.message ||
+                              `Failed to revoke session on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`
+                          );
                         }
                       }}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-all cursor-pointer disabled:opacity-50"
                     >
-                      {asterAgent.isRevoking ? (
+                      {activeAgent.isRevoking ? (
                         <>
                           <Loader2 className="w-3 h-3 animate-spin" />
                           <span>Revoking...</span>
@@ -333,7 +344,7 @@ export const ConnectWalletButton: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => {
-                        asterAgent.emergencyPurgeSession();
+                        activeAgent.emergencyPurgeSession();
                         setRevokeError(null);
                       }}
                       className="underline flex-shrink-0 cursor-pointer hover:text-rose-300"

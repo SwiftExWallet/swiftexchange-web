@@ -3,14 +3,17 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { Wallet } from 'ethers';
 import { create } from 'zustand';
 
+import { useNotificationStore } from '../../../../../store/notificationStore';
 import {
   HyperliquidIsolatedSigner,
   deriveHyperliquidAgentKey,
+  emergencyPurgeLocalAgent,
   encryptAndStoreAgentKey,
   getStoredAgentAddress,
   hasStoredAgentKey,
   purgeAgentKey,
   restoreAgentWallet,
+  revokeHyperliquidAgentKey,
 } from '../../../../walletconnect/services/hyperliquidAgentKeyManager';
 import { walletService } from '../../../../walletconnect/services/walletService';
 import { useWalletStore } from '../../../../walletconnect/store/walletConnectStore';
@@ -24,6 +27,7 @@ interface HyperliquidAgentStoreState {
   deriveState: DeriveState;
   error: Error | null;
   isRestoring: boolean;
+  isRevoking: boolean;
   setHyperliquidSigner: (
     signer: HyperliquidIsolatedSigner | Wallet | null,
     address?: string | null
@@ -33,6 +37,8 @@ interface HyperliquidAgentStoreState {
   deriveAgentKey: (
     userAddr: string
   ) => Promise<{ agentAddress: string; wallet: HyperliquidIsolatedSigner | Wallet }>;
+  revokeSession: () => Promise<void>;
+  emergencyPurgeSession: () => Promise<void>;
   restoreKey: () => Promise<HyperliquidIsolatedSigner | Wallet | null>;
   purge: () => void;
 }
@@ -47,6 +53,7 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
   deriveState: 'idle',
   error: null,
   isRestoring: false,
+  isRevoking: false,
 
   setHyperliquidSigner: (signer, address) =>
     set({
@@ -57,6 +64,60 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
 
   setDeriveState: deriveState => set({ deriveState }),
   setError: error => set({ error }),
+
+  revokeSession: async () => {
+    const userAddr = useWalletStore.getState().connectedWallets.evm?.address;
+    if (!userAddr) throw new Error('EVM wallet not connected');
+    if (get().isRevoking) return;
+
+    set({ isRevoking: true, error: null });
+    try {
+      const provider =
+        walletService.getProvider('evm') ||
+        (typeof window !== 'undefined' ? (window as any).ethereum : null);
+      if (!provider) throw new Error('EVM provider not available');
+
+      const isTestnet = useWalletStore.getState().network === 'testnet';
+      await revokeHyperliquidAgentKey(userAddr, provider, isTestnet);
+
+      set({
+        hyperliquidSigner: null,
+        agentAddress: null,
+        deriveState: 'idle',
+        isRevoking: false,
+        error: null,
+      });
+
+      useNotificationStore.getState().showToast({
+        type: 'SYSTEM',
+        title: 'Session Revoked',
+        message: 'Hyperliquid 1-click session has been revoked and purged.',
+        status: 'success',
+      });
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      set({ error: err, isRevoking: false });
+      throw err;
+    }
+  },
+
+  emergencyPurgeSession: async () => {
+    const isTestnet = useWalletStore.getState().network === 'testnet';
+    await emergencyPurgeLocalAgent(isTestnet);
+    set({
+      hyperliquidSigner: null,
+      agentAddress: null,
+      deriveState: 'idle',
+      isRevoking: false,
+      error: null,
+    });
+    useNotificationStore.getState().showToast({
+      type: 'SYSTEM',
+      title: 'Session Purged',
+      message: 'Local Hyperliquid trading session has been purged.',
+      status: 'info',
+    });
+  },
 
   restoreKey: async () => {
     const isTestnet = useWalletStore.getState().network === 'testnet';
@@ -171,6 +232,7 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
       deriveState: 'idle',
       error: null,
       isRestoring: false,
+      isRevoking: false,
     });
   },
 }));
@@ -182,6 +244,9 @@ export interface UseHyperliquidAgentResult {
   deriveState: DeriveState;
   error: Error | null;
   deriveAgentKey: () => Promise<void>;
+  revokeSession: () => Promise<void>;
+  emergencyPurgeSession: () => void;
+  isRevoking: boolean;
   purge: () => void;
   isReady: boolean;
 }
@@ -197,9 +262,12 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
   const agentAddress = useHyperliquidAgentStore(s => s.agentAddress);
   const deriveState = useHyperliquidAgentStore(s => s.deriveState);
   const error = useHyperliquidAgentStore(s => s.error);
+  const isRevoking = useHyperliquidAgentStore(s => s.isRevoking);
 
   const restoreKey = useHyperliquidAgentStore(s => s.restoreKey);
   const deriveAgentKeyStore = useHyperliquidAgentStore(s => s.deriveAgentKey);
+  const revokeSessionStore = useHyperliquidAgentStore(s => s.revokeSession);
+  const emergencyPurgeSessionStore = useHyperliquidAgentStore(s => s.emergencyPurgeSession);
   const purgeStore = useHyperliquidAgentStore(s => s.purge);
 
   const lastRestoredKeyRef = useRef<string | null>(null);
@@ -246,6 +314,9 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
     deriveState,
     error,
     deriveAgentKey,
+    revokeSession: revokeSessionStore,
+    emergencyPurgeSession: emergencyPurgeSessionStore,
+    isRevoking,
     purge: purgeStore,
     isReady,
   };

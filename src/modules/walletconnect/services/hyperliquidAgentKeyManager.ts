@@ -329,3 +329,35 @@ export async function purgeAgentKeyAndAes(isTestnet?: boolean): Promise<void> {
   purgeAgentKey(isTestnet);
   await destroyAESKey(HL_AES_KEY_ID);
 }
+
+export async function revokeHyperliquidAgentKey(
+  evmAddress: string,
+  provider: any,
+  isTestnet?: boolean
+): Promise<void> {
+  const activeTestnet =
+    isTestnet !== undefined ? isTestnet : useWalletStore.getState().network === 'testnet';
+  const transport = new HttpTransport({ isTestnet: activeTestnet });
+
+  let userApprovedSignature = false;
+  try {
+    const browserProvider = new BrowserProvider(provider);
+    const signer = await browserProvider.getSigner(evmAddress);
+    await approveAgent(
+      { transport, wallet: signer },
+      { agentAddress: '0x0000000000000000000000000000000000000000', agentName: '' }
+    );
+    userApprovedSignature = true;
+  } catch (err: any) {
+    console.warn('[hyperliquid] agent revocation error:', err);
+    throw err;
+  } finally {
+    if (userApprovedSignature) {
+      await purgeAgentKeyAndAes(activeTestnet);
+    }
+  }
+}
+
+export async function emergencyPurgeLocalAgent(isTestnet?: boolean): Promise<void> {
+  await purgeAgentKeyAndAes(isTestnet);
+}

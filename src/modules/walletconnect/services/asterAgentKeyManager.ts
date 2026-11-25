@@ -155,8 +155,9 @@ function getAsterAgentDomain(chainId: number) {
 
 const DEL_AGENT_TYPES = {
   DelAgent: [
-    { name: 'User', type: 'string' },
     { name: 'AgentAddress', type: 'string' },
+    { name: 'AsterChain', type: 'string' },
+    { name: 'User', type: 'string' },
     { name: 'Nonce', type: 'uint256' },
   ],
 };
@@ -165,7 +166,8 @@ function buildDelAgentData(
   evmAddress: string,
   agentAddress: string,
   nonce: number,
-  chainId: number
+  asterChain: string,
+  chainId: number = 56
 ) {
   return {
     domain: getAsterAgentDomain(chainId),
@@ -180,8 +182,9 @@ function buildDelAgentData(
       ...DEL_AGENT_TYPES,
     },
     message: {
-      User: getAddress(evmAddress),
       AgentAddress: getAddress(agentAddress),
+      AsterChain: asterChain,
+      User: getAddress(evmAddress),
       Nonce: nonce,
     },
   };
@@ -322,27 +325,24 @@ export async function submitApproveAgent(params: SubmitApproveAgentParams): Prom
 export async function submitDeleteAgent(params: {
   user: string;
   agentAddress: string;
-  nonce: string;
+  asterChain: string;
+  nonce: string | number;
   signature: string;
+  signatureChainId?: number;
   network?: 'mainnet' | 'testnet';
-}) {
+}): Promise<void> {
   const isTestnet = params.network === 'testnet';
   const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
-  const timeRes = await fetch(`${baseUrl}/fapi/v1/time`).catch(() => null);
-  const timeData = await timeRes?.json().catch(() => null);
-  const timestamp = timeData?.serverTime || Date.now();
+  const queryParams = new URLSearchParams({
+    agentAddress: getAddress(params.agentAddress),
+    asterChain: params.asterChain,
+    user: getAddress(params.user),
+    nonce: String(params.nonce),
+    signature: params.signature,
+    signatureChainId: String(params.signatureChainId ?? 56),
+  });
 
-  const rawParams = [
-    `user=${getAddress(params.user)}`,
-    `agentAddress=${getAddress(params.agentAddress)}`,
-    `nonce=${params.nonce}`,
-    `timestamp=${timestamp}`,
-    `recvWindow=5000`,
-    `signature=${params.signature}`,
-  ];
-
-  const queryString = rawParams.join('&');
-  const url = `${baseUrl}/fapi/v3/agent?${queryString}`;
+  const url = `${baseUrl}/fapi/v3/agent?${queryParams.toString()}`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -351,7 +351,10 @@ export async function submitDeleteAgent(params: {
   try {
     res = await fetch(url, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'NodeApp/1.0',
+      },
       signal: controller.signal,
     });
   } catch (error: any) {
@@ -687,7 +690,8 @@ export async function revokeAsterAgentKey(
 ): Promise<void> {
   const currentNetwork = resolveNetwork(network) as NetworkType;
   const isTestnet = currentNetwork === 'testnet';
-  const chainId = await resolveAndEnsureAsterChain(provider, isTestnet);
+  const asterChain = isTestnet ? 'Testnet' : 'Mainnet';
+  const signatureChainId = 56;
 
   const agentAddress = getStoredAgentAddress(currentNetwork);
   if (!agentAddress || agentAddress === ZERO_ADDRESS) {
@@ -695,10 +699,15 @@ export async function revokeAsterAgentKey(
     return;
   }
 
-  const baseUrl = isTestnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
-  const serverTime = await getSyncedServerTime(baseUrl);
-  const nonce = generateMonotonicNonce(serverTime);
-  const typedData = buildDelAgentData(evmAddress, agentAddress, Number(nonce), chainId);
+  const nowMs = Math.floor(Date.now() / 1000);
+  const nonce = nowMs * 1000000;
+  const typedData = buildDelAgentData(
+    evmAddress,
+    agentAddress,
+    nonce,
+    asterChain,
+    signatureChainId
+  );
 
   let userApprovedSignature = false;
   try {
@@ -710,8 +719,10 @@ export async function revokeAsterAgentKey(
       await submitDeleteAgent({
         user: evmAddress,
         agentAddress,
-        nonce: nonce.toString(),
+        asterChain,
+        nonce,
         signature,
+        signatureChainId,
         network: currentNetwork,
       });
     } catch (err: any) {
