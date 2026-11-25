@@ -9,13 +9,13 @@ interface TabEmptyStateProps {
 
 export const TabEmptyState: React.FC<TabEmptyStateProps> = ({ icon: Icon, title, description }) => {
   return (
-    <div className="flex flex-col items-center justify-center py-10 px-4 text-center select-none w-full">
+    <div className="flex flex-col items-center justify-center py-10 px-4 text-center select-none w-full bg-secondary">
       <div className="w-10 h-10 rounded-full bg-tertiary/60 border border-color flex items-center justify-center text-muted mb-2">
         <Icon size={18} className="text-secondary opacity-80" />
       </div>
-      <span className="text-xs font-semibold text-primary">{title}</span>
+      <span className="text-xs font-semibold text-text-primary">{title}</span>
       {description && (
-        <span className="text-[11px] text-muted mt-0.5 max-w-xs leading-relaxed">
+        <span className="text-[11px] text-text-muted mt-0.5 max-w-xs leading-relaxed">
           {description}
         </span>
       )}

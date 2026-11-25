@@ -96,13 +96,15 @@ const PositionRow = memo(
         setCloseModalOpen(false);
         if (res && res.fullyClosed === false && res.remainingSize > 0) {
           useNotificationStore.getState().showToast({
-            type: 'warning',
+            type: 'SYSTEM',
+            status: 'warning',
             title: 'Partially Closed',
             message: `Filled market liquidity. Remaining size: ${res.remainingSize} ${position.symbol.replace('-', '')}`,
           });
         } else {
           useNotificationStore.getState().showToast({
-            type: 'success',
+            type: 'SYSTEM',
+            status: 'success',
             title: 'Position Closed',
             message: `Closed ${position.symbol.replace('-', '')} position successfully`,
           });
@@ -111,7 +113,8 @@ const PositionRow = memo(
         console.error('Failed to close position:', err);
         const errMsg = err?.message || 'Failed to close position';
         useNotificationStore.getState().showToast({
-          type: 'error',
+          type: 'SYSTEM',
+          status: 'error',
           title: 'Close Position Failed',
           message: errMsg,
         });
@@ -129,7 +132,8 @@ const PositionRow = memo(
         await reversePosition(position.symbol, position.size, isLong, curPx);
         setReverseModalOpen(false);
         useNotificationStore.getState().showToast({
-          type: 'success',
+          type: 'SYSTEM',
+          status: 'success',
           title: 'Position Reversed',
           message: `Reversed ${position.symbol.replace('-', '')} position successfully`,
         });
@@ -137,7 +141,8 @@ const PositionRow = memo(
         console.error('Failed to reverse position:', err);
         const errMsg = err?.message || 'Failed to reverse position';
         useNotificationStore.getState().showToast({
-          type: 'error',
+          type: 'SYSTEM',
+          status: 'error',
           title: 'Reverse Position Failed',
           message: errMsg,
         });
@@ -508,7 +513,8 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
       await closeAllPositions(positionList);
       setCloseAllModalOpen(false);
       useNotificationStore.getState().showToast({
-        type: 'success',
+        type: 'SYSTEM',
+        status: 'success',
         title: 'All Positions Closed',
         message: 'All open positions were closed successfully',
       });
@@ -516,7 +522,8 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
       console.error('Failed to close all positions:', err);
       const errMsg = err?.message || 'Failed to close all positions';
       useNotificationStore.getState().showToast({
-        type: 'error',
+        type: 'SYSTEM',
+        status: 'error',
         title: 'Close All Positions Failed',
         message: errMsg,
       });
@@ -527,16 +534,18 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
 
   if (positionList.length === 0) {
     return (
-      <TabEmptyState
-        icon={Layers}
-        title="No open positions"
-        description="You currently have no open positions."
-      />
+      <div className="w-full h-full flex flex-col justify-between bg-secondary">
+        <TabEmptyState
+          icon={Layers}
+          title="No open positions"
+          description="You currently have no open positions."
+        />
+      </div>
     );
   }
 
   return (
-    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none">
+    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none bg-secondary">
       <table className="w-full text-[11px] text-left whitespace-nowrap">
         <thead className="text-secondary border-b border-color sticky top-0 bg-secondary z-10">
           <tr>

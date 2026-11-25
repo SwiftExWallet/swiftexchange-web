@@ -166,16 +166,18 @@ export const OpenOrdersTab: React.FC<Props> = ({ hideOtherSymbols, currentSymbol
 
   if (displayOrders.length === 0) {
     return (
-      <TabEmptyState
-        icon={Clock}
-        title="No open orders"
-        description="Your active limit and trigger orders will appear here."
-      />
+      <div className="w-full h-full flex flex-col justify-between bg-secondary">
+        <TabEmptyState
+          icon={Clock}
+          title="No open orders"
+          description="Your active limit and trigger orders will appear here."
+        />
+      </div>
     );
   }
 
   return (
-    <div className="w-full h-full overflow-x-auto overflow-y-auto">
+    <div className="w-full h-full overflow-x-auto overflow-y-auto bg-secondary">
       <div className="md:hidden space-y-2 p-2">
         {displayOrders.length > 0 && (
           <div className="flex items-center justify-between pb-1 px-1">

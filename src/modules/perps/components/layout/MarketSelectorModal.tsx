@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useExchangeManager } from '../../core/ExchangeManager';
 import type { Market } from '../../core/models';
 import { useLeverageStore } from '../../core/stores/leverageStore';
 import { marketStore, useMarketStore } from '../../core/stores/marketStore';
@@ -13,6 +14,8 @@ interface MarketSelectorModalProps {
 }
 
 export const MarketSelectorModal: React.FC<MarketSelectorModalProps> = ({ isOpen, onClose }) => {
+  const currentExchange = useExchangeManager(state => state.currentExchange);
+  const setExchange = useExchangeManager(state => state.setExchange);
   const marketMap = useMarketStore(state => state.markets);
   const markets = useMemo(() => Object.values(marketMap), [marketMap]);
   const assetCtxByMarket = useTickerStore(state => state.assetCtxByMarket);
@@ -70,9 +73,8 @@ export const MarketSelectorModal: React.FC<MarketSelectorModalProps> = ({ isOpen
           {/* Mobile Drag Pill */}
           <div className="w-10 h-1 rounded-full bg-tertiary mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
 
-          {/* Search */}
-          <div className="p-3 sm:p-4 border-b border-color">
-            <div className="relative">
+          <div className="p-3 sm:p-4 border-b border-color flex items-center gap-2">
+            <div className="relative flex-1 min-w-0">
               <svg
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"
                 xmlns="http://www.w3.org/2000/svg"
@@ -96,6 +98,45 @@ export const MarketSelectorModal: React.FC<MarketSelectorModalProps> = ({ isOpen
                 onChange={e => setSearch(e.target.value)}
                 autoFocus
               />
+            </div>
+
+            <div className="flex items-center gap-1 p-1 bg-tertiary rounded-xl border border-color shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentExchange !== 'aster') setExchange('aster');
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none ${
+                  currentExchange === 'aster'
+                    ? 'bg-hover text-primary shadow-xs border border-white/[0.08]'
+                    : 'text-muted hover:text-primary'
+                }`}
+              >
+                <img
+                  src="/aster.png"
+                  alt="Aster"
+                  className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
+                />
+                <span className="hidden sm:inline">Aster</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentExchange !== 'hyperliquid') setExchange('hyperliquid');
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none ${
+                  currentExchange === 'hyperliquid'
+                    ? 'bg-hover text-primary shadow-xs border border-white/[0.08]'
+                    : 'text-muted hover:text-primary'
+                }`}
+              >
+                <img
+                  src="/hyperliquid.webp"
+                  alt="Hyperliquid"
+                  className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
+                />
+                <span className="hidden sm:inline">Hyperliquid</span>
+              </button>
             </div>
           </div>
 

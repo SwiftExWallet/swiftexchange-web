@@ -106,7 +106,7 @@ export const FundingHistoryTab: React.FC<Props> = ({
 
   if (filteredRecords.length === 0) {
     return (
-      <div className="w-full h-full flex flex-col justify-between">
+      <div className="w-full h-full flex flex-col justify-between bg-secondary">
         <TabEmptyState
           icon={DollarSign}
           title="No funding history"

@@ -148,7 +148,7 @@ export const TradeHistoryTab: React.FC<Props> = ({
 
   if (filteredTrades.length === 0) {
     return (
-      <div className="w-full h-full flex flex-col justify-between">
+      <div className="w-full h-full flex flex-col justify-between bg-secondary">
         <TabEmptyState
           icon={ArrowUpDown}
           title="No trade history"
