@@ -596,6 +596,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     },
 
     disconnect: async type => {
+      get().cancelAuthentication();
       set({ isDisconnecting: true, isAuthenticating: false, authError: null });
       const disconnectedWallet = get().connectedWallets[type];
       const disconnectedAddress = disconnectedWallet?.address;
@@ -672,6 +673,9 @@ export const useWalletStore = create<WalletState & WalletActions>()(
         }
         set(state => ({
           linkedChains: state.linkedChains.filter(c => c !== type),
+          ...(Object.keys(remainingWallets).length === 0
+            ? { isAuthenticated: false, authenticatedChain: null, authError: null }
+            : {}),
         }));
       }
 
@@ -688,6 +692,7 @@ export const useWalletStore = create<WalletState & WalletActions>()(
     },
 
     disconnectAll: async () => {
+      get().cancelAuthentication();
       set({ isDisconnecting: true, isAuthenticating: false, authError: null });
       try {
         await walletService.disconnectAll();

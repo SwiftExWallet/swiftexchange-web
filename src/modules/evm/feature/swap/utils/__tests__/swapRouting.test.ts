@@ -87,13 +87,28 @@ describe('Task 2 & 3: selectProvider - Pure Routing Rules', () => {
     expect(testnetStellarToEvm).toBe('near_intent');
   });
 
-  // Rule 5: Everything else -> 'unsupported' (Never fallback)
-  it('Rule 5: defaults to "unsupported" for non-EVM<->Stellar pairs and missing chains', () => {
-    // Stellar to Stellar
+  // Rule 5: Stellar -> Stellar same chain -> stellar native swap
+  it('Rule 5: selects "stellar" for Stellar same-chain swaps', () => {
+    const pubnetSwap = selectProvider({
+      fromChain: 'pubnet',
+      toChain: 'pubnet',
+    });
+    expect(pubnetSwap).toBe('stellar');
+
+    const testnetSwap = selectProvider({
+      fromChain: 'testnet',
+      toChain: 'testnet',
+    });
+    expect(testnetSwap).toBe('stellar');
+  });
+
+  // Rule 6: Everything else -> 'unsupported' (Never fallback)
+  it('Rule 6: defaults to "unsupported" for non-EVM<->Stellar pairs and missing chains', () => {
+    // Stellar cross-network (e.g. pubnet to testnet)
     expect(
       selectProvider({
         fromChain: 'pubnet',
-        toChain: 'pubnet',
+        toChain: 'testnet',
       })
     ).toBe('unsupported');
 
