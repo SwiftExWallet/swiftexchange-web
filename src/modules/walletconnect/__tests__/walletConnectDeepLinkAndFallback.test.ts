@@ -45,9 +45,9 @@ describe('WalletConnect Deep Linking & Registry Verification', () => {
       expect(link).toContain(encodeURIComponent(SAMPLE_WC_URI));
     });
 
-    it('formats SwiftEx native deep link with host path', () => {
+    it('formats SwiftEx native deep link', () => {
       const link = formatWalletDeepLink('swiftex', SAMPLE_WC_URI, true);
-      expect(link.startsWith('swiftEx://app.swiftexchange.io/wc?uri=')).toBe(true);
+      expect(link.startsWith('swiftEx://wc?uri=')).toBe(true);
       expect(link).toContain(encodeURIComponent(SAMPLE_WC_URI));
     });
 
