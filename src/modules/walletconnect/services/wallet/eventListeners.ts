@@ -92,6 +92,12 @@ export function setupWalletConnectListeners(
     }
   );
 
+  // UniversalProvider emits 'chainChanged' directly (not via 'session_event')
+  // when setDefaultChain() or local wallet_switchEthereumChain runs.
+  provider.on('chainChanged', (chainId: string | number) => {
+    handleChainChanged(ctx, 'evm', chainId);
+  });
+
   provider.on('session_update', ({ params }: { topic: string; params: any }) => {
     if (params?.namespaces) {
       getBoundTypes().forEach(t => handleSessionUpdate(ctx, t, params.namespaces));
