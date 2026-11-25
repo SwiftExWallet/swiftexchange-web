@@ -8,6 +8,7 @@ import {
   handleAccountsChanged,
   handleChainChanged,
   handleSessionUpdate,
+  setupWalletConnectListeners,
 } from '../services/wallet/eventListeners';
 import { connectChainWallet } from '../services/wallet/evmConnect';
 import {
@@ -433,6 +434,25 @@ describe('Unified Multi-Chain & EVM Request Verification', () => {
       });
 
       handleChainChanged(ctx, 'evm', '0x89');
+
+      expect(ctx.sessions.get('evm')?.evmChainId).toBe(137);
+      expect(emittedStates).toContainEqual({ type: 'evm', state: 'connected' });
+    });
+
+    it('updates session chainId when UniversalProvider emits direct chainChanged event', () => {
+      const { ctx, emittedStates } = createMockWalletServiceContext();
+      const mockProvider = createMockUniversalProvider();
+      ctx.sessions.set('evm', {
+        type: 'evm',
+        walletId: 'swiftex',
+        evmAddress: '0xUser',
+        evmChainId: 1,
+        connectionMode: 'unified',
+      });
+      ctx.providers.set('evm', mockProvider);
+
+      setupWalletConnectListeners(ctx, mockProvider, 'evm');
+      mockProvider.emit('chainChanged', '137');
 
       expect(ctx.sessions.get('evm')?.evmChainId).toBe(137);
       expect(emittedStates).toContainEqual({ type: 'evm', state: 'connected' });
