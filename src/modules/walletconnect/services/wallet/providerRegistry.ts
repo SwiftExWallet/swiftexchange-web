@@ -492,6 +492,8 @@ const CHAIN_APPROVAL_METHODS = [
 
 export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): void {
   if (!provider) return;
+  let signRequestSeq = 0;
+  const activeSignSeq = new Map<WalletType, number>();
 
   const wrapMethod = (target: any) => {
     if (!target || typeof target.request !== 'function' || target.request.__isWrapped) return;
@@ -609,6 +611,8 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           error.code = -32002;
           throw error;
         }
+        const mySeq = ++signRequestSeq;
+        activeSignSeq.set(signingType, mySeq);
         ctx.isSignRequestInFlight.set(signingType, true);
 
         try {
@@ -683,7 +687,9 @@ export function wrapProviderRequests(ctx: WalletServiceContext, provider: any): 
           if (provider?.client) {
             provider.client.__parentCalling = false;
           }
-          ctx.isSignRequestInFlight.set(signingType, false);
+          if (activeSignSeq.get(signingType) === mySeq) {
+            ctx.isSignRequestInFlight.set(signingType, false);
+          }
         }
       }
 

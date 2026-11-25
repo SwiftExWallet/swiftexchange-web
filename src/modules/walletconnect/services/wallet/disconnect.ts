@@ -31,6 +31,7 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
   if (provider) {
     ctx.registeredProviders.delete(provider);
     removeEVMListeners(provider);
+    provider.removeAllListeners?.();
 
     if (provider.session) {
       try {
@@ -83,6 +84,7 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
   const providers = new Set(ctx.providers.values());
   for (const provider of providers) {
     removeEVMListeners(provider);
+    provider?.removeAllListeners?.();
     if (provider?.session) {
       try {
         await provider.disconnect();
@@ -158,7 +160,10 @@ export async function clearAppData(): Promise<void> {
   try {
     if (typeof indexedDB !== 'undefined') {
       indexedDB.deleteDatabase('_sx_v4_kv_28f3');
-      indexedDB.deleteDatabase('WALLET_CONNECT_V2_INDEXED_DB'); // WC v2 IndexedDB
+      // Do NOT delete WALLET_CONNECT_V2_INDEXED_DB here: open Core/IDB handles from
+      // the current page session block deleteDatabase() and corrupt subsequent
+      // WalletConnect reconnects until a full page refresh. provider.disconnect()
+      // already cleans up the active WC session.
     }
   } catch (error) {
     console.error('[WalletService] Failed to clear IndexedDB:', error);
