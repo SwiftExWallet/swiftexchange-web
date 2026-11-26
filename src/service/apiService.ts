@@ -483,6 +483,11 @@ export async function fetchApiResponseFromProxy<T>(
   signal?: AbortSignal,
   chainTypeOverride?: 'evm' | 'stellar'
 ): Promise<ApiResponse<T>> {
+  const effectiveToken = getEffectiveAuthToken();
+  if (!effectiveToken) {
+    throw new Error('Authentication required: auth token not available');
+  }
+
   const targetChain = chainTypeOverride || inferChainType(endpoint, undefined, body);
   if (
     !endpoint.startsWith('/wallet') &&
@@ -615,6 +620,7 @@ export async function getWalletGasInfo(
   prefix: string,
   address: string
 ): Promise<WalletGasInfo | null> {
+  if (!getEffectiveAuthToken()) return null;
   const key = getGasKey(prefix, address);
 
   const cached = readLocalCache<WalletGasInfo>(key, GAS_TTL);

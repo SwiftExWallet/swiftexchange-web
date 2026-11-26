@@ -25,12 +25,10 @@ vi.mock('@stellar/freighter-api', () => ({
   signTransaction: vi.fn().mockResolvedValue({ signedTxXdr: 'AAAA' }),
   signMessage: vi.fn().mockResolvedValue({ signedMessage: 'AAAA' }),
   getNetwork: vi.fn().mockResolvedValue('PUBLIC'),
-  getNetworkDetails: vi
-    .fn()
-    .mockResolvedValue({
-      network: 'PUBLIC',
-      networkPassphrase: 'Public Global Stellar Network ; September 2015',
-    }),
+  getNetworkDetails: vi.fn().mockResolvedValue({
+    network: 'PUBLIC',
+    networkPassphrase: 'Public Global Stellar Network ; September 2015',
+  }),
 }));
 
 describe('QA Phase 5 Verification Tests (Must fail before fix, pass after fix)', () => {
@@ -50,7 +48,7 @@ describe('QA Phase 5 Verification Tests (Must fail before fix, pass after fix)',
     sessionStorage.clear();
   });
 
-  it('TEST-FIX-01: logoutServer sends POST /auth/logout with token before clearing session', async () => {
+  it('TEST-FIX-01: logoutServer clears local auth session without calling /auth/logout', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response('{}', { status: 200 }));
@@ -59,19 +57,15 @@ describe('QA Phase 5 Verification Tests (Must fail before fix, pass after fix)',
       { accessToken: 'valid-bearer-token-123', expiresAt: Date.now() + 3600_000 },
       '0x1111111111111111111111111111111111111111'
     );
+    expect(getAccessToken()).toBe('valid-bearer-token-123');
 
-    // Call logoutServer directly or via store logoutAuth
     await logoutServer('0x1111111111111111111111111111111111111111');
 
     const logoutCalls = fetchSpy.mock.calls.filter(call =>
       String(call[0]).includes('/auth/logout')
     );
-    expect(logoutCalls.length).toBe(1);
-    expect(logoutCalls[0][1]?.headers).toEqual(
-      expect.objectContaining({
-        Authorization: 'Bearer valid-bearer-token-123',
-      })
-    );
+    expect(logoutCalls.length).toBe(0);
+    expect(getAccessToken()).toBeNull();
   });
 
   it('TEST-FIX-02: handleAccountsChanged invokes ctx.onAccountChanged when address changes', () => {

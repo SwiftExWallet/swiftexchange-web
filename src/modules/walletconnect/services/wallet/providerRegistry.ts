@@ -396,6 +396,77 @@ async function loadUniversalProvider(): Promise<typeof UniversalProviderType> {
 
 const pendingProviderInits = new Map<string, Promise<any>>();
 
+/**
+ * Destroy a cached provider's underlying Core, relayer, subscriber, and event
+ * emitters so that no stale WebSocket lingers in memory and steals JSON-RPC
+ * responses that belong to a freshly-created provider on reconnect.
+ *
+ * Call this during disconnect — before the provider reference is dropped.
+ */
+export async function destroyProvider(provider: any): Promise<void> {
+  if (!provider) return;
+  try {
+    provider.removeAllListeners?.();
+  } catch {
+    /* ignore */
+  }
+
+  // Tear down the Core: relayer transport → subscriber → pairing → Core itself
+  const core = provider.client?.core ?? provider.core;
+  if (core) {
+    try {
+      const relayer = core.relayer;
+      if (relayer) {
+        // Unsubscribe all relay topics so the relay server stops sending us messages
+        if (relayer.subscriber) {
+          try {
+            const topics = Array.from(relayer.subscriber.subscriptions?.values?.() ?? [])
+              .map((s: any) => s?.topic)
+              .filter(Boolean);
+            for (const topic of topics) {
+              try {
+                await relayer.subscriber.unsubscribe(topic);
+              } catch {
+                /* ignore */
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        // Close the WebSocket transport
+        if (typeof relayer.transportClose === 'function') {
+          try {
+            await Promise.race([
+              relayer.transportClose(),
+              new Promise<void>(resolve => setTimeout(resolve, 2000)),
+            ]);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Also kill the sign-client event emitters
+  try {
+    provider.client?.removeAllListeners?.();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Remove a provider key from the pending-init cache so the next
+ * `getOrCreateProvider` creates a truly fresh provider + Core.
+ */
+export function clearPendingProviderInit(key: string): void {
+  pendingProviderInits.delete(key);
+}
+
 export async function getOrCreateProvider(ctx: WalletServiceContext, key: string): Promise<any> {
   const existing = ctx.providers.get(key);
   if (existing && (existing as any).__providerKey === key) {
@@ -416,9 +487,17 @@ export async function getOrCreateProvider(ctx: WalletServiceContext, key: string
           if (p === existing) ctx.providers.delete(k);
         }
       } else {
+        const relayer = existing.client?.core?.relayer;
+        if (relayer && !relayer.connected && typeof relayer.transportOpen === 'function') {
+          await relayer.transportOpen().catch(() => {});
+        }
         return existing;
       }
     } else {
+      const relayer = existing.client?.core?.relayer;
+      if (relayer && !relayer.connected && typeof relayer.transportOpen === 'function') {
+        await relayer.transportOpen().catch(() => {});
+      }
       return existing;
     }
   }

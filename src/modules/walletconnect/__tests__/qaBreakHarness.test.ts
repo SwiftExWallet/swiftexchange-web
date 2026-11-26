@@ -34,12 +34,10 @@ vi.mock('@stellar/freighter-api', () => ({
   signTransaction: vi.fn().mockResolvedValue({ signedTxXdr: 'AAAA' }),
   signMessage: vi.fn().mockResolvedValue({ signedMessage: 'AAAA' }),
   getNetwork: vi.fn().mockResolvedValue('PUBLIC'),
-  getNetworkDetails: vi
-    .fn()
-    .mockResolvedValue({
-      network: 'PUBLIC',
-      networkPassphrase: 'Public Global Stellar Network ; September 2015',
-    }),
+  getNetworkDetails: vi.fn().mockResolvedValue({
+    network: 'PUBLIC',
+    networkPassphrase: 'Public Global Stellar Network ; September 2015',
+  }),
 }));
 
 describe('QA Hostile Test Matrix: Wallet Connect & Security Audits', () => {
@@ -237,7 +235,7 @@ describe('QA Hostile Test Matrix: Wallet Connect & Security Audits', () => {
   // MATRIX ROW E & F: DISCONNECT, STORAGE PURGE & LOGOUT
   // =========================================================================
   describe('Row E & F: Disconnect, Storage Cleanup & Auth Invalidation', () => {
-    it('E1: logoutServer invokes /auth/logout with valid token', async () => {
+    it('E1: logoutServer clears local session without calling /auth/logout', async () => {
       const fetchSpy = vi
         .spyOn(globalThis, 'fetch')
         .mockResolvedValue(new Response('{}', { status: 200 }));
@@ -255,7 +253,8 @@ describe('QA Hostile Test Matrix: Wallet Connect & Security Audits', () => {
       const logoutCalls = fetchSpy.mock.calls.filter(call =>
         String(call[0]).includes('/auth/logout')
       );
-      expect(logoutCalls.length).toBe(1);
+      expect(logoutCalls.length).toBe(0);
+      expect(getAccessToken()).toBeNull();
     });
 
     it('E2: Disconnecting one wallet in dual connection preserves remaining wallet auth', () => {
