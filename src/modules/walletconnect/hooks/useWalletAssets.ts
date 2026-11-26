@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react';
 
+import { getEffectiveAuthToken } from '../../../service/apiService';
 import { type Asset, type ProviderStatus, usePortfolioStore } from '../store/portfolioStore';
 import { useWalletStore } from '../store/walletConnectStore';
 
@@ -16,7 +17,7 @@ interface UseWalletAssetsReturn {
 }
 
 export function useWalletAssets(network: string): UseWalletAssetsReturn {
-  const { connectedWallets } = useWalletStore();
+  const { connectedWallets, isAuthenticated } = useWalletStore();
 
   const storeAssets = usePortfolioStore(state => state.assets);
   const isLoading = usePortfolioStore(state => state.isLoading);
@@ -28,12 +29,16 @@ export function useWalletAssets(network: string): UseWalletAssetsReturn {
   const refreshAssets = usePortfolioStore(state => state.refreshAssets);
 
   useEffect(() => {
-    if (connectedWallets.evm || connectedWallets.stellar) {
+    const hasAuth = isAuthenticated || Boolean(getEffectiveAuthToken());
+    if (hasAuth && (connectedWallets.evm || connectedWallets.stellar)) {
       fetchAssets(connectedWallets, network);
     }
 
     const interval = setInterval(() => {
+      const hasIntervalAuth =
+        useWalletStore.getState().isAuthenticated || Boolean(getEffectiveAuthToken());
       if (
+        hasIntervalAuth &&
         document.visibilityState === 'visible' &&
         (connectedWallets.evm || connectedWallets.stellar)
       ) {
@@ -42,7 +47,7 @@ export function useWalletAssets(network: string): UseWalletAssetsReturn {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [connectedWallets, network, fetchAssets]);
+  }, [connectedWallets, isAuthenticated, network, fetchAssets]);
 
   const totalValue = useMemo(() => {
     return storeAssets.reduce((sum, a) => sum + (a.balance || 0) * (a.current_price || 0), 0);

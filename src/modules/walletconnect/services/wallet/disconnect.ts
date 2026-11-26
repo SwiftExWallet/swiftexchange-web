@@ -1,4 +1,5 @@
 import { removeEVMListeners } from './eventListeners';
+import { clearPendingProviderInit, destroyProvider } from './providerRegistry';
 import { saveSession } from './sessionPersistence';
 import type { WalletServiceContext, WalletType } from './types';
 
@@ -31,7 +32,6 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
   if (provider) {
     ctx.registeredProviders.delete(provider);
     removeEVMListeners(provider);
-    provider.removeAllListeners?.();
 
     if (provider.session) {
       try {
@@ -41,9 +41,15 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
       }
     }
 
+    // Fully destroy the Core/relayer so no stale WebSocket can steal
+    // JSON-RPC responses from a freshly-created provider on reconnect.
+    await destroyProvider(provider);
+
     for (const [key, p] of Array.from(ctx.providers.entries())) {
       if (p === provider) {
         ctx.providers.delete(key);
+        // Also clear pending-init cache for this key so a fresh Core is created
+        clearPendingProviderInit(key);
       }
     }
   }
@@ -51,7 +57,10 @@ export async function disconnect(ctx: WalletServiceContext, type: WalletType): P
   for (const t of sharedTypes) {
     ctx.isSignRequestInFlight.set(t, false);
     ctx.providers.delete(t);
+    clearPendingProviderInit(t);
   }
+  // Also clear the 'unified' key in case this was a unified session
+  clearPendingProviderInit('unified');
 
   for (const t of sharedTypes) {
     ctx.derivationInProgress = false;
@@ -84,7 +93,6 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
   const providers = new Set(ctx.providers.values());
   for (const provider of providers) {
     removeEVMListeners(provider);
-    provider?.removeAllListeners?.();
     if (provider?.session) {
       try {
         await provider.disconnect();
@@ -92,7 +100,13 @@ export async function disconnectAll(ctx: WalletServiceContext): Promise<void> {
         console.warn('[WalletService] Error disconnecting provider:', err);
       }
     }
+    await destroyProvider(provider);
   }
+
+  // Clear all pending init promises so reconnect creates fresh Cores
+  clearPendingProviderInit('evm');
+  clearPendingProviderInit('stellar');
+  clearPendingProviderInit('unified');
 
   ctx.providers.clear();
   ctx.isSignRequestInFlight.clear();
