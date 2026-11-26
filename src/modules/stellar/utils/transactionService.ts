@@ -376,9 +376,10 @@ export const signAndSubmitTransaction = async (
       return { success: true, hash };
     }
 
-    const computedHash = new StellarSDK.Transaction(finalXdr, canonicalPassphrase)
-      .hash()
-      .toString('hex');
+    const computedHash = Array.from(
+      new StellarSDK.Transaction(finalXdr, canonicalPassphrase).hash(),
+      b => b.toString(16).padStart(2, '0')
+    ).join('');
 
     if (provider?.client && provider?.session) {
       const stellarNetwork = config.chainId;
