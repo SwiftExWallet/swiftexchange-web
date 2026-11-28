@@ -2,6 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getCurrentNetwork } from '../../../../../service/apiConfig';
 import {
+  CCTP_STELLAR_DOMAIN,
+  type CctpRecoveryState,
+  buildReceiveMessageTx,
+  buildStellarReceiveMessageXdr,
+  discoverUnclaimedCctpBurns,
+  getCctpDomainForEvmChain,
+  inspectCctpRecovery,
+  markCctpBurnClaimed,
+  requestIrisReattestation,
+  saveCctpBurnHistory,
+} from '../../../../../service/cctpRecoveryService';
+import {
   CCTP_SUPPORTED_EVM_CHAINS,
   type CctpBridgeDirection,
   type CctpBridgeQuote,
@@ -145,11 +157,19 @@ export function useEvmToStellarCctp({
   const [isSigning, setIsSigning] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState<CctpRecoveryState | null>(null);
+  const [claimableBurns, setClaimableBurns] = useState<CctpRecoveryState[]>([]);
+  const [isScanningBurns, setIsScanningBurns] = useState(false);
 
   const processingRef = useRef(false);
   const lastSigningRef = useRef<string | null>(null);
   const quoteAbortRef = useRef<AbortController | null>(null);
   const retrySignatureRef = useRef<(() => Promise<void>) | null>(null);
+  const recoveryAbortRef = useRef<AbortController | null>(null);
+  const recoverySeqRef = useRef(0);
+  const scanAbortRef = useRef<AbortController | null>(null);
+  const scanSeqRef = useRef(0);
+  const claimingRef = useRef(false);
 
   const selectedEvmChain = useMemo<CctpEvmChainConfig>(() => {
     const matched = CCTP_SUPPORTED_EVM_CHAINS.find(
@@ -199,6 +219,10 @@ export function useEvmToStellarCctp({
     setAmount('');
     setError(null);
     setMessage('');
+    recoveryAbortRef.current?.abort();
+    recoverySeqRef.current += 1;
+    claimingRef.current = false;
+    setRecovery(null);
   }, [currentNetwork, setSelectedEvmChainId]);
 
   useEffect(() => {
@@ -253,7 +277,33 @@ export function useEvmToStellarCctp({
     } else {
       localStorage.setItem(storageKey, JSON.stringify(transfer));
     }
-  }, [transfer, storageKey]);
+    if (transfer.sourceTxHash) {
+      const sourceKind: 'EVM' | 'STELLAR' =
+        (transfer.direction || direction) === 'STELLAR_TO_EVM' ? 'STELLAR' : 'EVM';
+      if (transfer.status === 'COMPLETED') {
+        markCctpBurnClaimed(currentNetwork, transfer.sourceTxHash, sourceKind);
+      } else {
+        saveCctpBurnHistory(currentNetwork, {
+          txHash: transfer.sourceTxHash,
+          sourceKind,
+          sourceChainId: sourceKind === 'EVM' ? selectedEvmChainId : undefined,
+          evmAddress: transfer.evmAddress || evmAddress,
+          stellarAddress: transfer.stellarAddress || stellarAddress,
+          amount: transfer.amount || amount,
+          transferId: transfer.id,
+        });
+      }
+    }
+  }, [
+    transfer,
+    storageKey,
+    direction,
+    currentNetwork,
+    selectedEvmChainId,
+    evmAddress,
+    stellarAddress,
+    amount,
+  ]);
 
   const sourceChainKey = useMemo(() => {
     if (direction === 'STELLAR_TO_EVM') {
@@ -1150,7 +1200,11 @@ export function useEvmToStellarCctp({
       currentNetwork === 'testnet'
         ? 'https://iris-api-sandbox.circle.com'
         : 'https://iris-api.circle.com';
-    const irisUrl = `${irisBase}/v2/messages/0?transactionHash=${txHash}`;
+    const sourceDomain =
+      (transfer?.direction || direction) === 'STELLAR_TO_EVM'
+        ? CCTP_STELLAR_DOMAIN
+        : (getCctpDomainForEvmChain(selectedEvmChainId, currentNetwork) ?? 0);
+    const irisUrl = `${irisBase}/v2/messages/${sourceDomain}?transactionHash=${txHash}`;
 
     const checkIris = async () => {
       try {
@@ -1185,7 +1239,15 @@ export function useEvmToStellarCctp({
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [transfer?.sourceTxHash, transfer?.attestation, transfer?.status, currentNetwork]);
+  }, [
+    transfer?.sourceTxHash,
+    transfer?.attestation,
+    transfer?.status,
+    transfer?.direction,
+    direction,
+    selectedEvmChainId,
+    currentNetwork,
+  ]);
 
   useEffect(() => {
     if (!transfer?.status) return;
@@ -1551,6 +1613,486 @@ export function useEvmToStellarCctp({
     }
   }, [manualSubmitTxHash]);
 
+  const clearRecovery = useCallback(() => {
+    recoveryAbortRef.current?.abort();
+    recoverySeqRef.current += 1;
+    claimingRef.current = false;
+    setRecovery(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      recoveryAbortRef.current?.abort();
+      recoverySeqRef.current += 1;
+      scanAbortRef.current?.abort();
+      scanSeqRef.current += 1;
+    };
+  }, []);
+
+  const scanUnclaimedBurns = useCallback(async (): Promise<CctpRecoveryState[]> => {
+    if (!stellarAddress && !evmAddress) {
+      setClaimableBurns([]);
+      return [];
+    }
+
+    scanAbortRef.current?.abort();
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
+    const seq = ++scanSeqRef.current;
+
+    setIsScanningBurns(true);
+    try {
+      const found = await discoverUnclaimedCctpBurns({
+        network: currentNetwork,
+        stellarAddress,
+        evmAddress,
+        signal: controller.signal,
+      });
+      if (seq !== scanSeqRef.current || controller.signal.aborted) {
+        return [];
+      }
+      setClaimableBurns(found);
+      return found;
+    } catch (err: any) {
+      if (seq !== scanSeqRef.current || controller.signal.aborted || err?.name === 'AbortError') {
+        return [];
+      }
+      return [];
+    } finally {
+      if (seq === scanSeqRef.current) {
+        setIsScanningBurns(false);
+      }
+    }
+  }, [currentNetwork, evmAddress, stellarAddress]);
+
+  useEffect(() => {
+    if (transfer?.id) return;
+    if (!stellarAddress && !evmAddress) {
+      setClaimableBurns([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void scanUnclaimedBurns();
+    }, 350);
+    return () => {
+      clearTimeout(timer);
+      scanAbortRef.current?.abort();
+    };
+  }, [transfer?.id, stellarAddress, evmAddress, currentNetwork, scanUnclaimedBurns]);
+
+  const checkClaimStatus = useCallback(
+    async (
+      txHash: string,
+      sourceKindOverride?: 'EVM' | 'STELLAR',
+      evmChainIdOverride?: number
+    ): Promise<CctpRecoveryState | null> => {
+      const trimmed = txHash.trim();
+      if (!trimmed) return null;
+
+      const resolvedSourceKind: 'EVM' | 'STELLAR' =
+        sourceKindOverride || (direction === 'STELLAR_TO_EVM' ? 'STELLAR' : 'EVM');
+      const resolvedChainId =
+        resolvedSourceKind === 'EVM' ? evmChainIdOverride || selectedEvmChainId : undefined;
+
+      recoveryAbortRef.current?.abort();
+      const controller = new AbortController();
+      recoveryAbortRef.current = controller;
+      const seq = ++recoverySeqRef.current;
+
+      setRecovery({
+        phase: 'CHECKING',
+        txHash: trimmed,
+        sourceKind: resolvedSourceKind,
+        sourceDomain: -1,
+        sourceChainId: resolvedChainId,
+        humanMessage: 'Verifying burn transaction and Circle attestation...',
+      });
+
+      try {
+        const result = await inspectCctpRecovery({
+          network: currentNetwork,
+          sourceKind: resolvedSourceKind,
+          evmChainId: resolvedChainId,
+          txHash: trimmed,
+          knownDestinationTxHash: transfer?.destinationTxHash,
+          signal: controller.signal,
+        });
+
+        if (seq !== recoverySeqRef.current || controller.signal.aborted) {
+          return null;
+        }
+
+        setRecovery(result);
+
+        if (result.phase === 'ALREADY_CLAIMED' && transfer?.id && transfer.status !== 'COMPLETED') {
+          setTransfer(prev => (prev ? { ...prev, status: 'COMPLETED' } : prev));
+        }
+
+        return result;
+      } catch (err: any) {
+        if (
+          seq !== recoverySeqRef.current ||
+          controller.signal.aborted ||
+          err?.name === 'AbortError'
+        ) {
+          return null;
+        }
+        const errMsg = err?.message || 'Failed to verify burn status.';
+        const failedState: CctpRecoveryState = {
+          phase: 'ERROR',
+          txHash: trimmed,
+          sourceKind: resolvedSourceKind,
+          sourceDomain: -1,
+          sourceChainId: resolvedChainId,
+          humanMessage: errMsg,
+          error: errMsg,
+        };
+        setRecovery(failedState);
+        return failedState;
+      }
+    },
+    [
+      currentNetwork,
+      direction,
+      selectedEvmChainId,
+      transfer?.destinationTxHash,
+      transfer?.id,
+      transfer?.status,
+    ]
+  );
+
+  const reattestAndCheck = useCallback(async () => {
+    if (!recovery?.nonce || claimingRef.current) return;
+
+    recoveryAbortRef.current?.abort();
+    const controller = new AbortController();
+    recoveryAbortRef.current = controller;
+    const seq = ++recoverySeqRef.current;
+
+    setRecovery(prev =>
+      prev
+        ? {
+            ...prev,
+            phase: 'REATTESTING',
+            humanMessage: 'Requesting fresh attestation from Circle Iris...',
+            error: null,
+          }
+        : prev
+    );
+
+    try {
+      const res = await requestIrisReattestation({
+        network: currentNetwork,
+        nonce: recovery.nonce,
+        signal: controller.signal,
+      });
+
+      if (seq !== recoverySeqRef.current || controller.signal.aborted) return;
+
+      if (!res.ok) {
+        setRecovery(prev =>
+          prev
+            ? {
+                ...prev,
+                phase: 'EXPIRED_NEEDS_REATTEST',
+                error: res.error || 'Re-attestation failed.',
+                humanMessage: res.error || 'Re-attestation failed. Please try again.',
+              }
+            : prev
+        );
+        return;
+      }
+
+      const refreshed = await inspectCctpRecovery({
+        network: currentNetwork,
+        sourceKind: recovery.sourceKind,
+        evmChainId: recovery.sourceChainId,
+        txHash: recovery.txHash,
+        knownDestinationTxHash: transfer?.destinationTxHash,
+        signal: controller.signal,
+      });
+
+      if (seq !== recoverySeqRef.current || controller.signal.aborted) return;
+      setRecovery(refreshed);
+    } catch (err: any) {
+      if (
+        seq !== recoverySeqRef.current ||
+        controller.signal.aborted ||
+        err?.name === 'AbortError'
+      ) {
+        return;
+      }
+      setRecovery(prev =>
+        prev
+          ? {
+              ...prev,
+              phase: 'EXPIRED_NEEDS_REATTEST',
+              error: err?.message || 'Re-attestation failed.',
+              humanMessage: err?.message || 'Re-attestation failed.',
+            }
+          : prev
+      );
+    }
+  }, [currentNetwork, recovery, transfer?.destinationTxHash]);
+
+  const executeManualClaim = useCallback(
+    async (targetOverride?: CctpRecoveryState) => {
+      const target = targetOverride || recovery;
+      if (claimingRef.current) return;
+      if (
+        !target ||
+        (target.phase !== 'CLAIMABLE_EVM' && target.phase !== 'CLAIMABLE_STELLAR') ||
+        !target.message ||
+        !target.attestation
+      ) {
+        return;
+      }
+
+      if (target.phase === 'CLAIMABLE_STELLAR') {
+        if (!stellarAddress) {
+          const errState: CctpRecoveryState = {
+            ...target,
+            error: 'Connect a Stellar wallet to claim on Stellar.',
+          };
+          setRecovery(errState);
+          setClaimableBurns(prev => prev.map(b => (b.txHash === target.txHash ? errState : b)));
+          return;
+        }
+
+        claimingRef.current = true;
+        const seq = ++recoverySeqRef.current;
+        const tid = target.transferId || transfer?.id;
+
+        const claimingState: CctpRecoveryState = {
+          ...target,
+          phase: 'CLAIMING',
+          error: null,
+          humanMessage: 'Confirm claim transaction in your Stellar wallet...',
+        };
+        setRecovery(claimingState);
+        setClaimableBurns(prev => prev.map(b => (b.txHash === target.txHash ? claimingState : b)));
+
+        try {
+          let xdrToSign: string | undefined;
+          if (tid) {
+            try {
+              const latest = await getCctpBridgeTransfer(tid);
+              if (latest?.status === 'COMPLETED' || latest?.destinationTxHash) {
+                markCctpBurnClaimed(currentNetwork, target.txHash, target.sourceKind);
+                setClaimableBurns(prev => prev.filter(b => b.txHash !== target.txHash));
+                setRecovery({
+                  ...target,
+                  phase: 'CLAIMED',
+                  mintTxHash: latest.destinationTxHash || undefined,
+                  humanMessage: 'Already claimed on Stellar.',
+                });
+                return;
+              }
+              xdrToSign = latest?.signingRequest?.xdr || latest?.stellarUnsignedXdr;
+            } catch {
+              void 0;
+            }
+          }
+
+          if (!xdrToSign) {
+            xdrToSign = await buildStellarReceiveMessageXdr({
+              network: currentNetwork,
+              callerAddress: stellarAddress,
+              message: target.message,
+              attestation: target.attestation,
+            });
+          }
+
+          let stellarMintHash = '';
+          if (signStellarTx) {
+            stellarMintHash = await signStellarTx(xdrToSign);
+          } else {
+            const res = await signAndSubmitTransaction({
+              xdr: xdrToSign,
+              network: currentNetwork,
+              networkPassphrase,
+              provider: stellarProvider,
+              stellarAddress,
+            });
+            if (!res?.success || !res?.hash) {
+              throw new Error(res?.error || 'Stellar claim transaction failed or was rejected.');
+            }
+            stellarMintHash = res.hash;
+          }
+
+          if (seq !== recoverySeqRef.current) return;
+
+          markCctpBurnClaimed(currentNetwork, target.txHash, target.sourceKind);
+
+          if (tid && transfer?.id === tid) {
+            setTransfer(prev =>
+              prev ? { ...prev, status: 'COMPLETED', destinationTxHash: stellarMintHash } : prev
+            );
+          }
+
+          setRecovery({
+            ...target,
+            phase: 'CLAIMED',
+            mintTxHash: stellarMintHash,
+            error: null,
+            humanMessage: 'Successfully claimed USDC on Stellar!',
+          });
+          setClaimableBurns(prev => prev.filter(b => b.txHash !== target.txHash));
+        } catch (err: any) {
+          if (seq !== recoverySeqRef.current) return;
+          const rawMsg = err?.message || 'Failed to claim on Stellar.';
+          if (/nonce.*used|already.*used|already.*claimed/i.test(rawMsg)) {
+            markCctpBurnClaimed(currentNetwork, target.txHash, target.sourceKind);
+            setClaimableBurns(prev => prev.filter(b => b.txHash !== target.txHash));
+            setRecovery({
+              ...target,
+              phase: 'ALREADY_CLAIMED',
+              error: null,
+              humanMessage: 'Already claimed on Stellar.',
+            });
+            return;
+          }
+          const revertState: CctpRecoveryState = {
+            ...target,
+            phase: 'CLAIMABLE_STELLAR',
+            error: rawMsg,
+            humanMessage: `Claim failed: ${rawMsg}`,
+          };
+          setRecovery(revertState);
+          setClaimableBurns(prev => prev.map(b => (b.txHash === target.txHash ? revertState : b)));
+        } finally {
+          claimingRef.current = false;
+        }
+        return;
+      }
+
+      if (!target.destinationChainId) return;
+
+      if (!evmAddress) {
+        const errState: CctpRecoveryState = {
+          ...target,
+          error: 'Connect an EVM wallet to submit the claim transaction.',
+        };
+        setRecovery(errState);
+        setClaimableBurns(prev => prev.map(b => (b.txHash === target.txHash ? errState : b)));
+        return;
+      }
+
+      claimingRef.current = true;
+      const seq = ++recoverySeqRef.current;
+      const targetChainId = target.destinationChainId;
+      const targetRpc = target.destinationRpcUrl;
+      const targetChainName = target.destinationChainName || `Chain ${targetChainId}`;
+
+      const claimingState: CctpRecoveryState = {
+        ...target,
+        phase: 'CLAIMING',
+        error: null,
+        humanMessage: `Confirm claim transaction on ${targetChainName} in your EVM wallet...`,
+      };
+      setRecovery(claimingState);
+      setClaimableBurns(prev => prev.map(b => (b.txHash === target.txHash ? claimingState : b)));
+
+      try {
+        if (evmProvider && typeof evmProvider.request === 'function') {
+          try {
+            const currentChainHex = await evmProvider.request({ method: 'eth_chainId' });
+            const currentChain = parseRawChainId(currentChainHex);
+            if (currentChain !== targetChainId) {
+              await switchOrAddChain(evmProvider, targetChainId);
+            }
+          } catch (switchErr: any) {
+            console.warn('[CCTP Recovery] Chain switch warning:', switchErr);
+          }
+        }
+
+        const { to, data } = buildReceiveMessageTx({
+          network: currentNetwork,
+          message: target.message,
+          attestation: target.attestation,
+        });
+
+        const rawTx = {
+          from: evmAddress,
+          to,
+          data,
+          value: '0x0',
+        };
+
+        let mintTxHash = '';
+        if (signEvmTx) {
+          mintTxHash = await signEvmTx(rawTx, evmAddress, targetChainId);
+        } else if (evmProvider && typeof evmProvider.request === 'function') {
+          mintTxHash = await evmProvider.request({
+            method: 'eth_sendTransaction',
+            params: [rawTx],
+          });
+        } else if (evmProvider) {
+          mintTxHash = await sendEVMTransaction(evmProvider, targetChainId, rawTx);
+        } else {
+          throw new Error('No EVM wallet or provider available');
+        }
+
+        const normalizedMintHash = '0x' + String(mintTxHash).replace(/^(0x)+/i, '');
+
+        const waitingState: CctpRecoveryState = {
+          ...target,
+          phase: 'CLAIMING',
+          mintTxHash: normalizedMintHash,
+          humanMessage: `Claim submitted on ${targetChainName}. Waiting for confirmation...`,
+        };
+        setRecovery(waitingState);
+
+        await waitForTxReceipt(evmProvider, normalizedMintHash, 120_000, targetRpc);
+
+        if (seq !== recoverySeqRef.current) return;
+
+        markCctpBurnClaimed(currentNetwork, target.txHash, target.sourceKind);
+
+        if (transfer?.id) {
+          setTransfer(prev =>
+            prev ? { ...prev, status: 'COMPLETED', destinationTxHash: normalizedMintHash } : prev
+          );
+        }
+
+        const claimedState: CctpRecoveryState = {
+          ...target,
+          phase: 'CLAIMED',
+          mintTxHash: normalizedMintHash,
+          error: null,
+          humanMessage: `Successfully claimed USDC on ${targetChainName}!`,
+        };
+        setRecovery(claimedState);
+        setClaimableBurns(prev => prev.filter(b => b.txHash !== target.txHash));
+      } catch (err: any) {
+        if (seq !== recoverySeqRef.current) return;
+        const errMsg = err?.message || 'Failed to claim USDC.';
+        const revertState: CctpRecoveryState = {
+          ...target,
+          phase: 'CLAIMABLE_EVM',
+          error: errMsg,
+          humanMessage: `Claim failed: ${errMsg}`,
+        };
+        setRecovery(revertState);
+        setClaimableBurns(prev => prev.map(b => (b.txHash === target.txHash ? revertState : b)));
+      } finally {
+        claimingRef.current = false;
+      }
+    },
+    [
+      currentNetwork,
+      evmAddress,
+      evmProvider,
+      networkPassphrase,
+      recovery,
+      signEvmTx,
+      signStellarTx,
+      stellarAddress,
+      stellarProvider,
+      transfer?.id,
+    ]
+  );
+
   const reset = useCallback(() => {
     setAmount('');
     setQuote(null);
@@ -1560,6 +2102,10 @@ export function useEvmToStellarCctp({
     lastSigningRef.current = null;
     processingRef.current = false;
     setIsSigning(false);
+    recoveryAbortRef.current?.abort();
+    recoverySeqRef.current += 1;
+    claimingRef.current = false;
+    setRecovery(null);
     try {
       localStorage.removeItem(storageKey);
     } catch {
@@ -1598,6 +2144,14 @@ export function useEvmToStellarCctp({
     retrySignature,
     refreshStatus,
     manualSubmitTxHash,
+    recovery,
+    claimableBurns,
+    isScanningBurns,
+    scanUnclaimedBurns,
+    checkClaimStatus,
+    reattestAndCheck,
+    executeManualClaim,
+    clearRecovery,
     reset,
   };
 }

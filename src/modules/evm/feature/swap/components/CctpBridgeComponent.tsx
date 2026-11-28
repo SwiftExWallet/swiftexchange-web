@@ -75,6 +75,13 @@ export const CctpBridgeComponent: React.FC<CctpBridgeComponentProps> = ({ curren
     retrySignature,
     refreshStatus,
     manualSubmitTxHash,
+    recovery,
+    claimableBurns,
+    isScanningBurns,
+    scanUnclaimedBurns,
+    checkClaimStatus,
+    reattestAndCheck,
+    executeManualClaim,
     reset,
   } = useEvmToStellarCctp({
     evmAddress,
@@ -1395,6 +1402,26 @@ export const CctpBridgeComponent: React.FC<CctpBridgeComponentProps> = ({ curren
                 >
                   Retry Signing
                 </button>
+                {status === 'FAILED' && transfer?.sourceTxHash && !transfer?.destinationTxHash && (
+                  <button
+                    type="button"
+                    disabled={
+                      recovery?.phase === 'CHECKING' ||
+                      recovery?.phase === 'REATTESTING' ||
+                      recovery?.phase === 'CLAIMING'
+                    }
+                    onClick={() =>
+                      checkClaimStatus(
+                        transfer.sourceTxHash!,
+                        direction === 'STELLAR_TO_EVM' ? 'STELLAR' : 'EVM',
+                        selectedChainId
+                      )
+                    }
+                    className="flex-1 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 hover:bg-amber-500/30 text-amber-300 font-bold text-xs transition-all disabled:opacity-50"
+                  >
+                    {recovery?.phase === 'CHECKING' ? 'Checking...' : 'Check & Claim'}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={reset}
@@ -1403,6 +1430,67 @@ export const CctpBridgeComponent: React.FC<CctpBridgeComponentProps> = ({ curren
                   Reset
                 </button>
               </div>
+
+              {status === 'FAILED' && recovery && (
+                <div className="p-3 rounded-xl bg-secondary/90 border border-divider/50 space-y-2 text-xs">
+                  <div className="flex items-center gap-2 text-primary">
+                    {(recovery.phase === 'CHECKING' ||
+                      recovery.phase === 'REATTESTING' ||
+                      recovery.phase === 'CLAIMING') && (
+                      <Loader2 size={13} className="animate-spin text-brand shrink-0" />
+                    )}
+                    <span>{recovery.humanMessage}</span>
+                  </div>
+                  {recovery.phase === 'ATTESTATION_PENDING' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        checkClaimStatus(
+                          recovery.txHash,
+                          recovery.sourceKind,
+                          recovery.sourceChainId
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-secondary border border-divider/50 hover:bg-hover text-primary font-semibold text-[11px]"
+                    >
+                      Re-check Attestation
+                    </button>
+                  )}
+                  {recovery.phase === 'EXPIRED_NEEDS_REATTEST' && (
+                    <button
+                      type="button"
+                      onClick={reattestAndCheck}
+                      className="w-full py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-all"
+                    >
+                      Re-attest &amp; Check
+                    </button>
+                  )}
+                  {(recovery.phase === 'CLAIMABLE_EVM' ||
+                    recovery.phase === 'CLAIMABLE_STELLAR') && (
+                    <button
+                      type="button"
+                      onClick={() => void executeManualClaim()}
+                      className="w-full py-2 rounded-lg bg-brand hover:opacity-90 text-white font-semibold text-xs transition-all"
+                    >
+                      Claim USDC
+                      {recovery.destinationChainName ? ` on ${recovery.destinationChainName}` : ''}
+                    </button>
+                  )}
+                  {recovery.phase === 'CLAIMED' &&
+                    recovery.mintTxHash &&
+                    recovery.destinationExplorerUrl && (
+                      <a
+                        href={`${recovery.destinationExplorerUrl}/tx/${recovery.mintTxHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-emerald-400 hover:underline text-[11px] font-medium"
+                      >
+                        <span>View Claim Tx</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    )}
+                </div>
+              )}
             </div>
           )}
 
@@ -1418,6 +1506,91 @@ export const CctpBridgeComponent: React.FC<CctpBridgeComponentProps> = ({ curren
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Auto-Discovered Unclaimed Burns (compact fintech card, only when unclaimed burns exist) */}
+      {status === 'IDLE' && claimableBurns.length > 0 && (
+        <div className="rounded-xl bg-secondary/70 border border-divider/50 p-3 space-y-2">
+          <div className="flex items-center justify-between px-0.5">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span>Pending Claim ({claimableBurns.length})</span>
+            </div>
+            <button
+              type="button"
+              disabled={isScanningBurns}
+              onClick={() => void scanUnclaimedBurns()}
+              title="Refresh"
+              className="text-muted hover:text-primary transition-colors p-0.5"
+            >
+              <RefreshCw size={11} className={isScanningBurns ? 'animate-spin' : ''} />
+            </button>
+          </div>
+
+          <div className="space-y-1.5">
+            {claimableBurns.map(item => (
+              <div
+                key={item.txHash}
+                className="px-3 py-2 rounded-lg bg-tertiary/70 border border-divider/30 space-y-1"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="font-semibold text-primary">
+                        {item.amountUsdc ? `${item.amountUsdc} USDC` : 'USDC'}
+                      </span>
+                      <span className="text-muted/60">•</span>
+                      <span className="text-[11px] text-muted truncate">
+                        {item.sourceChainName ||
+                          (item.sourceKind === 'STELLAR' ? 'Stellar' : 'EVM')}{' '}
+                        → {item.destinationChainName || 'Destination'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] font-mono text-muted/60 truncate">
+                      {item.txHash.slice(0, 10)}...{item.txHash.slice(-8)}
+                    </div>
+                  </div>
+
+                  {(item.phase === 'CLAIMABLE_EVM' || item.phase === 'CLAIMABLE_STELLAR') && (
+                    <button
+                      type="button"
+                      onClick={() => void executeManualClaim(item)}
+                      className="px-3 py-1.5 rounded-lg bg-brand text-white font-semibold text-[11px] hover:opacity-90 active:scale-[0.98] transition-all shrink-0"
+                    >
+                      Claim
+                    </button>
+                  )}
+                  {item.phase === 'CLAIMING' && (
+                    <span className="inline-flex items-center gap-1 text-brand text-[11px] font-medium shrink-0">
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>Claiming</span>
+                    </span>
+                  )}
+                  {item.phase === 'EXPIRED_NEEDS_REATTEST' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void checkClaimStatus(
+                          item.txHash,
+                          item.sourceKind,
+                          item.sourceChainId
+                        ).then(() => reattestAndCheck());
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-semibold text-[11px] hover:bg-amber-500/30 shrink-0"
+                    >
+                      Re-attest
+                    </button>
+                  )}
+                  {item.phase === 'ATTESTATION_PENDING' && (
+                    <span className="text-[11px] text-muted shrink-0">Attesting…</span>
+                  )}
+                </div>
+
+                {item.error && <div className="text-[10px] text-red-400">{item.error}</div>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
