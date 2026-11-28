@@ -22,11 +22,12 @@ export const formatTokenUnits = (
 
 export const formatPreciseUnits = (
   stroops: bigint | string | number,
-  decimals: number = 7
+  decimals: number = 7,
+  displayDecimals: number = 4
 ): string => {
   const bn = new BigNumber(stroops.toString()).dividedBy(new BigNumber(10).pow(decimals));
-  if (bn.isNaN() || bn.isZero()) return '0.0000';
-  return bn.toFixed(4, BigNumber.ROUND_DOWN);
+  if (bn.isNaN() || bn.isZero()) return `0.${'0'.repeat(displayDecimals)}`;
+  return bn.toFixed(displayDecimals, BigNumber.ROUND_DOWN);
 };
 
 export const formatCurrency = (val: number | string): string => {

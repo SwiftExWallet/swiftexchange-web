@@ -128,7 +128,7 @@ export const VaultActionConsole: React.FC<VaultActionConsoleProps> = ({
     loadBalance();
   };
 
-  const effectiveApy = apy !== undefined && apy > 0 ? apy : vault.targetApyPercent;
+  const effectiveApy = apy !== undefined && apy >= 0 ? apy : 0;
   const numAmount = parseFloat(amountStr);
   const isValidPositiveAmount = !isNaN(numAmount) && numAmount > 0;
   const estAnnualYield = isValidPositiveAmount ? (numAmount * effectiveApy) / 100 : 0;

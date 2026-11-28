@@ -41,10 +41,7 @@ export const VaultAssetSupplyTable: React.FC<VaultAssetSupplyTableProps> = ({
         {vaults.map(vault => {
           const isSelected = vault.id === selectedVaultId;
           const vaultMetric = metrics[vault.id];
-          const apyNum =
-            vaultMetric?.realizedApyPercent && vaultMetric.realizedApyPercent > 0
-              ? vaultMetric.realizedApyPercent
-              : vault.targetApyPercent;
+          const apyNum = vaultMetric?.realizedApyPercent ?? 0;
           const balance = isConnected ? walletBalances[vault.id] || '0.00' : '--';
 
           return (
