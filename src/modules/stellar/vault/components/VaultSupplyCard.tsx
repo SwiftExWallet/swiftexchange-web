@@ -16,13 +16,16 @@ export const VaultSupplyCard: React.FC<VaultSupplyCardProps> = ({
   metrics,
   onOpenSupply,
 }) => {
-  const apy =
-    metrics?.realizedApyPercent && metrics.realizedApyPercent > 0
-      ? metrics.realizedApyPercent
-      : vault.targetApyPercent;
+  const apy = metrics?.realizedApyPercent ?? 0;
 
   const totalAssetsNum = metrics ? Number(metrics.totalAssets) / 1e7 : 0;
   const utilization = metrics?.utilizationPercent || 0;
+  const vaultYieldUnits =
+    metrics && metrics.totalAssets > metrics.totalShares
+      ? metrics.totalAssets - metrics.totalShares
+      : 0n;
+  const vaultYieldNum = Number(vaultYieldUnits) / 1e7;
+  const sharePrice = metrics?.sharePrice || 1.0;
 
   return (
     <div className="bg-(--color-bg-secondary) border border-(--color-border) rounded-2xl p-6 flex flex-col justify-between hover:border-brand-primary/40 transition-all shadow-sm">
@@ -40,10 +43,10 @@ export const VaultSupplyCard: React.FC<VaultSupplyCardProps> = ({
         </div>
 
         <div>
-          <div className="text-xs text-(--color-text-secondary)">Target Net APY</div>
+          <div className="text-xs text-(--color-text-secondary)">Live Net Supply APY</div>
           <div className="flex items-baseline gap-2 mt-1">
             <span className="text-3xl font-extrabold text-emerald-400 font-mono">
-              {apy.toFixed(2)}%
+              {metrics ? `${apy.toFixed(2)}%` : '--'}
             </span>
             <TrendingUp className="w-4 h-4 text-emerald-400" />
           </div>
@@ -62,6 +65,20 @@ export const VaultSupplyCard: React.FC<VaultSupplyCardProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-(--color-text-secondary)">Strategy Utilization</span>
             <span className="font-semibold text-brand-primary">{utilization.toFixed(2)}%</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-(--color-text-secondary)">Vault Yield Earned</span>
+            <span className="font-mono font-bold text-emerald-400">
+              +{vaultYieldNum.toFixed(6)} {vault.underlyingAsset.symbol}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-(--color-text-secondary)">Share Price</span>
+            <span className="font-mono text-(--color-text-primary)">
+              1 {vault.symbol} = {sharePrice.toFixed(6)} {vault.underlyingAsset.symbol}
+            </span>
           </div>
 
           <div className="flex items-center justify-between">

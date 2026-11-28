@@ -112,7 +112,8 @@ export class VaultService {
           .build()
       );
       if (StellarSDK.rpc.Api.isSimulationSuccess(simFees) && simFees.result) {
-        feeBps = Number(StellarSDK.scValToNative(simFees.result.retval) || 0);
+        const rawFees = StellarSDK.scValToNative(simFees.result.retval);
+        feeBps = Array.isArray(rawFees) ? Number(rawFees[0] || 0) : Number(rawFees || 0);
       }
     } catch {
       feeBps = 0;
@@ -124,19 +125,19 @@ export class VaultService {
       sharePrice = Number(totalAssets) / Number(totalShares);
     }
 
-    // 5. Calculate Realized APY vs Target APY
-    const realizedApyPercent =
-      sharePrice > 1.0 && sharePrice <= 2.0 ? (sharePrice - 1.0) * 100 : vault.targetApyPercent;
-    const utilizationPercent =
-      totalAssets > 0n ? (Number(investedAmount) / Number(totalAssets)) * 100 : 0;
-
+    // 5. Fetch live dynamic Blend interest rate model & supply APY (no hardcoded APY fallback)
     let interestRateModel: InterestRateModelData | undefined;
     try {
-      const irm = await VaultService.fetchInterestRateModel(vault, network);
+      const irm = await VaultService.fetchInterestRateModel(vault, network, feeBps);
       if (irm) interestRateModel = irm;
     } catch {
       interestRateModel = undefined;
     }
+
+    const dynamicSupplyApy = interestRateModel?.supplyAprPercent ?? 0;
+    const realizedApyPercent = dynamicSupplyApy;
+    const utilizationPercent =
+      totalAssets > 0n ? (Number(investedAmount) / Number(totalAssets)) * 100 : 0;
 
     return {
       vaultId: vault.id,
@@ -146,7 +147,7 @@ export class VaultService {
       investedAmount,
       sharePrice,
       realizedApyPercent,
-      targetApyPercent: vault.targetApyPercent,
+      targetApyPercent: dynamicSupplyApy,
       utilizationPercent,
       oraclePriceUsd: vault.underlyingAsset.oraclePriceUsd,
       feeBps,
@@ -240,7 +241,7 @@ export class VaultService {
         shares: formatPreciseUnits(userShares),
         underlying: formatTokenUnits(underlyingAssets),
         deposited: formatTokenUnits(depositedPrincipal),
-        yield: `+${formatTokenUnits(accruedYield)}`,
+        yield: `+${formatPreciseUnits(accruedYield, vault.underlyingAsset.decimals, 6)}`,
       },
     };
   }
@@ -327,7 +328,7 @@ export class VaultService {
           amountsDesiredVec,
           amountsMinVec,
           new StellarSDK.Address(userAddress).toScVal(),
-          StellarSDK.xdr.ScVal.scvBool(false)
+          StellarSDK.xdr.ScVal.scvBool(true)
         )
       )
       .setTimeout(300)
@@ -552,57 +553,137 @@ export class VaultService {
 
   static async fetchInterestRateModel(
     vault: SingleVaultConfig,
-    network: NetworkType = 'testnet'
-  ): Promise<InterestRateModelData | null> {
+    network: NetworkType = 'testnet',
+    feeBps: number = 0
+  ): Promise<(InterestRateModelData & { supplyAprPercent: number }) | null> {
     try {
       const rpc = getRpcServer(network);
       const env = getVaultEnvironment(network);
-      const strategyContract = new StellarSDK.Contract(vault.strategyAddress);
       const dummyAccount = new StellarSDK.Account(
         vault.roles.vaultManager || 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
         '100'
       );
 
+      // 1. Read Blend Pool address from strategy contract instance storage (Config.pool)
+      let poolAddress = '';
+      try {
+        const entry: any = await rpc.getContractData(
+          vault.strategyAddress,
+          StellarSDK.xdr.ScVal.scvLedgerKeyContractInstance()
+        );
+        // Support both stellar-sdk v17 (entry.val.value.val.instance.storage) and v16 XDR
+        const storage =
+          entry?.val?.value?.val?.instance?.storage ||
+          (typeof entry?.val?.contractData === 'function'
+            ? entry.val.contractData().val().instance().storage()
+            : []) ||
+          [];
+
+        for (const item of storage) {
+          if (typeof item?.key === 'function') {
+            const k = StellarSDK.scValToNative(item.key());
+            if (k === 'Config' || (Array.isArray(k) && k[0] === 'Config')) {
+              const cfg = StellarSDK.scValToNative(item.val());
+              if (cfg?.pool) {
+                poolAddress = String(cfg.pool);
+                break;
+              }
+            }
+          } else {
+            // stellar-sdk v17: storage items serialize cleanly via toJSON()
+            const plain = JSON.parse(JSON.stringify(item));
+            if (plain?.key?.vec?.[0]?.symbol === 'Config' && Array.isArray(plain?.val?.map)) {
+              const poolEntry = plain.val.map.find((m: any) => m?.key?.symbol === 'pool');
+              if (poolEntry?.val?.address) {
+                poolAddress = String(poolEntry.val.address);
+                break;
+              }
+            }
+          }
+        }
+      } catch {
+        // Fallback to get_pool() if instance storage is unavailable
+      }
+
+      if (!poolAddress) {
+        const strategyContract = new StellarSDK.Contract(vault.strategyAddress);
+        const simPool = await rpc.simulateTransaction(
+          new StellarSDK.TransactionBuilder(dummyAccount, {
+            fee: '100',
+            networkPassphrase: env.networkPassphrase,
+          })
+            .addOperation(strategyContract.call('get_pool'))
+            .setTimeout(30)
+            .build()
+        );
+        if (StellarSDK.rpc.Api.isSimulationSuccess(simPool) && simPool.result) {
+          const rawPool = StellarSDK.scValToNative(simPool.result.retval);
+          if (typeof rawPool === 'string') poolAddress = rawPool;
+        }
+      }
+
+      if (!poolAddress) return null;
+
+      // 2. Query Blend Pool get_reserve(asset) for live utilization & interest rate curve
+      const poolContract = new StellarSDK.Contract(poolAddress);
       const sim = await rpc.simulateTransaction(
         new StellarSDK.TransactionBuilder(dummyAccount, {
           fee: '100',
           networkPassphrase: env.networkPassphrase,
         })
-          .addOperation(strategyContract.call('get_pool'))
+          .addOperation(
+            poolContract.call(
+              'get_reserve',
+              new StellarSDK.Address(vault.underlyingAsset.contractId).toScVal()
+            )
+          )
           .setTimeout(30)
           .build()
       );
 
       if (StellarSDK.rpc.Api.isSimulationSuccess(sim) && sim.result) {
-        const raw = StellarSDK.scValToNative(sim.result.retval);
-        if (raw && typeof raw === 'object') {
-          const ir = raw.config?.ir_params || raw.ir_params || raw.interest_rate || null;
-          if (ir) {
-            const targetUtil =
-              ir.target_util !== undefined ? (Number(ir.target_util) / 1e7) * 100 : 80.0;
-            const maxUtil = ir.max_util !== undefined ? (Number(ir.max_util) / 1e7) * 100 : 90.0;
-            const baseApr = ir.r_base !== undefined ? (Number(ir.r_base) / 1e7) * 100 : 2.5;
-            const rOne = ir.r_one !== undefined ? (Number(ir.r_one) / 1e7) * 100 : 0;
-            const rTwo = ir.r_two !== undefined ? (Number(ir.r_two) / 1e7) * 100 : 0;
-            const currentUtil =
-              raw.utilization !== undefined ? (Number(raw.utilization) / 1e7) * 100 : 0;
-            const currentApr =
-              currentUtil <= targetUtil
-                ? baseApr + (rOne * currentUtil) / targetUtil
-                : baseApr + rOne + (rTwo * (currentUtil - targetUtil)) / (maxUtil - targetUtil);
+        const reserve = StellarSDK.scValToNative(sim.result.retval);
+        const cfg = reserve?.config;
+        const data = reserve?.data;
+        if (cfg && data) {
+          const scalar = Number(reserve.scalar || 1e7);
+          const targetUtil = Number(cfg.util || 0) / scalar; // e.g. 0.70
+          const maxUtil = Number(cfg.max_util || 0) / scalar; // e.g. 0.95
+          const rBase = (Number(cfg.r_base || 0) / scalar) * 100;
+          const rOne = (Number(cfg.r_one || 0) / scalar) * 100;
+          const rTwo = (Number(cfg.r_two || 0) / scalar) * 100;
+          const rThree = (Number(cfg.r_three || 0) / scalar) * 100;
+          const irMod = Number(data.ir_mod || scalar) / scalar;
 
-            return {
-              currentApr,
-              baseApr,
-              currentUtilization: currentUtil,
-              targetUtilization: targetUtil,
-              maxUtilization: maxUtil,
-              collateralFactor:
-                ir.collateral_factor !== undefined ? Number(ir.collateral_factor) / 1e7 : 0,
-              liabilityFactor:
-                ir.liability_factor !== undefined ? Number(ir.liability_factor) / 1e7 : 0,
-            };
+          const totalSupplied = Number(data.b_supply || 0) * Number(data.b_rate || 0);
+          const totalBorrowed = Number(data.d_supply || 0) * Number(data.d_rate || 0);
+          const utilRatio = totalSupplied > 0 ? Math.min(totalBorrowed / totalSupplied, 1) : 0;
+
+          // Blend 3-slope piecewise linear borrow APR
+          let borrowApr = rBase;
+          if (utilRatio <= targetUtil && targetUtil > 0) {
+            borrowApr = rBase + (rOne * utilRatio) / targetUtil;
+          } else if (utilRatio <= maxUtil && maxUtil > targetUtil) {
+            borrowApr = rBase + rOne + (rTwo * (utilRatio - targetUtil)) / (maxUtil - targetUtil);
+          } else if (utilRatio > maxUtil && 1 > maxUtil) {
+            borrowApr = rBase + rOne + rTwo + (rThree * (utilRatio - maxUtil)) / (1 - maxUtil);
           }
+          borrowApr = borrowApr * irMod;
+
+          // Supply APR = borrowApr * utilization * (1 - vaultFee)
+          const netFactor = Math.max(0, 1 - feeBps / 10000);
+          const supplyAprPercent = borrowApr * utilRatio * netFactor;
+
+          return {
+            currentApr: borrowApr,
+            baseApr: rBase,
+            currentUtilization: utilRatio * 100,
+            targetUtilization: targetUtil * 100,
+            maxUtilization: maxUtil * 100,
+            collateralFactor: Number(cfg.c_factor || 0) / scalar,
+            liabilityFactor: Number(cfg.l_factor || 0) / scalar,
+            supplyAprPercent,
+          };
         }
       }
     } catch {

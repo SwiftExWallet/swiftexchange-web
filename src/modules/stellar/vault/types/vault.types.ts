@@ -56,6 +56,7 @@ export interface InterestRateModelData {
   maxUtilization: number;
   collateralFactor: number;
   liabilityFactor: number;
+  supplyAprPercent?: number;
 }
 
 export interface VaultActivityRecord {
