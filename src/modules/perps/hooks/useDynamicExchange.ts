@@ -60,7 +60,7 @@ export function useDynamicExchange() {
         return;
       }
 
-      const exchangeLabel = currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3';
+      const exchangeLabel = currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster';
       const networkLabel = currentNetwork === 'testnet' ? 'Testnet' : 'Mainnet';
 
       if (!isFirstRender.current) {

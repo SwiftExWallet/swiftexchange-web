@@ -3,6 +3,7 @@ import { memo } from 'react';
 
 import { indicatorRegistry } from 'lightweight-charts-indicators';
 
+import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useMarketStore } from '../../../core/stores/marketStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
@@ -64,6 +65,7 @@ export const Legend = memo(function Legend({
       state.assetCtxByMarket[market.replace('-', '')] ||
       state.assetCtxByMarket[market.replace('USDT', '-USDT')]
   );
+  const currentExchange = useExchangeManager(state => state.currentExchange);
 
   if (!legend) return null;
   const changeColor = legend.change >= 0 ? colors.upColor : colors.downColor;
@@ -98,7 +100,9 @@ export const Legend = memo(function Legend({
         <span className="text-[10px] text-gray-500 shrink-0 select-none opacity-50">•</span>
         <span className="text-[10.5px] font-semibold text-primary shrink-0">{tfLabel}</span>
         <span className="text-[10px] text-gray-500 shrink-0 select-none opacity-50">•</span>
-        <span className="text-[10.5px] font-medium text-gray-400 shrink-0">Aster</span>
+        <span className="text-[10.5px] font-medium text-gray-400 shrink-0">
+          {currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}
+        </span>
         <span className="text-[10px] text-gray-500 shrink-0 select-none opacity-50">•</span>
 
         <div className="flex flex-wrap items-center gap-x-1.5 font-mono text-[10px]">

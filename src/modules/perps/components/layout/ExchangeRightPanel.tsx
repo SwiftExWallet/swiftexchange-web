@@ -18,6 +18,7 @@ import { useTickerStore } from '../../core/stores/tickerStore';
 import { useTradeCalculations } from '../../hooks/useTradeCalculations';
 import { useUnifiedExecution } from '../../services/useUnifiedExecution';
 import { formatPriceToTick, formatQuantityToStep } from '../../utils/precision';
+import { toAsterSymbol } from '../../utils/symbol';
 import { AccountModal } from '../trade/AccountModal';
 import { AssetModeModal } from '../trade/AssetModeModal';
 import { LeverageModal } from '../trade/LeverageModal';
@@ -76,8 +77,11 @@ export const ExchangeOrderFormPanel: React.FC = () => {
   const { userAddr } = activeAgent;
   const market = useMarketStore(state => state.markets[state.selectedSymbol]);
 
-  useAsterDataSync(asterAgent.isReady ? asterAgent.asterSigner : null, asterAgent.userAddr);
-  useHyperliquidDataStream(hyperliquidAgent.userAddr);
+  useAsterDataSync(
+    currentExchange === 'aster' && asterAgent.isReady ? asterAgent.asterSigner : null,
+    currentExchange === 'aster' ? asterAgent.userAddr : null
+  );
+  useHyperliquidDataStream(currentExchange === 'hyperliquid' ? hyperliquidAgent.userAddr : null);
 
   const { executeOrder } = useUnifiedExecution();
   const { placeChase, placeBatch } = useOrders(asterAgent.asterSigner, userAddr);
@@ -175,7 +179,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
 
           if (fPrice && fSize && parseFloat(fSize) > 0) {
             scaledOrders.push({
-              symbol: payload.symbol.replace('-', ''),
+              symbol: toAsterSymbol(payload.symbol),
               side: payload.side,
               type: 'LIMIT',
               quantity: fSize,
@@ -189,12 +193,13 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         if (scaledOrders.length === 0)
           throw new Error('Calculated sizes are too small for market step size');
 
-        const minNotional = currentMarket?.minNotional || 5.0;
+        const minNotional =
+          currentMarket?.minNotional || (currentExchange === 'hyperliquid' ? 10.0 : 5.0);
         for (const o of scaledOrders) {
           const splitNotional = parseFloat(o.price) * parseFloat(o.quantity);
           if (splitNotional < minNotional) {
             throw new Error(
-              `Each split order must have at least $${minNotional.toFixed(2)} USDT notional (current split is $${splitNotional.toFixed(2)} USDT). Please increase total size or reduce order count.`
+              `Each split order must have at least $${minNotional.toFixed(2)} notional (current split is $${splitNotional.toFixed(2)}). Please increase total size or reduce order count.`
             );
           }
         }
@@ -212,7 +217,7 @@ export const ExchangeOrderFormPanel: React.FC = () => {
             : undefined;
 
         res = await placeChase({
-          symbol: payload.symbol.replace('-', ''),
+          symbol: toAsterSymbol(payload.symbol),
           side: payload.side,
           quantity: formattedQty || payload.size,
           quantityUnit: 'BASE',
@@ -224,6 +229,20 @@ export const ExchangeOrderFormPanel: React.FC = () => {
         const isMarket = payload.type === 'MARKET';
         const isTrailingStop = payload.type === 'TRAILING_STOP_MARKET';
         const isPostOnly = payload.type === 'POST_ONLY';
+
+        const attachedTp =
+          payload.attachedTpEnabled &&
+          payload.attachedTpPrice &&
+          new BigNumber(payload.attachedTpPrice).gt(0)
+            ? formatPriceToTick(payload.attachedTpPrice, tickSize)
+            : undefined;
+
+        const attachedSl =
+          payload.attachedSlEnabled &&
+          payload.attachedSlPrice &&
+          new BigNumber(payload.attachedSlPrice).gt(0)
+            ? formatPriceToTick(payload.attachedSlPrice, tickSize)
+            : undefined;
 
         res = await executeOrder({
           symbol: payload.symbol,
@@ -237,65 +256,59 @@ export const ExchangeOrderFormPanel: React.FC = () => {
           callbackRate: isTrailingStop ? payload.callbackRate || '1.0' : undefined,
           activationPrice: isTrailingStop ? formattedActivation : undefined,
           currentPrice: currentMarketPrice,
+          attachedTpPrice: attachedTp,
+          attachedSlPrice: attachedSl,
         });
 
-        if (
-          payload.attachedTpEnabled &&
-          payload.attachedTpPrice &&
-          new BigNumber(payload.attachedTpPrice).gt(0)
-        ) {
-          const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
-          const formattedTp = formatPriceToTick(payload.attachedTpPrice, tickSize);
-          try {
-            await executeOrder({
-              symbol: payload.symbol,
-              side: oppositeSide,
-              type: 'TAKE_PROFIT_MARKET',
-              price: '0',
-              size: formattedQty || payload.size,
-              reduceOnly: true,
-              stopPrice: formattedTp,
-              workingType: payload.attachedTpTrigger || 'MARK_PRICE',
-              currentPrice: currentMarketPrice,
-            });
-          } catch (tpErr: any) {
-            console.warn('Attached Take Profit order notice:', tpErr);
-            useNotificationStore.getState().showToast({
-              type: 'SYSTEM',
-              status: 'error',
-              title: 'Take Profit Failed',
-              message: tpErr?.message || 'Failed to place attached Take Profit order',
-            });
+        if (currentExchange !== 'hyperliquid') {
+          if (attachedTp) {
+            const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
+            try {
+              await executeOrder({
+                symbol: payload.symbol,
+                side: oppositeSide,
+                type: 'TAKE_PROFIT_MARKET',
+                price: '0',
+                size: formattedQty || payload.size,
+                reduceOnly: true,
+                stopPrice: attachedTp,
+                workingType: payload.attachedTpTrigger || 'MARK_PRICE',
+                currentPrice: currentMarketPrice,
+              });
+            } catch (tpErr: any) {
+              console.warn('Attached Take Profit order notice:', tpErr);
+              useNotificationStore.getState().showToast({
+                type: 'SYSTEM',
+                status: 'error',
+                title: 'Take Profit Failed',
+                message: tpErr?.message || 'Failed to place attached Take Profit order',
+              });
+            }
           }
-        }
 
-        if (
-          payload.attachedSlEnabled &&
-          payload.attachedSlPrice &&
-          new BigNumber(payload.attachedSlPrice).gt(0)
-        ) {
-          const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
-          const formattedSl = formatPriceToTick(payload.attachedSlPrice, tickSize);
-          try {
-            await executeOrder({
-              symbol: payload.symbol,
-              side: oppositeSide,
-              type: 'STOP_MARKET',
-              price: '0',
-              size: formattedQty || payload.size,
-              reduceOnly: true,
-              stopPrice: formattedSl,
-              workingType: payload.attachedSlTrigger || 'MARK_PRICE',
-              currentPrice: currentMarketPrice,
-            });
-          } catch (slErr: any) {
-            console.warn('Attached Stop Loss order notice:', slErr);
-            useNotificationStore.getState().showToast({
-              type: 'SYSTEM',
-              status: 'error',
-              title: 'Stop Loss Failed',
-              message: slErr?.message || 'Failed to place attached Stop Loss order',
-            });
+          if (attachedSl) {
+            const oppositeSide: 'BUY' | 'SELL' = payload.side === 'BUY' ? 'SELL' : 'BUY';
+            try {
+              await executeOrder({
+                symbol: payload.symbol,
+                side: oppositeSide,
+                type: 'STOP_MARKET',
+                price: '0',
+                size: formattedQty || payload.size,
+                reduceOnly: true,
+                stopPrice: attachedSl,
+                workingType: payload.attachedSlTrigger || 'MARK_PRICE',
+                currentPrice: currentMarketPrice,
+              });
+            } catch (slErr: any) {
+              console.warn('Attached Stop Loss order notice:', slErr);
+              useNotificationStore.getState().showToast({
+                type: 'SYSTEM',
+                status: 'error',
+                title: 'Stop Loss Failed',
+                message: slErr?.message || 'Failed to place attached Stop Loss order',
+              });
+            }
           }
         }
       }
@@ -419,7 +432,13 @@ export const ExchangeAccountPanel: React.FC = () => {
     ? multiAssetsMargin && storeMarginBalance && parseFloat(storeMarginBalance) > 0
       ? parseFloat(storeMarginBalance)
       : parseFloat(balances['USDT']?.total || balances['USDT']?.marginBalance || '0') + totalPnl
-    : parseFloat(balances['USDC']?.total || balances['USD']?.total || '0') + totalPnl;
+    : parseFloat(
+        balances['USDC']?.marginBalance ||
+          balances['USDC']?.total ||
+          balances['USD']?.marginBalance ||
+          balances['USD']?.total ||
+          '0'
+      );
 
   const marginCurrency = isAster ? (multiAssetsMargin ? 'USD' : 'USDT') : 'USDC';
 
@@ -454,6 +473,19 @@ export const ExchangeAccountPanel: React.FC = () => {
           >
             <Sparkles size={12} className="text-warning" />
             <span>Claim Aster Testnet Faucet</span>
+            <ExternalLink size={10} className="opacity-70" />
+          </a>
+        )}
+
+        {currentNetwork === 'testnet' && !isAster && (
+          <a
+            href="https://app.hyperliquid-testnet.xyz"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <Sparkles size={12} className="text-cyan-400" />
+            <span>Claim Hyperliquid Testnet Faucet</span>
             <ExternalLink size={10} className="opacity-70" />
           </a>
         )}

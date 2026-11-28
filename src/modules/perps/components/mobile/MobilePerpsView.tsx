@@ -4,6 +4,7 @@ import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
 import { useAsterDataSync } from '../../adapters/aster/hooks/useAsterDataSync';
 import { useHyperliquidAgent } from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
 import { useHyperliquidDataStream } from '../../adapters/hyperliquid/hooks/useHyperliquidDataStream';
+import { useExchangeManager } from '../../core/ExchangeManager';
 import { useOrderEntryStore } from '../../core/stores/orderEntryStore';
 import { MobileChartScreen } from './MobileChartScreen';
 import { MobileTradeScreen } from './MobileTradeScreen';
@@ -16,8 +17,13 @@ export const MobilePerpsView: React.FC<MobilePerpsViewProps> = ({ sidebar }) => 
   const asterAgent = useAsterAgent();
   const hyperliquidAgent = useHyperliquidAgent();
 
-  useAsterDataSync(asterAgent.isReady ? asterAgent.asterSigner : null, asterAgent.userAddr);
-  useHyperliquidDataStream(hyperliquidAgent.userAddr);
+  const currentExchange = useExchangeManager(s => s.currentExchange);
+
+  useAsterDataSync(
+    currentExchange === 'aster' && asterAgent.isReady ? asterAgent.asterSigner : null,
+    currentExchange === 'aster' ? asterAgent.userAddr : null
+  );
+  useHyperliquidDataStream(currentExchange === 'hyperliquid' ? hyperliquidAgent.userAddr : null);
 
   const [currentScreen, setCurrentScreen] = useState<'chart' | 'trade'>('chart');
   const [tradeSide, setTradeSide] = useState<'BUY' | 'SELL'>('BUY');

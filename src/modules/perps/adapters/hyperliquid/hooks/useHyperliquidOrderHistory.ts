@@ -63,7 +63,10 @@ export const useHyperliquidOrderHistory = (userAddr: string | null, symbol: stri
 
         let filtered = data;
         if (symbol) {
-          filtered = data.filter(o => o.symbol === symbol);
+          const cleanTarget = symbol.replace('-', '').toUpperCase();
+          filtered = data.filter(
+            o => (o.symbol || '').replace('-', '').toUpperCase() === cleanTarget
+          );
         }
 
         if (isMounted) {
@@ -139,7 +142,17 @@ export const useHyperliquidOrderHistory = (userAddr: string | null, symbol: stri
   const recentOrders = useHistoryStore(state => state.recentOrders);
 
   const mergedOrders = useMemo(() => {
-    const socketOrders = symbol ? recentOrders.filter(o => o.symbol === symbol) : recentOrders;
+    const hlSocketOrders = recentOrders.filter(o => {
+      const sym = (o.symbol || '').toUpperCase();
+      return sym.endsWith('USDC') || sym.endsWith('-USDC');
+    });
+    const socketOrders = symbol
+      ? hlSocketOrders.filter(
+          o =>
+            (o.symbol || '').replace('-', '').toUpperCase() ===
+            symbol.replace('-', '').toUpperCase()
+        )
+      : hlSocketOrders;
     const all = [...socketOrders, ...orders];
     const seen = new Set();
     return all

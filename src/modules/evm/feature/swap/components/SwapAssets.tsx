@@ -22,6 +22,11 @@ import { rejectPendingWCRequest } from '../../../../../utils/walletConnectUtils'
 import { ActionGuard } from '../../../../commonfeature/components/ActionGuard';
 import TransactionButton from '../../../../commonfeature/components/TransactionButton';
 import { useAssetSelectorModal } from '../../../../commonfeature/components/useAssetSelectorModal';
+import { AttestationModal } from '../../../../rwa/components/AttestationModal';
+import { OrderProgressModal } from '../../../../rwa/components/OrderProgressModal';
+import { findEvmRwaAsset } from '../../../../rwa/data/assets';
+import { useRwaSwapIntegration } from '../../../../rwa/hooks/useRwaSwapIntegration';
+import { payOptionsFor } from '../../../../rwa/utils/tradeRules';
 import { StellarActivationBanner } from '../../../../walletconnect/components/StellarActivationBanner';
 import { getStellarConfig } from '../../../../walletconnect/config/chains';
 import { WalletType } from '../../../../walletconnect/constants/Wallet';
@@ -124,6 +129,16 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
       setSwapTab('swap');
     }
   }, [isTestnet, swapTab]);
+
+  const rwa = useRwaSwapIntegration({
+    fromChainId,
+    toChainId,
+    sellAddress: sellAssetAddress,
+    buyAddress: buyAssetAddress,
+    sellAmount,
+    evmAddress,
+    getProvider: () => getProvider(WalletType.EVM),
+  });
 
   const actionType = useMemo(
     () =>
@@ -306,6 +321,21 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
 
       const isNative = isExplicitlyNative || (isNativeCurrency && !sellAssetAddress);
 
+      const rwaFallback = findEvmRwaAsset(fromChainId, sellAssetAddress);
+      if (rwaFallback) {
+        return {
+          id: `rwa-${rwaFallback.id}`,
+          symbol: rwaFallback.symbol,
+          name: rwaFallback.name,
+          logoURI: rwaFallback.logo || undefined,
+          balance: '0',
+          decimals: rwaFallback.decimals,
+          isNative: false,
+          address: rwaFallback.address || '',
+          chainId: rwaFallback.chainId || Number(fromChainId),
+        };
+      }
+
       const knownTokenAddr =
         chainConfig?.tokens?.[sellAssetSymbol.toUpperCase()] ||
         chainConfig?.tokens?.[sellAssetSymbol] ||
@@ -364,17 +394,13 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
       if (buyAssetSymbol) {
         const isXlm = buyAssetSymbol.toUpperCase() === 'XLM';
         const chainConfig = getChainById(toChainId);
-        const knownAddr =
-          chainConfig?.tokens?.[buyAssetSymbol.toUpperCase()] ||
-          (buyAssetSymbol.toUpperCase() === 'USDC'
-            ? 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'
-            : '');
+        const knownAddr = chainConfig?.tokens?.[buyAssetSymbol.toUpperCase()] || '';
 
         const resolvedAddress = isXlm
           ? 'native'
           : buyAssetAddress && buyAssetAddress !== 'native'
             ? buyAssetAddress
-            : knownAddr || '';
+            : knownAddr;
 
         return {
           id: `stellar-${toChainId}-${buyAssetSymbol}`,
@@ -417,6 +443,21 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
     if (chainAsset) return chainAsset;
 
     if (buyAssetSymbol) {
+      const rwaFallback = findEvmRwaAsset(toChainId, buyAssetAddress);
+      if (rwaFallback) {
+        return {
+          id: `rwa-${rwaFallback.id}`,
+          symbol: rwaFallback.symbol,
+          name: rwaFallback.name,
+          logoURI: rwaFallback.logo || undefined,
+          balance: '0',
+          decimals: rwaFallback.decimals,
+          isNative: false,
+          address: rwaFallback.address || '',
+          chainId: rwaFallback.chainId || Number(toChainId),
+        };
+      }
+
       const chainConfig = getChainById(toChainId);
       const nativeSymbol = (
         chainConfig?.nativeCurrency?.symbol ||
@@ -505,7 +546,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
   const showFusionScreenRef = useRef(false);
 
   const { currentQuote, setCurrentQuote, isQuoteLoading, fetchUnifiedQuote } = useSwapQuote({
-    sellAmount,
+    sellAmount: rwa.isActive ? '' : sellAmount,
     showFusionScreen: showFusionScreenRef.current,
     actionType,
     fromChainId,
@@ -1114,7 +1155,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
               swapTab === 'swap' ? 'bg-brand text-white shadow-sm' : 'text-muted hover:text-primary'
             }`}
           >
-            Swap & Bridge
+            Swap &amp; Bridge
           </button>
           <button
             type="button"
@@ -1284,6 +1325,23 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                         : a.contract || a.address || a.issuer || '';
                       setSellAssetSymbol(a.symbol);
                       setSellAssetAddress(effAddress);
+                      if (
+                        a.isRwa &&
+                        a.rwaAsset &&
+                        (a.rwaAsset.chain === 'ETH' || a.rwaAsset.chain === 'BSC')
+                      ) {
+                        const opts = payOptionsFor(a.rwaAsset);
+                        const curOk =
+                          String(toChainId) === String(targetChainId) &&
+                          opts.some(
+                            p => p.address.toLowerCase() === (buyAssetAddress || '').toLowerCase()
+                          );
+                        if (!curOk && opts[0]) {
+                          setToChainId(targetChainId);
+                          setBuyAssetSymbol(opts[0].symbol);
+                          setBuyAssetAddress(opts[0].address);
+                        }
+                      }
                       try {
                         await handleChainSelectInModal(targetChainId, true);
                       } catch (err) {
@@ -1444,6 +1502,32 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                         : a.contract || a.address || a.issuer || '';
                       setBuyAssetSymbol(a.symbol);
                       setBuyAssetAddress(effAddress);
+                      if (
+                        a.isRwa &&
+                        a.rwaAsset &&
+                        (a.rwaAsset.chain === 'ETH' || a.rwaAsset.chain === 'BSC')
+                      ) {
+                        const opts = payOptionsFor(a.rwaAsset);
+                        const curOk =
+                          String(fromChainId) === String(targetChainId) &&
+                          opts.some(
+                            p => p.address.toLowerCase() === (sellAssetAddress || '').toLowerCase()
+                          );
+                        if (!curOk && opts[0]) {
+                          setSellAssetSymbol(opts[0].symbol);
+                          setSellAssetAddress(opts[0].address);
+                          if (String(fromChainId) !== String(targetChainId)) {
+                            showToast({
+                              type: 'EVM_SWAP',
+                              title: 'Network Updated',
+                              message: `Switched pair to ${a.rwaAsset.chain === 'BSC' ? 'BNB Chain' : 'Ethereum'} ${opts[0].symbol} for ${a.symbol}.`,
+                              dontSave: true,
+                            });
+                          }
+                          handleChainSelectInModal(targetChainId, true);
+                          return;
+                        }
+                      }
                       handleChainSelectInModal(targetChainId, false);
                     },
                   })
@@ -1497,7 +1581,17 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                             : 'text-3xl sm:text-4xl tabular-nums'
                     }`}
                   >
-                    {currentQuote.loading || swapQuoteLoading ? (
+                    {rwa.isActive ? (
+                      rwa.quoteLoading ? (
+                        <div className="flex flex-col items-end gap-1.5 py-1">
+                          <div className="w-32 sm:w-44 h-8 sm:h-9 rounded-xl animate-shimmer-brand" />
+                        </div>
+                      ) : rwa.calculatedBuyAmount && !isSameAssetSelected ? (
+                        <span>{rwa.calculatedBuyAmount}</span>
+                      ) : (
+                        '--'
+                      )
+                    ) : currentQuote.loading || swapQuoteLoading ? (
                       <div className="flex flex-col items-end gap-1.5 py-1">
                         <div className="w-32 sm:w-44 h-8 sm:h-9 rounded-xl animate-shimmer-brand" />
                       </div>
@@ -2079,6 +2173,7 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
               )}
 
             {currentQuote.error &&
+              !rwa.isActive &&
               !isLoadingExecution &&
               (() => {
                 const isTrustlineErr =
@@ -2138,17 +2233,80 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                 );
               })()}
 
+            {rwa.isActive && rwa.quoteError && (
+              <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 mb-3 text-xs text-red-400">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <span>{rwa.quoteError}</span>
+              </div>
+            )}
+            {rwa.isActive && rwa.quoteOk && (
+              <div className="rounded-xl bg-tertiary border border-divider/40 px-4 py-3 mb-3 space-y-1.5 text-xs">
+                {rwa.rateLabel && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted">Rate</span>
+                    <span className="font-bold text-primary">{rwa.rateLabel}</span>
+                  </div>
+                )}
+                {rwa.feePctLabel && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted">Provider Fee</span>
+                    <span className="font-bold text-primary">{rwa.feePctLabel}</span>
+                  </div>
+                )}
+                {rwa.minReceivedText && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted">Min. Received</span>
+                    <span className="font-bold text-brand">{rwa.minReceivedText}</span>
+                  </div>
+                )}
+                {rwa.closedLabel && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted">Market</span>
+                    <span className="font-medium text-amber-400">{rwa.closedLabel}</span>
+                  </div>
+                )}
+                {rwa.activeAsset?.termsUrl && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted uppercase">{rwa.activeAsset.issuer}</span>
+                    <a
+                      href={rwa.activeAsset.termsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold text-brand hover:underline"
+                    >
+                      Issuer Terms
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
             <ActionGuard
               title="Connect Wallet"
               requiredWallets={requiredWallets}
-              disabled={isLoadingExecution}
+              disabled={rwa.isActive ? rwa.submitting : isLoadingExecution}
             >
               <TransactionButton
-                label={buttonLabel}
-                loadingLabel={executionLoadingLabel}
-                isLoading={isLoadingExecution}
-                isDisabled={isSwapDisabled}
-                isError={!!isErrorState && !isLoadingExecution}
+                label={
+                  rwa.isActive && !isWrongChain
+                    ? rwa.submitting
+                      ? 'Submitting Order…'
+                      : isInsufficientBalance
+                        ? `Insufficient ${sellAssetSymbol}`
+                        : `${rwa.side === 'buy' ? 'Buy' : 'Sell'} ${rwa.activeAsset?.symbol}`
+                    : buttonLabel
+                }
+                loadingLabel={rwa.isActive ? 'Submitting Order…' : executionLoadingLabel}
+                isLoading={rwa.isActive ? rwa.submitting : isLoadingExecution}
+                isDisabled={
+                  rwa.isActive && !isWrongChain
+                    ? !rwa.canExecute || isInsufficientBalance
+                    : isSwapDisabled
+                }
+                isError={
+                  rwa.isActive
+                    ? Boolean(rwa.quoteError) || isInsufficientBalance
+                    : !!isErrorState && !isLoadingExecution
+                }
                 onClick={
                   isWrongChain
                     ? async () => {
@@ -2159,7 +2317,9 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                           console.warn('[SwapAssets] Chain switch failed:', e);
                         }
                       }
-                    : handleUnifiedSwap
+                    : rwa.isActive
+                      ? rwa.executeSwap
+                      : handleUnifiedSwap
                 }
                 icon={
                   isGasless && actionType === 'SWAP' ? (
@@ -2169,6 +2329,21 @@ const SwapAssets: React.FC<SwapAssetsProps> = ({ onClose }) => {
                 className={`relative z-10 ${isErrorState && !isLoadingExecution ? ' border-t-red-500/20 mt-5' : 'mt-5'}`}
               />
             </ActionGuard>
+
+            {rwa.isActive && (
+              <>
+                <AttestationModal
+                  open={rwa.showAttestation}
+                  country={rwa.country}
+                  onAccept={rwa.acceptAttestation}
+                  onDecline={() => rwa.setShowAttestation(false)}
+                />
+                <OrderProgressModal
+                  record={rwa.activeOrder}
+                  onClose={() => rwa.setActiveOrder(null)}
+                />
+              </>
+            )}
           </div>
         </div>
       )}

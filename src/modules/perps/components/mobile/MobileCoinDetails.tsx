@@ -7,6 +7,8 @@ import {
   getSymbolAthl,
   getSymbolDetail,
 } from '../../adapters/aster/api/funding';
+import { getHyperliquidFundingRate } from '../../adapters/hyperliquid/api/funding';
+import { useExchangeManager } from '../../core/ExchangeManager';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { safeFormatNumber } from '../../utils/precision';
@@ -59,27 +61,31 @@ export const MobileCoinDetails: React.FC = () => {
 
   const [activeSubTab, setActiveSubTab] = useState<DetailsSubTab>('overview');
 
-  // Real Funding Info
+  const currentExchange = useExchangeManager(state => state.currentExchange);
   const [fundingData, setFundingData] = useState<any>(null);
   const [fundingCountdown, setFundingCountdown] = useState<string>('--:--:--');
 
-  // Brackets Info
   const [brackets, setBrackets] = useState<any[]>([]);
   const [loadingBrackets, setLoadingBrackets] = useState(false);
 
-  // Token Profile Info
   const [tokenDetail, setTokenDetail] = useState<any>(null);
   const [athlData, setAthlData] = useState<any>(null);
   const [loadingToken, setLoadingToken] = useState(false);
 
-  // Fetch Funding Info
   useEffect(() => {
     let mounted = true;
     const fetchFunding = async () => {
       try {
-        const info = await getRealTimeFundingRate(asterSymbol);
-        if (info && mounted) {
-          setFundingData(info);
+        if (currentExchange === 'hyperliquid') {
+          const info = await getHyperliquidFundingRate(selectedSymbol);
+          if (info && mounted) {
+            setFundingData(info);
+          }
+        } else {
+          const info = await getRealTimeFundingRate(asterSymbol);
+          if (info && mounted) {
+            setFundingData(info);
+          }
         }
       } catch (e) {
         console.warn('Funding fetch notice:', e);
@@ -89,7 +95,7 @@ export const MobileCoinDetails: React.FC = () => {
     return () => {
       mounted = false;
     };
-  }, [asterSymbol]);
+  }, [asterSymbol, selectedSymbol, currentExchange]);
 
   // Live Funding Countdown
   useEffect(() => {

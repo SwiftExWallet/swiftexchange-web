@@ -54,9 +54,9 @@ export function useTradeCalculations(
     } else {
       const quoteBal =
         balances[quoteAsset] || balances['USDT'] || balances['USDC'] || balances['USD'];
-      totalRawWallet = quoteBal
-        ? new BigNumber(quoteBal.total || quoteBal.available || '0').toNumber()
-        : 0;
+      const rawTotal = quoteBal ? parseFloat(quoteBal.total || '0') || 0 : 0;
+      const rawAvail = quoteBal ? parseFloat(quoteBal.available || '0') || 0 : 0;
+      totalRawWallet = rawTotal > 0 ? rawTotal : Math.max(0, rawAvail);
       if (totalRawWallet === 0) {
         const storeTotal = parseFloat(useAccountStore.getState().totalWalletBalance || '0') || 0;
         if (storeTotal > 0) {
@@ -115,7 +115,14 @@ export function useTradeCalculations(
       totalRawWallet + crossUnrealizedLoss - posInitialMargin - orderInitialMargin
     );
 
-    return computedAvailable;
+    const quoteBal =
+      balances[quoteAsset] || balances['USDT'] || balances['USDC'] || balances['USD'];
+    if (computedAvailable > 0) return computedAvailable;
+    if (quoteBal && parseFloat(quoteBal.available || '0') > 0) {
+      return parseFloat(quoteBal.available);
+    }
+
+    return 0;
   }, [balances, positions, orders, assetCtxByMarket, multiAssetsMargin, symbol]);
 
   // Max Position Size Calculation (0% to 100% slider bounds)

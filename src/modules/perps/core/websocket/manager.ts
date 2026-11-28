@@ -20,10 +20,12 @@ export abstract class WebSocketManager {
   private reconnectAttempt = 0;
   private reconnectTimeoutId?: ReturnType<typeof setTimeout>;
 
-  // Set to true on intentional disconnect to prevent reconnect loop
   private isIntentionalClose = false;
 
-  // Ref-counted subscription map — prevents duplicate stream subscriptions
+  private lastMessageTime = 0;
+  private readonly staleThresholdMs = 45000;
+  private watchdogTimer?: ReturnType<typeof setInterval>;
+
   protected subscriptions: Map<string, number> = new Map();
 
   constructor(options: WebSocketManagerOptions) {
@@ -31,10 +33,32 @@ export abstract class WebSocketManager {
     this.pingIntervalMs = options.pingIntervalMs ?? 30000;
     this.reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 1000;
     this.maxReconnectDelayMs = options.maxReconnectDelayMs ?? 30000;
+    this.initLifecycleListeners();
   }
 
+  private initLifecycleListeners(): void {
+    if (typeof window === 'undefined') return;
+    window.addEventListener('online', this.handleOnlineOrVisible);
+    document.addEventListener('visibilitychange', this.handleOnlineOrVisible);
+  }
+
+  private handleOnlineOrVisible = (): void => {
+    if (this.isIntentionalClose) return;
+    const isStale =
+      !this.ws ||
+      this.ws.readyState !== WebSocket.OPEN ||
+      Date.now() - this.lastMessageTime > this.staleThresholdMs;
+    if (isStale) {
+      this.reconnectAttempt = 0;
+      if (this.ws) {
+        this.ws.close();
+        this.ws = null;
+      }
+      this.connect();
+    }
+  };
+
   public connect(): void {
-    // Guard: skip if already open or mid-handshake
     if (
       this.ws &&
       (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)
@@ -46,7 +70,10 @@ export abstract class WebSocketManager {
     this.ws = new WebSocket(this.url);
 
     this.ws.onopen = this.handleOpen.bind(this);
-    this.ws.onmessage = this.handleMessage.bind(this);
+    this.ws.onmessage = (event: MessageEvent) => {
+      this.lastMessageTime = Date.now();
+      this.handleMessage(event);
+    };
     this.ws.onclose = this.handleClose.bind(this);
     this.ws.onerror = this.handleError.bind(this);
   }
@@ -54,7 +81,13 @@ export abstract class WebSocketManager {
   public disconnect(): void {
     this.isIntentionalClose = true;
     this.clearPing();
+    this.clearWatchdog();
     this.clearReconnectTimeout();
+
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.handleOnlineOrVisible);
+      document.removeEventListener('visibilitychange', this.handleOnlineOrVisible);
+    }
 
     if (this.ws) {
       this.ws.onopen = null;
@@ -96,7 +129,9 @@ export abstract class WebSocketManager {
 
   protected handleOpen(): void {
     this.reconnectAttempt = 0;
+    this.lastMessageTime = Date.now();
     this.startPing();
+    this.startWatchdog();
     this.onReconnect();
     perpEventBus.emit(PerpEvent.CONNECTED);
   }
@@ -104,6 +139,7 @@ export abstract class WebSocketManager {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   protected handleClose(_event: CloseEvent): void {
     this.clearPing();
+    this.clearWatchdog();
     if (!this.isIntentionalClose) {
       this.scheduleReconnect();
     }
@@ -117,6 +153,26 @@ export abstract class WebSocketManager {
   protected abstract handleMessage(event: MessageEvent): void;
   protected abstract onReconnect(): void;
   protected abstract ping(): void;
+
+  private startWatchdog(): void {
+    this.clearWatchdog();
+    this.watchdogTimer = setInterval(() => {
+      if (this.isIntentionalClose) return;
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (Date.now() - this.lastMessageTime > this.staleThresholdMs) {
+          console.warn('[WS] Stale watchdog detected zombie connection. Force reconnecting...');
+          this.ws.close();
+        }
+      }
+    }, 10000);
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdogTimer !== undefined) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = undefined;
+    }
+  }
 
   private startPing(): void {
     this.clearPing();
@@ -135,11 +191,12 @@ export abstract class WebSocketManager {
   private scheduleReconnect(): void {
     this.clearReconnectTimeout();
 
-    // Exponential backoff capped at maxReconnectDelayMs
-    const delay = Math.min(
+    const baseDelay = Math.min(
       this.reconnectBaseDelayMs * Math.pow(2, this.reconnectAttempt),
       this.maxReconnectDelayMs
     );
+    const jitter = Math.random() * 0.3 * baseDelay;
+    const delay = Math.floor(baseDelay + jitter);
     this.reconnectAttempt++;
 
     console.warn(

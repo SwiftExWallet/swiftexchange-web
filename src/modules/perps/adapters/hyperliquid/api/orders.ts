@@ -6,9 +6,12 @@ import {
   updateLeverage,
 } from '@nktkas/hyperliquid/api/exchange';
 import { meta, openOrders } from '@nktkas/hyperliquid/api/info';
+import BigNumber from 'bignumber.js';
 import type { Wallet } from 'ethers';
 
+import type { HyperliquidIsolatedSigner } from '../../../../walletconnect/services/hyperliquidAgentKeyManager';
 import { useExchangeManager } from '../../../core/ExchangeManager';
+import { toHyperliquidCoin } from '../../../utils/symbol';
 
 export interface HyperliquidOrderRequest {
   symbol: string;
@@ -28,6 +31,8 @@ export interface HyperliquidOrderRequest {
   timeInForce?: 'GTC' | 'IOC' | 'FOK' | 'GTX' | 'ALO' | 'FrontendMarket';
   stopPrice?: string | number;
   currentPrice?: number;
+  attachedTpPrice?: string | number;
+  attachedSlPrice?: string | number;
 }
 
 let cachedUniverse: { name: string; szDecimals: number; maxLeverage: number }[] | null = null;
@@ -52,10 +57,7 @@ export async function getHyperliquidUniverse(
 }
 
 export async function getHyperliquidAssetId(symbol: string, isTestnet: boolean): Promise<number> {
-  const coin = symbol
-    .split('-')[0]
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toUpperCase();
+  const coin = toHyperliquidCoin(symbol).toUpperCase();
   const universe = await getHyperliquidUniverse(isTestnet);
   const index = universe.findIndex(u => u.name.toUpperCase() === coin);
   if (index === -1) {
@@ -64,30 +66,39 @@ export async function getHyperliquidAssetId(symbol: string, isTestnet: boolean):
   return index;
 }
 
-export function formatHyperliquidPrice(price: number | string): string {
-  const num = typeof price === 'string' ? parseFloat(price) : price;
-  if (isNaN(num) || num <= 0) return '0';
-  if (num >= 10000) return num.toFixed(1);
-  if (num >= 1000) return num.toFixed(2);
-  if (num >= 100) return num.toFixed(3);
-  if (num >= 1) return num.toFixed(4);
-  if (num >= 0.01) return num.toFixed(5);
-  return num.toFixed(6);
+export function formatHyperliquidPrice(price: number | string, szDecimals: number = 4): string {
+  const bn = new BigNumber(price);
+  if (bn.isNaN() || bn.lte(0)) return '0';
+
+  // 1. Hyperliquid price cannot exceed 5 significant figures
+  const maxDecimals = Math.max(0, 6 - szDecimals);
+  const fiveSigFigs = new BigNumber(bn.toPrecision(5, BigNumber.ROUND_HALF_UP));
+
+  // 2. Hyperliquid price cannot have more decimal places than (6 - szDecimals)
+  const clamped = fiveSigFigs.decimalPlaces(maxDecimals, BigNumber.ROUND_HALF_UP);
+
+  // 3. Format as fixed string and strip unnecessary trailing zeros
+  const str = clamped.toFixed(maxDecimals);
+  return str.includes('.') ? str.replace(/\.?0+$/, '') : str;
 }
 
 export function formatHyperliquidSize(size: number | string, szDecimals: number = 4): string {
-  const num = typeof size === 'string' ? parseFloat(size) : size;
-  if (isNaN(num) || num <= 0) return '0';
-  return num.toFixed(szDecimals);
+  const bn = new BigNumber(size);
+  if (bn.isNaN() || bn.lte(0)) return '0';
+
+  // Always truncate/floor size down to step precision to prevent reduce-only/balance overshoots
+  const decimals = Math.max(0, Math.floor(szDecimals));
+  const floored = bn.decimalPlaces(decimals, BigNumber.ROUND_DOWN);
+  const str = floored.toFixed(decimals);
+  return str.includes('.') ? str.replace(/\.?0+$/, '') : str;
 }
 
-/**
- * Places an authentic order on Hyperliquid AppChain via @nktkas/hyperliquid
- */
-export async function placeHyperliquidOrder(
-  wallet: Wallet,
+let hlOrderQueue: Promise<any> = Promise.resolve();
+
+async function executePlaceHyperliquidOrder(
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   req: HyperliquidOrderRequest,
-  isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
+  isTestnet: boolean
 ): Promise<any> {
   const transport = new HttpTransport({ isTestnet });
   const universe = await getHyperliquidUniverse(isTestnet);
@@ -103,18 +114,38 @@ export async function placeHyperliquidOrder(
   let orderTypeObj: any;
 
   if (req.type === 'MARKET') {
-    const curPx =
-      req.currentPrice || (typeof req.price === 'string' ? parseFloat(req.price) : req.price);
-    // Apply 5% slippage protection for market execution
-    const slipPrice = isBuy ? curPx * 1.05 : curPx * 0.95;
-    limitPx = formatHyperliquidPrice(slipPrice);
+    let curPx = 0;
+    try {
+      const mids: any = await transport.request('info', { type: 'allMids' });
+      const coin = universeItem?.name;
+      if (coin && mids && mids[coin]) {
+        curPx = parseFloat(mids[coin]);
+      }
+    } catch {
+      void 0;
+    }
+
+    if (!curPx || curPx <= 0 || isNaN(curPx)) {
+      curPx =
+        req.currentPrice ||
+        (typeof req.price === 'string' ? parseFloat(req.price) : req.price) ||
+        0;
+    }
+
+    if (!curPx || curPx <= 0 || isNaN(curPx)) {
+      throw new Error(`Unable to determine execution price for ${req.symbol}`);
+    }
+
+    const slippageMultiplier = isBuy ? 1.02 : 0.98;
+    const slipPrice = curPx * slippageMultiplier;
+    limitPx = formatHyperliquidPrice(slipPrice, szDecimals);
     orderTypeObj = { limit: { tif: 'FrontendMarket' } };
   } else if (req.type === 'POST_ONLY') {
-    limitPx = formatHyperliquidPrice(req.price);
+    limitPx = formatHyperliquidPrice(req.price, szDecimals);
     orderTypeObj = { limit: { tif: 'Alo' } };
   } else if (req.type === 'STOP_MARKET' || req.type === 'STOP') {
-    const triggerPx = formatHyperliquidPrice(req.stopPrice || req.price);
-    limitPx = formatHyperliquidPrice(req.price || req.stopPrice || 0);
+    const triggerPx = formatHyperliquidPrice(req.stopPrice || req.price, szDecimals);
+    limitPx = formatHyperliquidPrice(req.price || req.stopPrice || 0, szDecimals);
     orderTypeObj = {
       trigger: {
         isMarket: req.type === 'STOP_MARKET',
@@ -123,8 +154,8 @@ export async function placeHyperliquidOrder(
       },
     };
   } else if (req.type === 'TAKE_PROFIT_MARKET' || req.type === 'TAKE_PROFIT') {
-    const triggerPx = formatHyperliquidPrice(req.stopPrice || req.price);
-    limitPx = formatHyperliquidPrice(req.price || req.stopPrice || 0);
+    const triggerPx = formatHyperliquidPrice(req.stopPrice || req.price, szDecimals);
+    limitPx = formatHyperliquidPrice(req.price || req.stopPrice || 0, szDecimals);
     orderTypeObj = {
       trigger: {
         isMarket: req.type === 'TAKE_PROFIT_MARKET',
@@ -134,23 +165,76 @@ export async function placeHyperliquidOrder(
     };
   } else {
     // Standard LIMIT
-    limitPx = formatHyperliquidPrice(req.price);
+    limitPx = formatHyperliquidPrice(req.price, szDecimals);
     const tif = req.timeInForce === 'IOC' ? 'Ioc' : req.timeInForce === 'ALO' ? 'Alo' : 'Gtc';
     orderTypeObj = { limit: { tif } };
   }
 
-  const payload = {
-    orders: [
-      {
+  // Pre-flight check: Hyperliquid enforces a minimum order notional value of $10 USD for opening orders.
+  // Reduce-only closes of smaller positions are allowed through exchange rules.
+  if (!reduceOnly) {
+    const notional = new BigNumber(limitPx).times(sizeFormatted);
+    if (notional.isLessThan(10.0)) {
+      throw new Error(
+        `Minimum order value on Hyperliquid is $10 USD (current: $${notional.toFixed(2)})`
+      );
+    }
+  }
+
+  const ordersList: any[] = [
+    {
+      a: assetId,
+      b: isBuy,
+      p: limitPx,
+      s: sizeFormatted,
+      r: reduceOnly,
+      t: orderTypeObj,
+    },
+  ];
+
+  let grouping: 'na' | 'normalTpsl' = 'na';
+
+  if (!reduceOnly && (req.attachedTpPrice || req.attachedSlPrice)) {
+    grouping = 'normalTpsl';
+    if (req.attachedTpPrice && new BigNumber(req.attachedTpPrice).gt(0)) {
+      const tpPx = formatHyperliquidPrice(req.attachedTpPrice, szDecimals);
+      ordersList.push({
         a: assetId,
-        b: isBuy,
-        p: limitPx,
+        b: !isBuy,
+        p: tpPx,
         s: sizeFormatted,
-        r: reduceOnly,
-        t: orderTypeObj,
-      },
-    ],
-    grouping: 'na' as const,
+        r: true,
+        t: {
+          trigger: {
+            isMarket: true,
+            triggerPx: tpPx,
+            tpsl: 'tp',
+          },
+        },
+      });
+    }
+    if (req.attachedSlPrice && new BigNumber(req.attachedSlPrice).gt(0)) {
+      const slPx = formatHyperliquidPrice(req.attachedSlPrice, szDecimals);
+      ordersList.push({
+        a: assetId,
+        b: !isBuy,
+        p: slPx,
+        s: sizeFormatted,
+        r: true,
+        t: {
+          trigger: {
+            isMarket: true,
+            triggerPx: slPx,
+            tpsl: 'sl',
+          },
+        },
+      });
+    }
+  }
+
+  const payload = {
+    orders: ordersList,
+    grouping,
   };
 
   const response: any = await order({ transport, wallet: wallet as any }, payload);
@@ -177,11 +261,22 @@ export async function placeHyperliquidOrder(
   return response;
 }
 
+export async function placeHyperliquidOrder(
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
+  req: HyperliquidOrderRequest,
+  isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
+): Promise<any> {
+  const runner = () => executePlaceHyperliquidOrder(wallet, req, isTestnet);
+  const resultPromise = hlOrderQueue.then(runner, runner);
+  hlOrderQueue = resultPromise.catch(() => {});
+  return resultPromise;
+}
+
 /**
  * Cancels a single order on Hyperliquid
  */
 export async function cancelHyperliquidOrder(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   symbol: string,
   orderId: string | number,
   isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
@@ -198,20 +293,57 @@ export async function cancelHyperliquidOrder(
     ],
   };
 
-  const res: any = await cancel({ transport, wallet: wallet as any }, payload);
-  if (res?.status === 'err') {
-    throw new Error(
-      typeof res.response === 'string' ? res.response : 'Failed to cancel order on Hyperliquid'
-    );
+  try {
+    const res: any = await cancel({ transport, wallet: wallet as any }, payload);
+    if (res?.status === 'err') {
+      const errStr = typeof res.response === 'string' ? res.response : JSON.stringify(res.response);
+      if (
+        /already (filled|canceled|cancelled)|order (was never placed|not found|does not exist)/i.test(
+          errStr
+        )
+      ) {
+        return { status: 'ok', alreadyDone: true, response: res.response };
+      }
+      throw new Error(errStr || 'Failed to cancel order on Hyperliquid');
+    }
+
+    const statuses = res?.response?.data?.statuses;
+    if (Array.isArray(statuses) && statuses.length > 0) {
+      const firstStatus = statuses[0];
+      if (typeof firstStatus === 'object' && firstStatus !== null && 'error' in firstStatus) {
+        const errStr =
+          typeof firstStatus.error === 'string'
+            ? firstStatus.error
+            : JSON.stringify(firstStatus.error);
+        if (
+          /already (filled|canceled|cancelled)|order (was never placed|not found|does not exist)/i.test(
+            errStr
+          )
+        ) {
+          return { status: 'ok', alreadyDone: true, response: firstStatus };
+        }
+        throw new Error(errStr);
+      }
+    }
+    return res;
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+    if (
+      /already (filled|canceled|cancelled)|order (was never placed|not found|does not exist)/i.test(
+        errMsg
+      )
+    ) {
+      return { status: 'ok', alreadyDone: true };
+    }
+    throw err;
   }
-  return res;
 }
 
 /**
  * Cancels all open orders for a specific symbol or all symbols on Hyperliquid
  */
 export async function cancelAllHyperliquidOrders(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   userAddr: string,
   symbol?: string,
   isTestnet: boolean = useExchangeManager.getState().currentNetwork === 'testnet'
@@ -244,7 +376,7 @@ export async function cancelAllHyperliquidOrders(
  * Updates leverage and margin mode (cross vs isolated) on Hyperliquid
  */
 export async function updateHyperliquidLeverage(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   symbol: string,
   leverage: number,
   isCross: boolean,
@@ -275,7 +407,7 @@ export async function updateHyperliquidLeverage(
  * Adds or removes isolated margin for a position on Hyperliquid
  */
 export async function updateHyperliquidIsolatedMargin(
-  wallet: Wallet,
+  wallet: HyperliquidIsolatedSigner | Wallet | any,
   symbol: string,
   marginDeltaUsd: number,
   isBuy: boolean = true,

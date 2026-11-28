@@ -7,6 +7,7 @@ import { useMarketStore } from '../../../core/stores/marketStore';
 import { useOrderStore } from '../../../core/stores/orderStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
 import { useUnifiedExecution } from '../../../services/useUnifiedExecution';
+import { getPerpExplorerTxUrl } from '../../../utils/explorer';
 import { safeDecimals, safeFormatNumber } from '../../../utils/precision';
 import { TabEmptyState } from './TabEmptyState';
 
@@ -115,9 +116,10 @@ function formatTriggerPrice(o: Order, tickSize?: number): { label: string; value
   return null;
 }
 
-export const OpenOrdersTab: React.FC<Props> = ({ hideOtherSymbols, currentSymbol }) => {
+export const OpenOrdersTab: React.FC<Props> = ({ hideOtherSymbols, currentSymbol, userAddr }) => {
   const orders = useOrderStore(state => state.orders);
   const currentNetwork = useExchangeManager(state => state.currentNetwork);
+  const currentExchange = useExchangeManager(state => state.currentExchange);
   const { isReady, cancelSingleOrder, cancelAll } = useUnifiedExecution();
   const assetCtxByMarket = useTickerStore(state => state.assetCtxByMarket);
   const markets = useMarketStore(state => state.markets);
@@ -162,23 +164,20 @@ export const OpenOrdersTab: React.FC<Props> = ({ hideOtherSymbols, currentSymbol
     }
   };
 
-  const explorerBase =
-    currentNetwork === 'testnet'
-      ? 'https://www.asterdex-testnet.com/en/explorer/tx/'
-      : 'https://www.asterdex.com/en/explorer/tx/';
-
   if (displayOrders.length === 0) {
     return (
-      <TabEmptyState
-        icon={Clock}
-        title="No open orders"
-        description="Your active limit and trigger orders will appear here."
-      />
+      <div className="w-full h-full flex flex-col justify-between bg-secondary">
+        <TabEmptyState
+          icon={Clock}
+          title="No open orders"
+          description="Your active limit and trigger orders will appear here."
+        />
+      </div>
     );
   }
 
   return (
-    <div className="w-full h-full overflow-x-auto overflow-y-auto">
+    <div className="w-full h-full overflow-x-auto overflow-y-auto bg-secondary">
       <div className="md:hidden space-y-2 p-2">
         {displayOrders.length > 0 && (
           <div className="flex items-center justify-between pb-1 px-1">
@@ -285,7 +284,7 @@ export const OpenOrdersTab: React.FC<Props> = ({ hideOtherSymbols, currentSymbol
                 <div>
                   {o.hash && (
                     <a
-                      href={`${explorerBase}${o.hash}`}
+                      href={getPerpExplorerTxUrl(currentExchange, currentNetwork, o.hash, userAddr)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-brand hover:underline inline-flex items-center gap-1 text-[10px]"
@@ -437,7 +436,12 @@ export const OpenOrdersTab: React.FC<Props> = ({ hideOtherSymbols, currentSymbol
                   <td className="px-3 py-2 text-secondary">
                     {o.hash ? (
                       <a
-                        href={`${explorerBase}${o.hash}`}
+                        href={getPerpExplorerTxUrl(
+                          currentExchange,
+                          currentNetwork,
+                          o.hash,
+                          userAddr
+                        )}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-brand hover:underline inline-flex items-center gap-1 font-mono text-[11px]"

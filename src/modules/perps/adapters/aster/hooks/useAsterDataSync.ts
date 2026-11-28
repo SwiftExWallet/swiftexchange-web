@@ -23,19 +23,23 @@ import {
 } from '../api/account';
 import { isAsterDepositRequiredError, isAsterNoAgentError } from '../api/errors';
 import { getOpenOrders } from '../api/orders';
+import type { IAsterSigner } from '../types/signer';
 import { useUserDataStream } from './useUserDataStream';
 
 let activeSnapshotPromise: Promise<any> | null = null;
 let lastSnapshotKey: string | null = null;
 
-export async function fetchAsterSnapshot(signer: Signer, userAddr: string, force = false) {
+export async function fetchAsterSnapshot(
+  signer: Signer | IAsterSigner,
+  userAddr: string,
+  force = false
+) {
   const currentNetwork = useExchangeManager.getState().currentNetwork;
   const snapshotKey = `${userAddr}_${currentNetwork}`;
 
   if (!force && activeSnapshotPromise && lastSnapshotKey === snapshotKey) {
     return activeSnapshotPromise;
   }
-
   useAccountStore.getState().setIsLoading(true);
 
   activeSnapshotPromise = (async () => {
@@ -247,11 +251,12 @@ export async function fetchAsterSnapshot(signer: Signer, userAddr: string, force
   return activeSnapshotPromise;
 }
 
-export function useAsterDataSync(signer: Signer | null, userAddr: string | null) {
+export function useAsterDataSync(signer: Signer | IAsterSigner | null, userAddr: string | null) {
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const currentNetwork = useExchangeManager(s => s.currentNetwork);
   const [isRestSynced, setIsRestSynced] = useState(false);
-  const { connected } = useUserDataStream(signer, userAddr);
+  const isAster = currentExchange === 'aster';
+  const { connected } = useUserDataStream(isAster ? signer : null, isAster ? userAddr : null);
 
   const initializedKeyRef = useRef<string | null>(null);
 
@@ -296,9 +301,13 @@ export function useAsterDataSync(signer: Signer | null, userAddr: string | null)
           setIsRestSynced(true);
         }
       } catch (err: any) {
-        if (!isAsterDepositRequiredError(err) && !isAsterNoAgentError(err)) {
-          initializedKeyRef.current = null;
-        }
+        console.warn('[AsterDataSync] Initial snapshot sync deferred:', err?.message || err);
+        // Delay any retry so we never create a tight re-render/network loop
+        setTimeout(() => {
+          if (isMounted) {
+            initializedKeyRef.current = null;
+          }
+        }, 15000);
       }
     };
 

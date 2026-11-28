@@ -150,7 +150,7 @@ export const WALLET_METADATA_MAP: Record<string, WalletMetadata> = {
     homepage: 'https://swiftexchange.io/',
     redirects: {
       native: 'swiftEx://',
-      universal: 'https://swiftexchange.io/',
+      universal: 'https://app.swiftexchange.io/',
     },
   },
   metamask: {

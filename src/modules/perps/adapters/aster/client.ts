@@ -25,7 +25,7 @@ export class AsterClient implements PerpExchange {
   }
 
   public async disconnect(): Promise<void> {
-    this.wsClient.disconnect();
+    this.wsClient.disconnect(true);
   }
 
   public async getMarkets(): Promise<Market[]> {

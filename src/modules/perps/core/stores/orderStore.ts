@@ -11,22 +11,45 @@ interface OrderStoreState {
   clear: () => void;
 }
 
+const TERMINAL_STATUSES = new Set(['filled', 'canceled', 'rejected']);
+
 export const useOrderStore = create<OrderStoreState>((set, get) => ({
   orders: {},
   setOrders: orders => {
-    const nextOrders: Record<string, Order> = {};
-    orders.forEach(o => {
-      nextOrders[o.id] = o;
+    set(state => {
+      const nextOrders: Record<string, Order> = {};
+      orders.forEach(o => {
+        const existing = state.orders[o.id];
+        if (
+          existing &&
+          TERMINAL_STATUSES.has(existing.status) &&
+          !TERMINAL_STATUSES.has(o.status)
+        ) {
+          nextOrders[o.id] = existing;
+        } else {
+          nextOrders[o.id] = o;
+        }
+      });
+      return { orders: nextOrders };
     });
-    set({ orders: nextOrders });
   },
   updateOrder: order =>
-    set(state => ({
-      orders: {
-        ...state.orders,
-        [order.id]: order,
-      },
-    })),
+    set(state => {
+      const existing = state.orders[order.id];
+      if (
+        existing &&
+        TERMINAL_STATUSES.has(existing.status) &&
+        !TERMINAL_STATUSES.has(order.status)
+      ) {
+        return state;
+      }
+      return {
+        orders: {
+          ...state.orders,
+          [order.id]: order,
+        },
+      };
+    }),
   removeOrder: orderId =>
     set(state => {
       const newOrders = { ...state.orders };

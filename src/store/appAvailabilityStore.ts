@@ -37,7 +37,9 @@ export const useAppAvailabilityStore = create<AppAvailabilityState>((set, get) =
     const { isLoading, lastChecked, availability } = get();
 
     if (isLoading) return availability;
-    if (!force && availability && lastChecked && Date.now() - lastChecked < CACHE_TTL_MS) {
+    // Cache for 60s on success, and enforce a 30s cooldown on failure so error states never loop
+    const cooldownMs = availability ? CACHE_TTL_MS : 30 * 1000;
+    if (!force && lastChecked && Date.now() - lastChecked < cooldownMs) {
       return availability;
     }
 

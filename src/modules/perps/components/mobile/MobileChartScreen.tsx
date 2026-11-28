@@ -7,6 +7,7 @@ import {
   ChevronDown,
   LineChart,
   Loader2,
+  Plus,
   Wallet,
   Zap,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import { useWalletStore } from '../../../walletconnect/store/walletConnectStore'
 import { getSymbolDetail } from '../../adapters/aster/api/funding';
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
 import { useHyperliquidAgent } from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
+import { AlertsBellButton } from '../../alerts/components/AlertsBellButton';
 import { useExchangeManager } from '../../core/ExchangeManager';
 import { useAccountStore } from '../../core/stores/accountStore';
 import { useLeverageStore } from '../../core/stores/leverageStore';
@@ -24,7 +26,9 @@ import { useOrderStore } from '../../core/stores/orderStore';
 import { usePositionStore } from '../../core/stores/positionStore';
 import { useTickerStore } from '../../core/stores/tickerStore';
 import { safeFormatNumber } from '../../utils/precision';
+import { ExchangeNetworkSelector } from '../layout/ExchangeNetworkSelector';
 import { MarketSelectorModal } from '../layout/MarketSelectorModal';
+import { FundingHistoryTab } from '../layout/tabs/FundingHistoryTab';
 import { OpenOrdersTab } from '../layout/tabs/OpenOrdersTab';
 import { OrderHistoryTab } from '../layout/tabs/OrderHistoryTab';
 import { PositionsTab } from '../layout/tabs/PositionsTab';
@@ -170,91 +174,117 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
 
   const positionsCount = Object.keys(positions).length;
   const hasFunds = walletBalance > 0 || positionsCount > 0;
-  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [accountModalTab, setAccountModalTab] = useState<'deposit' | 'withdraw' | 'faucet' | null>(
+    null
+  );
 
   const openOrdersCount = Object.values(orders).filter(
     o => o.status === 'new' || o.status === 'partially_filled'
   ).length;
 
-  // Local UI States
   const [timeframe, setTimeframe] = useState('1d');
   const [chartType, setChartType] = useState<'candle' | 'line'>('candle');
   const [isIntervalSheetOpen, setIsIntervalSheetOpen] = useState(false);
   const [isMarketSelectorOpen, setIsMarketSelectorOpen] = useState(false);
   const [isExpandedAbout, setIsExpandedAbout] = useState(false);
   const [activeBottomTab, setActiveBottomTab] = useState<
-    'positions' | 'orders' | 'orderHistory' | 'tradeHistory' | 'transactionHistory'
+    | 'positions'
+    | 'orders'
+    | 'orderHistory'
+    | 'tradeHistory'
+    | 'transactionHistory'
+    | 'fundingHistory'
   >('positions');
   const [mobileTimeRange, setMobileTimeRange] = useState<'1d' | '1w'>('1w');
 
   return (
-    <div className="flex flex-col h-full w-full bg-secondary text-primary font-body select-none overflow-hidden relative">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.04] shrink-0 bg-secondary z-30">
-        <div className="flex items-center gap-2">
+    <div className="flex flex-col h-full w-full bg-secondary text-text-primary font-body select-none overflow-hidden relative">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border-color shrink-0 bg-secondary z-30">
+        <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={() => window.history.back()}
-            className="w-8 h-8 rounded-full bg-tertiary flex items-center justify-center text-secondary hover:text-primary transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-full bg-bg-tertiary flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors cursor-pointer shrink-0"
           >
             <ArrowLeft size={16} />
           </button>
 
           <button
             onClick={() => setIsMarketSelectorOpen(true)}
-            className="flex items-center gap-2.5 hover:bg-hover px-1.5 py-1 rounded-xl transition-colors cursor-pointer text-left"
+            className="flex items-center gap-2 hover:bg-bg-hover px-2 py-1 rounded-xl transition-colors cursor-pointer text-left min-w-0"
           >
-            <div className="relative shrink-0 flex flex-col items-center">
-              <CoinIcon symbol={selectedSymbol} size={30} />
-              {/* <span className="absolute -bottom-2 text-yellow-950 bg-gradient-to-r from-yellow-400 to-amber-500 text-[8px] leading-tight px-1 py-[0.5px] rounded-[3px] font-bold uppercase tracking-widest shadow-sm z-10 pointer-events-none border border-yellow-200/50">
-                BETA
-              </span> */}
-            </div>
-            <div className="flex flex-col leading-tight ml-0.5">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[15px] font-bold text-primary">{baseAsset}</span>
-                <span className="px-1.5 py-[1px] rounded text-[9px] font-bold bg-tertiary border border-white/[0.08] text-muted">
-                  {maxLeverage}x
-                </span>
-                <ChevronDown size={12} className="text-muted" />
-              </div>
-              <span className="text-[11px] text-muted">
-                {coinDetail?.name || `${baseAsset} Perp`}
+            <CoinIcon symbol={selectedSymbol} size={26} />
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[15px] font-bold text-text-primary truncate">{baseAsset}</span>
+              <span className="text-xs text-text-muted font-normal">/ {quoteAsset}</span>
+              <span className="px-1.5 py-[1px] rounded text-[9px] font-bold bg-bg-tertiary border border-border-color text-text-muted shrink-0">
+                {maxLeverage}x
               </span>
+              <ChevronDown size={13} className="text-text-muted shrink-0" />
             </div>
           </button>
         </div>
 
-        <div className="flex flex-col items-end justify-center leading-tight font-mono-tabular">
-          <span className="text-base font-extrabold text-primary tracking-tight">
+        <div className="flex items-center gap-2 shrink-0">
+          <AlertsBellButton />
+          <ExchangeNetworkSelector />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between px-3.5 py-1.5 bg-secondary border-b border-border-color shrink-0">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="text-lg font-extrabold text-text-primary font-mono-tabular tracking-tight">
             $
             {markPrice
               ? safeFormatNumber(markPrice, markPrice < 10 ? 4 : 2, markPrice < 10 ? 4 : 2, '--')
               : '--'}
           </span>
           <span
-            className={`text-[11px] font-semibold mt-0.5 ${
-              isPositive ? 'text-success' : 'text-danger'
+            className={`text-[11px] font-bold font-mono-tabular px-1.5 py-0.5 rounded shrink-0 ${
+              isPositive ? 'text-success bg-success/10' : 'text-danger bg-danger/10'
             }`}
           >
             {isPositive ? '+' : ''}
-            {changeDiff.toFixed(2)} ({isPositive ? '+' : ''}
-            {changePct.toFixed(2)}%)
+            {changePct.toFixed(2)}%
           </span>
+        </div>
+
+        <div className="flex items-center gap-3 text-xs font-mono-tabular shrink-0">
+          <div className="flex flex-col items-end leading-tight">
+            <span className="text-[9px] text-text-muted font-semibold uppercase">24h Vol</span>
+            <span className="text-[11px] font-medium text-text-primary">
+              ${formatLargeNum(dayVolume)}
+            </span>
+          </div>
+          <div className="flex flex-col items-end leading-tight">
+            <span className="text-[9px] text-text-muted font-semibold uppercase">Oracle</span>
+            <span className="text-[11px] font-medium text-text-primary">
+              $
+              {oraclePrice > 0
+                ? safeFormatNumber(
+                    oraclePrice,
+                    oraclePrice < 10 ? 4 : 2,
+                    oraclePrice < 10 ? 4 : 2,
+                    '--'
+                  )
+                : '--'}
+            </span>
+          </div>
         </div>
       </div>
 
-      <div className="shrink-0 bg-secondary border-b border-white/[0.06] z-10 flex flex-col">
+      <div className="shrink-0 bg-secondary border-b border-border-color z-10 flex flex-col">
         <div className="w-full h-[225px] relative bg-secondary overflow-hidden">
           <MobileCleanChart symbol={selectedSymbol} timeframe={timeframe} chartType={chartType} />
         </div>
 
-        <div className="flex items-center justify-between px-3 py-1.5 border-t border-white/[0.06] shrink-0 bg-secondary">
+        <div className="flex items-center justify-between px-3 py-1.5 border-t border-border-color shrink-0 bg-secondary">
           <button
             onClick={() => setChartType(prev => (prev === 'candle' ? 'line' : 'candle'))}
-            className="w-7 h-7 rounded-lg bg-tertiary hover:bg-hover flex items-center justify-center text-secondary hover:text-primary transition-colors cursor-pointer"
+            className="w-7 h-7 rounded-lg bg-bg-tertiary hover:bg-bg-hover flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
             title="Toggle Line / Candle chart"
           >
             {chartType === 'candle' ? (
-              <CandlestickChart size={15} className="text-primary" />
+              <CandlestickChart size={15} className="text-text-primary" />
             ) : (
               <LineChart size={15} className="text-success" />
             )}
@@ -270,7 +300,7 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
                   className={`px-2 py-0.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                     isActive
                       ? 'bg-brand/20 text-brand font-bold'
-                      : 'text-secondary hover:text-primary hover:bg-tertiary'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
                   }`}
                 >
                   {tf.label}
@@ -280,7 +310,7 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
 
             <button
               onClick={() => setIsIntervalSheetOpen(true)}
-              className="flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-medium text-secondary hover:text-primary hover:bg-tertiary transition-colors cursor-pointer"
+              className="flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer"
             >
               <span>{timeframe}</span>
               <ChevronDown size={11} />
@@ -289,68 +319,15 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none pb-28 relative">
-        <div className="px-4 py-3 border-b border-white/[0.04] bg-secondary">
-          <h3 className="text-sm font-bold text-primary mb-1.5">
-            About {coinDetail?.name || baseAsset}
-          </h3>
-          {isLoadingDetail ? (
-            <p className="text-xs text-muted">Loading project details...</p>
-          ) : coinDetail?.description ? (
-            <p className="text-xs text-secondary leading-relaxed">
-              {isExpandedAbout
-                ? coinDetail.description
-                : coinDetail.description.length > 120
-                  ? `${coinDetail.description.slice(0, 120)}...`
-                  : coinDetail.description}
-              {coinDetail.description.length > 120 && (
-                <button
-                  onClick={() => setIsExpandedAbout(!isExpandedAbout)}
-                  className="text-brand ml-1.5 font-medium hover:underline cursor-pointer"
-                >
-                  {isExpandedAbout ? 'View less' : 'View more'}
-                </button>
-              )}
-            </p>
-          ) : (
-            <p className="text-xs text-muted leading-relaxed">
-              On testnet network, project details are currently not available for {baseAsset}.
-            </p>
-          )}
-        </div>
-
-        <div className="px-4 py-3 border-b border-white/[0.04] bg-secondary">
-          <h3 className="text-sm font-bold text-primary mb-2.5">Stats</h3>
-          <div className="space-y-2 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-secondary">24h volume</span>
-              <span className="font-bold text-primary font-mono-tabular">
-                ${formatLargeNum(dayVolume)} {quoteAsset}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-secondary">Open Interest</span>
-              <span className="font-medium text-primary font-mono-tabular">
-                ${formatLargeNum(openInterest)} {quoteAsset}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-secondary">Oracle Price</span>
-              <span className="font-medium text-primary font-mono-tabular">
-                ${oraclePrice > 0 ? oraclePrice.toFixed(2) : '--'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col min-h-[360px]">
-          <div className="sticky top-0 z-20 flex items-center border-b border-white/[0.04] px-3 bg-secondary text-xs overflow-x-auto scrollbar-none shrink-0 gap-3 shadow-sm">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none pb-28 relative bg-secondary">
+        <div className="flex flex-col min-h-[300px] bg-secondary">
+          <div className="sticky top-0 z-20 flex items-center border-b border-border-color px-3 bg-secondary text-xs overflow-x-auto scrollbar-none shrink-0 gap-3 shadow-sm">
             <button
               onClick={() => setActiveBottomTab('positions')}
               className={`py-2.5 px-1 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                 activeBottomTab === 'positions'
-                  ? 'text-primary font-bold border-b-2 border-brand'
-                  : 'text-secondary hover:text-primary'
+                  ? 'text-text-primary font-bold border-b-2 border-brand'
+                  : 'text-text-muted hover:text-text-primary'
               }`}
             >
               <span>Positions</span>
@@ -365,13 +342,13 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
               onClick={() => setActiveBottomTab('orders')}
               className={`py-2.5 px-1 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                 activeBottomTab === 'orders'
-                  ? 'text-primary font-bold border-b-2 border-brand'
-                  : 'text-secondary hover:text-primary'
+                  ? 'text-text-primary font-bold border-b-2 border-brand'
+                  : 'text-text-muted hover:text-text-primary'
               }`}
             >
               <span>Open Orders</span>
               {openOrdersCount > 0 && (
-                <span className="bg-tertiary text-secondary text-[9px] font-bold px-1.5 py-0.2 rounded-full">
+                <span className="bg-bg-tertiary text-text-secondary text-[9px] font-bold px-1.5 py-0.2 rounded-full">
                   {openOrdersCount}
                 </span>
               )}
@@ -381,8 +358,8 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
               onClick={() => setActiveBottomTab('orderHistory')}
               className={`py-2.5 px-1 transition-colors cursor-pointer whitespace-nowrap ${
                 activeBottomTab === 'orderHistory'
-                  ? 'text-primary font-bold border-b-2 border-brand'
-                  : 'text-secondary hover:text-primary'
+                  ? 'text-text-primary font-bold border-b-2 border-brand'
+                  : 'text-text-muted hover:text-text-primary'
               }`}
             >
               Order History
@@ -392,45 +369,59 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
               onClick={() => setActiveBottomTab('tradeHistory')}
               className={`py-2.5 px-1 transition-colors cursor-pointer whitespace-nowrap ${
                 activeBottomTab === 'tradeHistory'
-                  ? 'text-primary font-bold border-b-2 border-brand'
-                  : 'text-secondary hover:text-primary'
+                  ? 'text-text-primary font-bold border-b-2 border-brand'
+                  : 'text-text-muted hover:text-text-primary'
               }`}
             >
               Trade History
             </button>
 
-            <button
-              onClick={() => setActiveBottomTab('transactionHistory')}
-              className={`py-2.5 px-1 transition-colors cursor-pointer whitespace-nowrap ${
-                activeBottomTab === 'transactionHistory'
-                  ? 'text-primary font-bold border-b-2 border-brand'
-                  : 'text-secondary hover:text-primary'
-              }`}
-            >
-              Transactions
-            </button>
+            {currentExchange === 'hyperliquid' ? (
+              <button
+                onClick={() => setActiveBottomTab('fundingHistory')}
+                className={`py-2.5 px-1 transition-colors cursor-pointer whitespace-nowrap ${
+                  activeBottomTab === 'fundingHistory'
+                    ? 'text-text-primary font-bold border-b-2 border-brand'
+                    : 'text-text-muted hover:text-text-primary'
+                }`}
+              >
+                Funding
+              </button>
+            ) : (
+              <button
+                onClick={() => setActiveBottomTab('transactionHistory')}
+                className={`py-2.5 px-1 transition-colors cursor-pointer whitespace-nowrap ${
+                  activeBottomTab === 'transactionHistory'
+                    ? 'text-text-primary font-bold border-b-2 border-brand'
+                    : 'text-text-muted hover:text-text-primary'
+                }`}
+              >
+                Transactions
+              </button>
+            )}
 
             {(activeBottomTab === 'orderHistory' ||
               activeBottomTab === 'tradeHistory' ||
-              activeBottomTab === 'transactionHistory') && (
+              activeBottomTab === 'transactionHistory' ||
+              activeBottomTab === 'fundingHistory') && (
               <div className="relative inline-flex items-center ml-auto shrink-0">
                 <select
                   value={mobileTimeRange}
                   onChange={e => setMobileTimeRange(e.target.value as any)}
-                  className="bg-tertiary text-secondary hover:text-primary border border-white/[0.08] rounded px-2 py-0.5 text-[10px] outline-none cursor-pointer pr-4 appearance-none transition-colors"
+                  className="bg-bg-tertiary text-text-secondary hover:text-text-primary border border-border-color rounded px-2 py-0.5 text-[10px] outline-none cursor-pointer pr-4 appearance-none transition-colors"
                 >
                   <option value="1d">1d</option>
                   <option value="1w">1w</option>
                 </select>
                 <ChevronDown
                   size={9}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
                 />
               </div>
             )}
           </div>
 
-          <div className="p-3 min-h-[160px] pb-16">
+          <div className="p-3 min-h-[160px] pb-16 bg-secondary">
             {activeBottomTab === 'positions' && (
               <PositionsTab signer={asterSigner} userAddr={userAddr || undefined} />
             )}
@@ -474,31 +465,108 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
                 hideOtherSymbols={false}
               />
             )}
+
+            {activeBottomTab === 'fundingHistory' && (
+              <FundingHistoryTab
+                userAddr={userAddr || ''}
+                asterSymbol={asterSymbol}
+                timeRange={mobileTimeRange}
+                hideOtherSymbols={false}
+              />
+            )}
           </div>
+        </div>
+
+        <div className="px-4 py-3 border-t border-border-color bg-secondary">
+          <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">
+            Market Stats
+          </h3>
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-text-secondary">24h volume</span>
+              <span className="font-bold text-text-primary font-mono-tabular">
+                ${formatLargeNum(dayVolume)} {quoteAsset}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-text-secondary">Open Interest</span>
+              <span className="font-medium text-text-primary font-mono-tabular">
+                ${formatLargeNum(openInterest)} {quoteAsset}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-text-secondary">Oracle Price</span>
+              <span className="font-medium text-text-primary font-mono-tabular">
+                ${oraclePrice > 0 ? oraclePrice.toFixed(2) : '--'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 border-t border-border-color bg-secondary">
+          <button
+            type="button"
+            onClick={() => setIsExpandedAbout(!isExpandedAbout)}
+            className="flex items-center justify-between w-full text-left cursor-pointer"
+          >
+            <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider">
+              About {coinDetail?.name || baseAsset}
+            </h3>
+            <ChevronDown
+              size={14}
+              className={`text-text-muted transition-transform duration-200 ${isExpandedAbout ? 'rotate-180' : ''}`}
+            />
+          </button>
+          {isExpandedAbout && (
+            <div className="mt-2 text-xs text-text-secondary leading-relaxed">
+              {isLoadingDetail ? (
+                <p className="text-text-muted">Loading project details...</p>
+              ) : coinDetail?.description ? (
+                <p>{coinDetail.description}</p>
+              ) : (
+                <p className="text-text-muted">
+                  Project details are currently not available for {baseAsset}.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="fixed sm:absolute bottom-0 left-0 right-0 p-3 bg-secondary/85 backdrop-blur-xl flex flex-col gap-2 z-40 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-white/[0.04]">
+      <div className="fixed sm:absolute bottom-0 left-0 right-0 p-3 bg-secondary/95 backdrop-blur-xl flex flex-col gap-2.5 z-40 shadow-[0_-8px_30px_rgba(0,0,0,0.6)] pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-border-color">
         {isEvmConnected && isAgentReady && (
-          <div className="flex items-center justify-between text-xs px-1 text-secondary">
+          <div className="flex items-center justify-between text-xs px-1">
             <div className="flex items-center gap-1.5 font-medium">
-              <span className="text-muted">Avbl:</span>
-              <span className="font-bold text-primary font-mono-tabular">
+              <span className="text-text-muted text-[11px]">Available:</span>
+              <span className="font-bold text-text-primary font-mono-tabular text-[13px]">
                 {isAccountLoading && !walletBalance && positionsCount === 0 ? (
-                  <span className="animate-pulse">Loading...</span>
+                  <span className="animate-pulse text-text-muted">Loading...</span>
                 ) : (
-                  `${safeFormatNumber(parseFloat(availableBalance || '0') > 0 ? parseFloat(availableBalance!) : walletBalance, 2, 2, '0.00')} ${quoteAsset}`
+                  `$${safeFormatNumber(parseFloat(availableBalance || '0') > 0 ? parseFloat(availableBalance!) : walletBalance, 2, 2, '0.00')}`
                 )}
               </span>
+              <span className="text-[10px] text-text-muted font-normal uppercase">
+                {quoteAsset}
+              </span>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowDepositModal(true)}
-              className="text-brand hover:text-brand-hover font-semibold text-xs flex items-center gap-1 cursor-pointer transition-colors"
-            >
-              <Wallet size={13} />
-              <span>{currentNetwork === 'testnet' ? 'Faucet / Deposit' : 'Deposit'}</span>
-            </button>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setAccountModalTab('deposit')}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand/15 hover:bg-brand/25 text-brand text-xs font-semibold transition-all cursor-pointer border border-brand/30 shadow-xs"
+              >
+                <Plus size={12} strokeWidth={2.5} />
+                <span>{currentNetwork === 'testnet' ? 'Deposit / Faucet' : 'Deposit'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAccountModalTab('withdraw')}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-bg-tertiary hover:bg-bg-hover text-text-secondary hover:text-text-primary text-xs font-medium transition-all cursor-pointer border border-border-color"
+              >
+                <span>Withdraw</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -517,7 +585,7 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
               type="button"
               onClick={() => {
                 if (isDepositError) {
-                  setShowDepositModal(true);
+                  setAccountModalTab('deposit');
                 } else {
                   deriveAgentKey();
                 }
@@ -554,19 +622,19 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
                 </>
               )}
             </button>
-            <p className="text-[10.5px] text-center text-muted leading-tight">
+            <p className="text-[10.5px] text-center text-text-muted leading-tight">
               {deriveState === 'signing'
                 ? 'Confirm the signature request in your wallet'
                 : isDepositError
-                  ? `Account requires initial deposit to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`
-                  : `One-time signature to activate 1-click trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
+                  ? `Account requires initial deposit to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`
+                  : `One-time signature to activate 1-click trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`}
             </p>
           </div>
         ) : isAccountLoading && !walletBalance && positionsCount === 0 ? (
           <button
             type="button"
             disabled
-            className="w-full h-12 rounded-2xl bg-tertiary border border-white/[0.08] font-bold text-[15px] text-muted transition-all shadow-md flex items-center justify-center gap-2 cursor-wait"
+            className="w-full h-12 rounded-2xl bg-bg-tertiary border border-border-color font-bold text-[15px] text-text-muted transition-all shadow-md flex items-center justify-center gap-2 cursor-wait"
           >
             <Loader2 size={18} className="animate-spin text-brand" />
             <span>Loading Account...</span>
@@ -591,23 +659,41 @@ export const MobileChartScreen: React.FC<MobileChartScreenProps> = ({ onOpenTrad
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => setShowDepositModal(true)}
-            className="w-full h-12 rounded-2xl bg-brand hover:bg-brand-hover font-bold text-[15px] text-white transition-all shadow-lg active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 tracking-wide"
-          >
-            <Wallet size={18} />
-            <span>
-              {currentNetwork === 'testnet' ? 'Claim Testnet Faucet / Deposit' : 'Deposit Funds'}
-            </span>
-          </button>
+          <div className="flex items-center gap-2.5 w-full">
+            <button
+              type="button"
+              onClick={() => setAccountModalTab('deposit')}
+              className="flex-1 h-12 rounded-2xl bg-brand hover:bg-brand-hover font-bold text-[14px] text-white transition-all shadow-lg active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 tracking-wide"
+            >
+              <Wallet size={16} />
+              <span>{currentNetwork === 'testnet' ? 'Deposit / Faucet' : 'Deposit Funds'}</span>
+            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => onOpenTrade('BUY')}
+                className="h-12 px-3.5 rounded-2xl bg-success/15 hover:bg-success/25 border border-success/30 font-bold text-[13px] text-success transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1"
+              >
+                <span>Long</span>
+                <ArrowUpRight size={15} strokeWidth={2.5} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenTrade('SELL')}
+                className="h-12 px-3.5 rounded-2xl bg-danger/15 hover:bg-danger/25 border border-danger/30 font-bold text-[13px] text-danger transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1"
+              >
+                <span>Short</span>
+                <ArrowDownRight size={15} strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
       <AccountModal
-        isOpen={showDepositModal}
-        onClose={() => setShowDepositModal(false)}
-        initialTab="deposit"
+        isOpen={accountModalTab !== null}
+        onClose={() => setAccountModalTab(null)}
+        initialTab={accountModalTab || 'deposit'}
       />
 
       <MobileIntervalSheet

@@ -47,8 +47,10 @@ import { EVM_CHAINS, getAsterDepositBridge } from '../../adapters/aster/constant
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
 import { EVM_CHAIN_NAME_MAP, signEVMWithdraw } from '../../adapters/aster/signer';
 import { depositToHyperliquid } from '../../adapters/hyperliquid/api/deposit';
+import { getHyperliquidDepositWithdrawHistory } from '../../adapters/hyperliquid/api/history';
 import { withdrawFromHyperliquid } from '../../adapters/hyperliquid/api/withdraw';
 import { useExchangeManager } from '../../core/ExchangeManager';
+import { getHyperliquidConfig } from '../../core/config/networks';
 import { useAccountStore } from '../../core/stores/accountStore';
 import { startDepositPolling, useDepositTrackerStore } from '../../core/stores/depositTrackerStore';
 import { getCoinIconUrl } from '../../services/coinIconService';
@@ -72,12 +74,17 @@ const ChainSelector: React.FC<{
   onChange: (v: number) => void;
 }> = ({ value, onChange }) => {
   const currentNetwork = useExchangeManager(state => state.currentNetwork);
+  const currentExchange = useExchangeManager(state => state.currentExchange);
   const supportedChains = useMemo(() => {
+    if (currentExchange === 'hyperliquid') {
+      const hlChainId = currentNetwork === 'testnet' ? 421614 : 42161;
+      return [EVM_CHAINS[hlChainId]].filter(Boolean);
+    }
     if (currentNetwork === 'testnet') {
       return [EVM_CHAINS[97], EVM_CHAINS[421614], EVM_CHAINS[11155111]].filter(Boolean);
     }
     return [EVM_CHAINS[56], EVM_CHAINS[42161], EVM_CHAINS[1]].filter(Boolean);
-  }, [currentNetwork]);
+  }, [currentNetwork, currentExchange]);
 
   useEffect(() => {
     if (supportedChains.length > 0 && !supportedChains.some(c => c.id === value)) {
@@ -280,6 +287,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const currentExchange = useExchangeManager(s => s.currentExchange);
   const { asterSigner, userAddr } = useAsterAgent();
   const balances = useAccountStore(state => state.balances);
+  const availableBalance = useAccountStore(state => state.availableBalance);
 
   const pendingDeposits = useDepositTrackerStore(s => s.pendingDeposits);
   const addDepositRecord = useDepositTrackerStore(s => s.addDeposit);
@@ -377,16 +385,40 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
   useEffect(() => {
     if (currentExchange === 'hyperliquid') {
-      setSelectedChainId(42161);
-      // Hyperliquid only supports USDC natively right now via bridge
-      if (activeTab === 'deposit' && selectedDepositAsset?.name !== 'USDC') {
-        const usdcAsset = depositAssets.find(a => a.name === 'USDC');
-        if (usdcAsset) setSelectedDepositAsset(usdcAsset);
-      }
-    }
-  }, [currentExchange, activeTab, depositAssets, selectedDepositAsset]);
+      const targetChainId = currentNetwork === 'testnet' ? 421614 : 42161;
+      setSelectedChainId(targetChainId);
+      const hlConfig = getHyperliquidConfig(currentNetwork);
+      const hlDepositAsset: DepositAsset = {
+        name: 'USDC',
+        displayName: 'USDC',
+        contractAddress: hlConfig.usdcAddress,
+        decimals: 6,
+        network: 'Arbitrum',
+        chainId: targetChainId,
+        isNative: false,
+        isProfit: false,
+        rank: 1,
+      };
+      setDepositAssets([hlDepositAsset]);
+      setSelectedDepositAsset(hlDepositAsset);
 
-  // Withdraw State
+      const hlWithdrawAsset: WithdrawAsset = {
+        name: 'USDC',
+        displayName: 'USDC',
+        contractAddress: hlConfig.usdcAddress,
+        decimals: 6,
+        network: 'Arbitrum',
+        chainId: targetChainId,
+        isNative: false,
+        isProfit: false,
+        rank: 1,
+        withdrawType: 'bridge',
+      };
+      setWithdrawAssets([hlWithdrawAsset]);
+      setSelectedWithdrawAsset(hlWithdrawAsset);
+    }
+  }, [currentExchange, currentNetwork]);
+
   const [withdrawAssets, setWithdrawAssets] = useState<WithdrawAsset[]>([]);
   const [selectedWithdrawAsset, setSelectedWithdrawAsset] = useState<WithdrawAsset | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -396,7 +428,6 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
 
-  // Derive withdraw progress from persistent store
   const withdrawProgress: DepositProgress | null = useMemo(() => {
     if (!activeTx || activeTx.type !== 'WITHDRAW') return null;
     return {
@@ -405,19 +436,16 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     };
   }, [activeTx]);
 
-  // History State
   const [historyRecords, setHistoryRecords] = useState<DepositWithdrawRecord[]>([]);
   const [historyFilter, setHistoryFilter] = useState<'ALL' | 'DEPOSIT' | 'WITHDRAW'>('ALL');
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  // Sync when modal opens/closes without wiping background transaction
   useEffect(() => {
     if (!isOpen) {
       setShowDepositConfirm(false);
       setShowWithdrawConfirm(false);
       return;
     }
-    // If active transaction exists, open directly to corresponding tab!
     const currentActive = useDepositTrackerStore.getState().activeTransaction;
     if (currentActive) {
       setActiveTab(currentActive.type === 'DEPOSIT' ? 'deposit' : 'withdraw');
@@ -427,9 +455,26 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     if (userAddr && !destinationAddress) setDestinationAddress(userAddr);
   }, [isOpen, initialTab, userAddr]);
 
-  // Fetch Deposit Assets
   useEffect(() => {
     if (!isOpen || activeTab !== 'deposit') return;
+    if (currentExchange === 'hyperliquid') {
+      const targetChainId = currentNetwork === 'testnet' ? 421614 : 42161;
+      const hlConfig = getHyperliquidConfig(currentNetwork);
+      const hlAsset: DepositAsset = {
+        name: 'USDC',
+        displayName: 'USDC',
+        contractAddress: hlConfig.usdcAddress,
+        decimals: 6,
+        network: 'Arbitrum',
+        chainId: targetChainId,
+        isNative: false,
+        isProfit: false,
+        rank: 1,
+      };
+      setDepositAssets([hlAsset]);
+      setSelectedDepositAsset(hlAsset);
+      return;
+    }
     let alive = true;
     getDepositAssets(String(selectedChainId), accountType, 'EVM')
       .then(assets => {
@@ -447,11 +492,29 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     return () => {
       alive = false;
     };
-  }, [isOpen, activeTab, selectedChainId, accountType]);
+  }, [isOpen, activeTab, selectedChainId, accountType, currentExchange, currentNetwork]);
 
-  // Fetch Withdraw Assets & User Limits
   useEffect(() => {
     if (!isOpen || activeTab !== 'withdraw') return;
+    if (currentExchange === 'hyperliquid') {
+      const targetChainId = currentNetwork === 'testnet' ? 421614 : 42161;
+      const hlConfig = getHyperliquidConfig(currentNetwork);
+      const hlAsset: WithdrawAsset = {
+        name: 'USDC',
+        displayName: 'USDC',
+        contractAddress: hlConfig.usdcAddress,
+        decimals: 6,
+        network: 'Arbitrum',
+        chainId: targetChainId,
+        isNative: false,
+        isProfit: false,
+        rank: 1,
+        withdrawType: 'bridge',
+      };
+      setWithdrawAssets([hlAsset]);
+      setSelectedWithdrawAsset(hlAsset);
+      return;
+    }
     let alive = true;
     getWithdrawAssets(String(selectedChainId), accountType, 'EVM')
       .then(assets => {
@@ -481,9 +544,17 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     return () => {
       alive = false;
     };
-  }, [isOpen, activeTab, selectedChainId, accountType, currentNetwork, userAddr, asterSigner]);
+  }, [
+    isOpen,
+    activeTab,
+    selectedChainId,
+    accountType,
+    currentNetwork,
+    userAddr,
+    asterSigner,
+    currentExchange,
+  ]);
 
-  // Chain-specific withdraw details
   const chainWithdrawDetails = useMemo(
     () =>
       getChainWithdrawDetails(
@@ -495,7 +566,6 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     [withdrawInfo, selectedWithdrawAsset, selectedChainId, accountType]
   );
 
-  // Fetch On-chain Wallet Balance
   const refreshWalletBalance = useCallback(async () => {
     if (!userAddr || !selectedDepositAsset) {
       setWalletTokenBalance('0');
@@ -517,20 +587,31 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     }
   }, [activeTab, selectedDepositAsset, selectedChainId, refreshWalletBalance]);
 
-  // Aster Bridge Deposit Address for current chain
   const depositBridgeAddress = useMemo(() => {
     try {
+      if (currentExchange === 'hyperliquid') {
+        const config = getHyperliquidConfig(currentNetwork);
+        return config.depositBridge;
+      }
       return getAsterDepositBridge(selectedChainId);
     } catch {
       return '';
     }
-  }, [selectedChainId]);
+  }, [selectedChainId, currentExchange, currentNetwork]);
 
-  // History Fetcher
   const fetchHistory = useCallback(async () => {
-    if (!asterSigner || !userAddr) return;
+    if (!userAddr) return;
     setIsLoadingHistory(true);
     try {
+      if (currentExchange === 'hyperliquid') {
+        const records = await getHyperliquidDepositWithdrawHistory(userAddr, {
+          type: historyFilter === 'ALL' ? undefined : historyFilter,
+          limit: 30,
+        });
+        setHistoryRecords(records || []);
+        return;
+      }
+      if (!asterSigner) return;
       const records = await getDepositWithdrawHistory(asterSigner, userAddr, {
         type: historyFilter === 'ALL' ? undefined : historyFilter,
         limit: 30,
@@ -542,34 +623,42 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     } finally {
       setIsLoadingHistory(false);
     }
-  }, [asterSigner, userAddr, historyFilter, accountType]);
+  }, [asterSigner, userAddr, historyFilter, accountType, currentExchange]);
 
   useEffect(() => {
     if (isOpen && activeTab === 'history') fetchHistory();
   }, [isOpen, activeTab, fetchHistory]);
 
-  // Balance & Withdrawable limits
   const currentBalance = useMemo(() => {
+    if (currentExchange === 'hyperliquid') {
+      return balances['USDC']?.available || availableBalance || '0';
+    }
     const sym = selectedWithdrawAsset?.name || 'USDT';
     return balances[sym]?.available || '0';
-  }, [balances, selectedWithdrawAsset]);
+  }, [balances, selectedWithdrawAsset, currentExchange, availableBalance]);
 
   const maxWithdrawable = useMemo(() => {
+    if (currentExchange === 'hyperliquid') {
+      const bal = new BigNumber(currentBalance || 0);
+      return bal.isGreaterThan(0) ? bal.toString() : '0';
+    }
     const bal = new BigNumber(currentBalance || 0);
     if (withdrawInfo) {
       const fromChain = new BigNumber(chainWithdrawDetails.maxAmount || 0);
       return BigNumber.min(bal, fromChain).toString();
     }
     return bal.toString();
-  }, [currentBalance, chainWithdrawDetails.maxAmount, withdrawInfo]);
+  }, [currentBalance, chainWithdrawDetails.maxAmount, withdrawInfo, currentExchange]);
 
   const netReceiveAmount = useMemo(() => {
     const gross = new BigNumber(withdrawAmount || 0);
-    const fee = new BigNumber(chainWithdrawDetails.fee || 0);
+    const fee = new BigNumber(
+      currentExchange === 'hyperliquid' ? 1 : chainWithdrawDetails.fee || 0
+    );
     if (gross.isNaN() || gross.isLessThanOrEqualTo(0)) return '0';
     const net = gross.minus(fee);
     return net.isGreaterThan(0) ? net.toString() : '0';
-  }, [withdrawAmount, chainWithdrawDetails.fee]);
+  }, [withdrawAmount, chainWithdrawDetails.fee, currentExchange]);
 
   // Network Switch Handler
   const handleNetworkChange = async (chainId: number) => {
@@ -645,11 +734,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     try {
       if (currentExchange === 'hyperliquid') {
         // HYPERLIQUID NATIVE DEPOSIT FLOW
-        if (selectedChainId !== 42161) {
+        const targetChainId = currentNetwork === 'testnet' ? 421614 : 42161;
+        if (selectedChainId !== targetChainId) {
           updateActiveTx({
-            message: 'Please switch to Arbitrum One in your wallet...',
+            message: `Please switch to ${currentNetwork === 'testnet' ? 'Arbitrum Sepolia' : 'Arbitrum One'} in your wallet...`,
           });
-          await switchOrAddChain(provider, 42161);
+          await switchOrAddChain(provider, targetChainId);
         }
 
         const res = await depositToHyperliquid(provider, depositAmount, progress => {
@@ -763,22 +853,37 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     if (num.isGreaterThan(max)) {
       useNotificationStore.getState().showToast({
         type: 'SYSTEM',
-        title: 'Exceeds Chain Balance',
+        title: 'Exceeds Available Balance',
         status: 'error',
         message: max.isZero()
-          ? `No ${selectedWithdrawAsset.name} available on this chain. Deposited tokens must be withdrawn on the same chain they were deposited.`
-          : `Max withdrawable on this chain is ${formatDisplayAmount(maxWithdrawable)} ${selectedWithdrawAsset.name}.`,
+          ? currentExchange === 'hyperliquid'
+            ? 'No USDC available for withdrawal.'
+            : `No ${selectedWithdrawAsset.name} available on this chain. Deposited tokens must be withdrawn on the same chain they were deposited.`
+          : currentExchange === 'hyperliquid'
+            ? `Max withdrawable is ${formatDisplayAmount(maxWithdrawable)} USDC.`
+            : `Max withdrawable on this chain is ${formatDisplayAmount(maxWithdrawable)} ${selectedWithdrawAsset.name}.`,
       });
       return;
     }
-    const remaining = new BigNumber(withdrawInfo?.userRemainingDailyLimit ?? '999999999');
-    if (num.isGreaterThan(remaining)) {
-      useNotificationStore.getState().showToast({
-        type: 'DYDX',
-        title: 'Daily Limit Exceeded',
-        message: `Remaining: ${remaining.toFormat()} USDT`,
-      });
-      return;
+    if (currentExchange === 'hyperliquid') {
+      if (num.isLessThanOrEqualTo(1)) {
+        useNotificationStore.getState().showToast({
+          type: 'DYDX',
+          title: 'Amount Too Low',
+          message: 'Withdrawal amount must be greater than the 1 USDC bridge fee.',
+        });
+        return;
+      }
+    } else {
+      const remaining = new BigNumber(withdrawInfo?.userRemainingDailyLimit ?? '999999999');
+      if (num.isGreaterThan(remaining)) {
+        useNotificationStore.getState().showToast({
+          type: 'DYDX',
+          title: 'Daily Limit Exceeded',
+          message: `Remaining: ${remaining.toFormat()} USDT`,
+        });
+        return;
+      }
     }
     setShowWithdrawConfirm(true);
   };
@@ -806,16 +911,17 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       if (!provider) throw new Error('EVM wallet not connected');
 
       if (currentExchange === 'hyperliquid') {
-        if (selectedChainId !== 42161) {
+        const targetChainId = currentNetwork === 'testnet' ? 421614 : 42161;
+        const targetChainName = currentNetwork === 'testnet' ? 'Arbitrum Sepolia' : 'Arbitrum One';
+        if (selectedChainId !== targetChainId) {
           updateActiveTx({
-            message: 'Please switch your wallet to Arbitrum One...',
+            message: `Please switch your wallet to ${targetChainName}...`,
           });
-          await switchOrAddChain(provider, 42161);
+          await switchOrAddChain(provider, targetChainId);
         }
         const ep = new ethers.BrowserProvider(provider as any);
         const userWalletSigner = await ep.getSigner();
 
-        // HYPERLIQUID WITHDRAW FLOW
         await withdrawFromHyperliquid(
           userWalletSigner,
           destinationAddress,
@@ -974,7 +1080,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
               <p className="text-[12px] text-secondary leading-relaxed">
                 Get free testnet funds to trade risk-free on{' '}
                 <strong className="text-primary font-semibold">
-                  {currentExchange === 'hyperliquid' ? 'Hyperliquid Testnet' : 'Aster V3 Testnet'}
+                  {currentExchange === 'hyperliquid' ? 'Hyperliquid Testnet' : 'Aster Testnet'}
                 </strong>
                 . Claim tokens below using your connected EVM wallet:
               </p>
@@ -1880,7 +1986,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     ],
                     ['Destination', destinationAddress],
                     ['Gross Amount', `${withdrawAmount} ${selectedWithdrawAsset?.name}`],
-                    ['Gas Fee', `${chainWithdrawDetails.fee} ${selectedWithdrawAsset?.name}`],
+                    [
+                      'Fee',
+                      currentExchange === 'hyperliquid'
+                        ? '1 USDC'
+                        : `${chainWithdrawDetails.fee} ${selectedWithdrawAsset?.name}`,
+                    ],
                   ].map(([label, val]) => (
                     <div key={label} className="flex justify-between gap-3">
                       <span className="text-secondary shrink-0">{label}</span>
@@ -2001,13 +2112,23 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                   />
                 </div>
 
-                <div className="flex items-start gap-2 p-2.5 rounded-xl bg-tertiary/70 border border-white/[0.06] text-[11px] text-secondary leading-relaxed">
-                  <Info size={14} className="shrink-0 text-muted mt-0.5" />
-                  <span>
-                    Deposited tokens must be withdrawn on the same chain they were deposited;
-                    profits (USDT) can be withdrawn on any supported chain.
-                  </span>
-                </div>
+                {currentExchange === 'hyperliquid' ? (
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-tertiary/70 border border-white/[0.06] text-[11px] text-secondary leading-relaxed">
+                    <Info size={14} className="shrink-0 text-muted mt-0.5" />
+                    <span>
+                      Withdrawals are bridged directly from Hyperliquid L1 to your Arbitrum address
+                      in USDC. Standard bridge fee is 1 USDC.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-tertiary/70 border border-white/[0.06] text-[11px] text-secondary leading-relaxed">
+                    <Info size={14} className="shrink-0 text-muted mt-0.5" />
+                    <span>
+                      Deposited tokens must be withdrawn on the same chain they were deposited;
+                      profits (USDT) can be withdrawn on any supported chain.
+                    </span>
+                  </div>
+                )}
 
                 <div className="bg-tertiary rounded-xl p-3 border border-color space-y-1.5 text-[11px]">
                   <div className="flex justify-between text-secondary">
@@ -2019,14 +2140,18 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     </span>
                   </div>
                   <div className="flex justify-between text-secondary">
-                    <span>Network Gas Fee</span>
+                    <span>
+                      {currentExchange === 'hyperliquid' ? 'Bridge Fee' : 'Network Gas Fee'}
+                    </span>
                     <span className="text-primary font-mono font-medium">
-                      {isLoadingWithdrawInfo
-                        ? '...'
-                        : `${chainWithdrawDetails.fee} ${selectedWithdrawAsset?.name || ''}`}
+                      {currentExchange === 'hyperliquid'
+                        ? '1 USDC'
+                        : isLoadingWithdrawInfo
+                          ? '...'
+                          : `${chainWithdrawDetails.fee} ${selectedWithdrawAsset?.name || ''}`}
                     </span>
                   </div>
-                  {withdrawInfo && (
+                  {currentExchange !== 'hyperliquid' && withdrawInfo && (
                     <div className="flex justify-between text-secondary">
                       <span>24h Remaining Limit</span>
                       <span className="text-primary font-mono font-medium">
@@ -2034,7 +2159,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                       </span>
                     </div>
                   )}
-                  {chainWithdrawDetails.chainLimit > 0 && (
+                  {currentExchange !== 'hyperliquid' && chainWithdrawDetails.chainLimit > 0 && (
                     <div className="flex justify-between text-secondary">
                       <span>Chain Limit</span>
                       <span className="text-primary font-mono font-medium">
@@ -2052,7 +2177,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </div>
 
                 {isEvmConnected ? (
-                  currentNetwork === 'testnet' ? (
+                  currentNetwork === 'testnet' && currentExchange !== 'hyperliquid' ? (
                     <div className="space-y-2">
                       <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[12px] text-amber-500 space-y-1">
                         <div className="font-semibold flex items-center gap-1.5">
@@ -2080,15 +2205,21 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                         !isPositiveNumber(withdrawAmount) ||
                         !ethers.isAddress(destinationAddress) ||
                         new BigNumber(withdrawAmount).isGreaterThan(maxWithdrawable) ||
-                        new BigNumber(maxWithdrawable).isLessThanOrEqualTo(0)
+                        new BigNumber(maxWithdrawable).isLessThanOrEqualTo(0) ||
+                        (currentExchange === 'hyperliquid' &&
+                          new BigNumber(withdrawAmount).isLessThanOrEqualTo(1))
                       }
                       className="w-full h-11 bg-brand hover:bg-brand-hover text-white font-semibold text-[13px] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-sm flex items-center justify-center"
                     >
                       {new BigNumber(maxWithdrawable).isLessThanOrEqualTo(0)
-                        ? `No ${selectedWithdrawAsset?.name || 'Asset'} on this Chain`
+                        ? `No ${selectedWithdrawAsset?.name || 'USDC'} to Withdraw`
                         : new BigNumber(withdrawAmount || '0').isGreaterThan(maxWithdrawable)
-                          ? 'Amount Exceeds Chain Balance'
-                          : 'Withdrawal'}
+                          ? 'Amount Exceeds Available Balance'
+                          : currentExchange === 'hyperliquid' &&
+                              isPositiveNumber(withdrawAmount) &&
+                              new BigNumber(withdrawAmount).isLessThanOrEqualTo(1)
+                            ? 'Minimum withdrawal is > 1 USDC'
+                            : `Withdraw ${selectedWithdrawAsset?.name || 'USDC'}`}
                     </button>
                   )
                 ) : (

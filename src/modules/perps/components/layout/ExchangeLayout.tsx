@@ -29,7 +29,7 @@ export const ExchangeLayout: React.FC<ExchangeLayoutProps> = ({ sidebar }) => {
             <ExchangeChartPanel />
           </div>
 
-          <div className="w-[300px] shrink-0 h-full min-h-0 overflow-hidden">
+          <div className="w-[315px] shrink-0 h-full min-h-0 overflow-hidden">
             <OrderbookPanel />
           </div>
           <div className="w-[295px] shrink-0 h-full min-h-0 overflow-hidden">

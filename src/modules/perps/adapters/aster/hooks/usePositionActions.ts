@@ -2,9 +2,10 @@ import { useCallback, useState } from 'react';
 
 import type { Signer } from 'ethers';
 
+import type { IAsterSigner } from '../types/signer';
 import { useOrders } from './useOrders';
 
-export function usePositionActions(signer: Signer | null, userAddr: string | null) {
+export function usePositionActions(signer: Signer | IAsterSigner | null, userAddr: string | null) {
   const [isProcessing, setIsProcessing] = useState(false);
   const { place } = useOrders(signer, userAddr);
 

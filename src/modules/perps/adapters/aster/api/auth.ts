@@ -3,6 +3,7 @@ import { type Signer, getAddress } from 'ethers';
 import { asterHttpClient } from '../client/asterHttpClient';
 import { AsterUserRejectedError } from '../client/errors';
 import { getAsterChainId, getAsterRestUrl } from '../constants';
+import type { IAsterSigner } from '../types/signer';
 import { parseAsterError } from './errors';
 
 export function buildSortedQueryString(params: Record<string, string>): string {
@@ -131,7 +132,7 @@ const ALLOWED_ASTER_HOSTNAMES = new Set([
 ]);
 
 export async function signedRequest(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
@@ -167,43 +168,69 @@ export async function signedRequest(
     }
   }
 
-  let signerAddr: string;
-  try {
-    signerAddr = await signer.getAddress();
-  } catch (err: any) {
-    if (err?.code === 4001 || /rejected|denied/i.test(err?.message || '')) {
-      throw new AsterUserRejectedError('User rejected address retrieval.');
-    }
-    throw err;
-  }
-
   const chainId = getAsterChainId();
-  const serverTime = await getSyncedServerTime(effectiveBaseUrl);
-  const nonce = generateMonotonicNonce(serverTime);
-
-  const allParams: Record<string, string> = {
-    ...params,
-    user: getAddress(userAddr),
-    signer: getAddress(signerAddr),
-    nonce,
-    timestamp: String(serverTime),
-    recvWindow: '5000',
-  };
-
-  const sortedQs = buildSortedQueryString(allParams);
-  const typedData = buildTypedData(sortedQs, chainId);
-
   let signature: string;
-  try {
-    signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
-  } catch (err: any) {
-    if (err?.code === 4001 || /rejected|denied|user rejected/i.test(err?.message || '')) {
-      throw new AsterUserRejectedError('User rejected cryptographic signature.');
-    }
-    throw err;
-  }
+  let finalQs: string;
 
-  const finalQs = `${sortedQs}&signature=${signature}`;
+  if ('signAsterRequest' in signer) {
+    const serverTime = await getSyncedServerTime(effectiveBaseUrl);
+    const signResult = await signer.signAsterRequest({
+      userAddress: userAddr,
+      method,
+      path,
+      params,
+      chainId,
+      serverTime,
+    });
+    signature = signResult.signature;
+
+    const allParams: Record<string, string> = {
+      ...params,
+      user: getAddress(userAddr),
+      signer: getAddress(signResult.signerAddress),
+      nonce: signResult.nonce,
+      timestamp: signResult.timestamp,
+      recvWindow: '5000',
+    };
+    const sortedQs = buildSortedQueryString(allParams);
+    finalQs = `${sortedQs}&signature=${signature}`;
+  } else {
+    let signerAddr: string;
+    try {
+      signerAddr = await signer.getAddress();
+    } catch (err: any) {
+      if (err?.code === 4001 || /rejected|denied/i.test(err?.message || '')) {
+        throw new AsterUserRejectedError('User rejected address retrieval.');
+      }
+      throw err;
+    }
+
+    const serverTime = await getSyncedServerTime(effectiveBaseUrl);
+    const nonce = generateMonotonicNonce(serverTime);
+
+    const allParams: Record<string, string> = {
+      ...params,
+      user: getAddress(userAddr),
+      signer: getAddress(signerAddr),
+      nonce,
+      timestamp: String(serverTime),
+      recvWindow: '5000',
+    };
+
+    const sortedQs = buildSortedQueryString(allParams);
+    const typedData = buildTypedData(sortedQs, chainId);
+
+    try {
+      signature = await signer.signTypedData(typedData.domain, EIP712_TYPES, typedData.message);
+    } catch (err: any) {
+      if (err?.code === 4001 || /rejected|denied|user rejected/i.test(err?.message || '')) {
+        throw new AsterUserRejectedError('User rejected cryptographic signature.');
+      }
+      throw err;
+    }
+
+    finalQs = `${sortedQs}&signature=${signature}`;
+  }
 
   let url: string;
   let options: import('../client/asterHttpClient').AsterRequestOptions;

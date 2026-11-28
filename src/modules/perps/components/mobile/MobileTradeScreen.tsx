@@ -40,6 +40,7 @@ import {
   safeDecimals,
   safeFormatNumber,
 } from '../../utils/precision';
+import { ExchangeNetworkSelector } from '../layout/ExchangeNetworkSelector';
 import { AccountModal } from '../trade/AccountModal';
 import { LeverageModal } from '../trade/LeverageModal';
 import { TpSlSection } from '../trade/TpSlSection';
@@ -164,6 +165,24 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   const isEvmConnected = useWalletStore(state => !!state.connectedWallets.evm?.address);
   const openWalletModal = useWalletStore(state => state.openModal);
   const isDepositError = deriveState === 'error' && deriveError?.message?.includes('Must deposit');
+  const isSignerOffline =
+    deriveState === 'error' &&
+    (deriveError?.message?.includes('Signer') ||
+      deriveError?.message?.includes('offline') ||
+      deriveError?.message?.includes('Unavailable'));
+
+  useEffect(() => {
+    if (currentExchange === 'hyperliquid') {
+      const currentType = useOrderEntryStore.getState().orderType;
+      if (
+        currentType === 'SCALED' ||
+        currentType === 'CHASE' ||
+        currentType === 'TRAILING_STOP_MARKET'
+      ) {
+        useOrderEntryStore.getState().setOrderType('LIMIT');
+      }
+    }
+  }, [currentExchange]);
 
   // Sync store for symbol
   useEffect(() => {
@@ -392,10 +411,11 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
     store.attachedSlPrice,
   ]);
 
-  // Local state
   const [showOrderTypeMenu, setShowOrderTypeMenu] = useState(false);
   const [showLeverageModal, setShowLeverageModal] = useState(false);
-  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [accountModalTab, setAccountModalTab] = useState<'deposit' | 'withdraw' | 'faucet' | null>(
+    null
+  );
   const [sliderVal, setSliderVal] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -759,39 +779,42 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
   }, [isSubmitting, isSigning, store.orderType, isLong]);
 
   return (
-    <div className="flex flex-col h-full w-full bg-secondary text-primary font-sans select-none">
-      <div className="flex items-center justify-between px-3.5 py-2.5 bg-secondary border-b border-white/[0.06] shrink-0">
-        <div className="flex items-center gap-3">
+    <div className="flex flex-col h-full w-full bg-bg-primary text-text-primary font-sans select-none">
+      <div className="flex items-center justify-between px-3 py-2 bg-bg-secondary border-b border-border-color shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           <button
             onClick={onBack}
-            className="w-9 h-9 rounded-full bg-tertiary flex items-center justify-center text-primary hover:bg-hover transition-colors cursor-pointer border border-white/[0.08]"
+            className="w-8 h-8 rounded-full bg-bg-tertiary flex items-center justify-center text-text-primary hover:bg-bg-hover transition-colors cursor-pointer border border-border-color shrink-0"
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={16} />
           </button>
-          <div className="flex flex-col">
-            <span className={`text-[15px] font-bold ${isLong ? 'text-success' : 'text-danger'}`}>
+          <div className="flex flex-col min-w-0 leading-tight">
+            <span
+              className={`text-[14px] font-bold truncate ${isLong ? 'text-success' : 'text-danger'}`}
+            >
               {isLong ? 'Open Long' : 'Open Short'}
             </span>
-            <span className="text-[11px] text-muted font-mono-tabular">
+            <span className="text-[11px] text-text-muted font-mono-tabular truncate">
               {baseAsset} ${currentPrice ? currentPrice.toLocaleString('en-US') : '--'}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <ExchangeNetworkSelector />
           <div className="relative">
             <button
               onClick={() => setShowOrderTypeMenu(true)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors cursor-pointer shadow-xs ${
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer shadow-xs ${
                 isAdvancedOrder(store.orderType)
                   ? 'bg-brand/15 border-brand text-brand font-bold'
-                  : 'bg-tertiary hover:bg-hover border-white/[0.08] text-primary'
+                  : 'bg-bg-tertiary hover:bg-bg-hover border-border-color text-text-primary'
               }`}
             >
               <span>{getOrderTypeLabel(store.orderType)}</span>
               <ChevronDown
-                size={12}
-                className={isAdvancedOrder(store.orderType) ? 'text-brand' : 'text-secondary'}
+                size={11}
+                className={isAdvancedOrder(store.orderType) ? 'text-brand' : 'text-text-secondary'}
               />
             </button>
           </div>
@@ -882,7 +905,15 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                 </div>
 
                 <div className="space-y-1.5">
-                  {ADVANCED_ORDER_TYPES.map(item => {
+                  {(currentExchange === 'hyperliquid'
+                    ? ADVANCED_ORDER_TYPES.filter(
+                        item =>
+                          item.value !== 'SCALED' &&
+                          item.value !== 'CHASE' &&
+                          item.value !== 'TRAILING_STOP_MARKET'
+                      )
+                    : ADVANCED_ORDER_TYPES
+                  ).map(item => {
                     const isSelected = store.orderType === item.value;
                     return (
                       <button
@@ -981,21 +1012,30 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="flex items-center justify-end gap-1 text-[10px] text-muted font-medium">
-                    <Wallet size={10} className="text-secondary" />
+                  <div className="flex items-center justify-end gap-1 text-[10px] text-text-muted font-medium">
+                    <Wallet size={10} className="text-text-secondary" />
                     <span>Avail. Balance</span>
                   </div>
-                  <div className="flex items-center justify-end gap-1.5 mt-0.5">
-                    <span className="text-[13px] font-bold font-mono-tabular text-primary">
+                  <div className="flex items-center justify-end gap-1 mt-0.5">
+                    <span className="text-[13px] font-bold font-mono-tabular text-text-primary">
                       ${availableMargin.toFixed(2)}
                     </span>
                     <button
                       type="button"
-                      onClick={() => setShowDepositModal(true)}
-                      className="w-4 h-4 rounded-full bg-brand/20 hover:bg-brand/30 flex items-center justify-center text-brand cursor-pointer transition-colors border border-brand/30 shadow-2xs shrink-0"
+                      onClick={() => setAccountModalTab('deposit')}
+                      className="px-1.5 py-0.5 rounded-md bg-brand/15 hover:bg-brand/25 text-brand text-[10px] font-bold flex items-center gap-0.5 cursor-pointer transition-colors border border-brand/30 shadow-2xs shrink-0"
                       title="Deposit Margin"
                     >
-                      <Plus size={11} strokeWidth={2.5} />
+                      <Plus size={10} strokeWidth={2.5} />
+                      <span>Add</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAccountModalTab('withdraw')}
+                      className="px-1.5 py-0.5 rounded-md bg-bg-tertiary hover:bg-hover text-text-secondary hover:text-text-primary text-[10px] font-medium flex items-center cursor-pointer transition-colors border border-border-color shrink-0"
+                      title="Withdraw Margin"
+                    >
+                      <span>Out</span>
                     </button>
                   </div>
                 </div>
@@ -1472,7 +1512,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                   type="button"
                   onClick={() => {
                     if (isDepositError) {
-                      setShowDepositModal(true);
+                      setAccountModalTab('deposit');
                     } else {
                       deriveAgentKey();
                     }
@@ -1499,7 +1539,9 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                           ? currentNetwork === 'testnet'
                             ? 'Claim Faucet to Activate'
                             : 'Deposit to Activate'
-                          : 'Signature Rejected — Try Again'}
+                          : isSignerOffline
+                            ? 'Trading Engine Maintenance — Retry'
+                            : 'Signature Rejected — Try Again'}
                       </span>
                     </>
                   ) : (
@@ -1509,19 +1551,21 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
                     </>
                   )}
                 </button>
-                <p className="text-[10.5px] text-center text-muted leading-tight">
+                <p className="text-[10.5px] text-center text-text-muted leading-tight">
                   {deriveState === 'signing'
                     ? 'Confirm signature request in your wallet'
                     : isDepositError
-                      ? `Initial deposit or faucet required to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`
-                      : `One-time signature to activate gas-free trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster V3'}`}
+                      ? `Initial deposit or faucet required to activate ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`
+                      : isSignerOffline
+                        ? 'Secure trading engine is undergoing a brief update. Our team is actively working on it.'
+                        : `One-time signature to activate gas-free trading on ${currentExchange === 'hyperliquid' ? 'Hyperliquid' : 'Aster'}`}
                 </p>
               </div>
             ) : isAccountLoading && !hasFunds ? (
               <button
                 type="button"
                 disabled
-                className="w-full h-11 rounded-xl font-bold text-sm text-muted bg-tertiary border border-white/[0.08] flex items-center justify-center gap-2 cursor-wait"
+                className="w-full h-11 rounded-xl font-bold text-sm text-text-muted bg-bg-tertiary border border-border-color flex items-center justify-center gap-2 cursor-wait"
               >
                 <Loader2 size={16} className="animate-spin text-brand" />
                 <span>Loading Balance...</span>
@@ -1529,7 +1573,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
             ) : !hasFunds ? (
               <button
                 type="button"
-                onClick={() => setShowDepositModal(true)}
+                onClick={() => setAccountModalTab('deposit')}
                 className="w-full h-11 bg-brand hover:bg-brand-hover text-white rounded-xl font-bold text-sm transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 active:scale-[0.99]"
               >
                 <Wallet size={16} />
@@ -1552,7 +1596,7 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
           </div>
         </div>
 
-        <div className="w-[120px] shrink-0 border-l border-white/[0.06] px-1 py-1 flex flex-col h-full bg-secondary">
+        <div className="w-[120px] shrink-0 border-l border-border-color px-1 py-1 flex flex-col h-full bg-bg-secondary">
           <MobileMiniOrderbook
             currentPrice={currentPrice}
             tickSize={currentMarket?.tickSize}
@@ -1564,9 +1608,9 @@ export const MobileTradeScreen: React.FC<MobileTradeScreenProps> = ({
       <LeverageModal isOpen={showLeverageModal} onClose={() => setShowLeverageModal(false)} />
 
       <AccountModal
-        isOpen={showDepositModal}
-        onClose={() => setShowDepositModal(false)}
-        initialTab="deposit"
+        isOpen={accountModalTab !== null}
+        onClose={() => setAccountModalTab(null)}
+        initialTab={accountModalTab || 'deposit'}
       />
     </div>
   );

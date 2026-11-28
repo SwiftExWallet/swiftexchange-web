@@ -3,7 +3,6 @@ import { getAddress, isAddress } from 'ethers';
 
 import { asterHttpClient } from '../client/asterHttpClient';
 import {
-  ASTER_CHAIN_ID,
   ASTER_ENDPOINTS,
   getAsterBapiUrl,
   getAsterRestUrl,
@@ -19,6 +18,7 @@ import type {
   MarginType,
   SymbolLeverageBracket,
 } from '../types/account';
+import type { IAsterSigner } from '../types/signer';
 import {
   EIP712_TYPES,
   buildSortedQueryString,
@@ -130,7 +130,10 @@ export interface DepositWithdrawRecord {
   address?: string;
 }
 
-export async function getAccountInfo(signer: Signer, userAddr: string): Promise<AsterAccountInfo> {
+export async function getAccountInfo(
+  signer: Signer | IAsterSigner,
+  userAddr: string
+): Promise<AsterAccountInfo> {
   return signedRequest(
     signer,
     userAddr,
@@ -143,7 +146,10 @@ export async function getAccountInfo(signer: Signer, userAddr: string): Promise<
   );
 }
 
-export async function getBalance(signer: Signer, userAddr: string): Promise<AsterBalance[]> {
+export async function getBalance(
+  signer: Signer | IAsterSigner,
+  userAddr: string
+): Promise<AsterBalance[]> {
   return signedRequest(
     signer,
     userAddr,
@@ -157,7 +163,7 @@ export async function getBalance(signer: Signer, userAddr: string): Promise<Aste
 }
 
 export async function getPositionRisk(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol?: string
 ): Promise<AsterPositionRisk[]> {
@@ -176,7 +182,7 @@ export async function getPositionRisk(
 }
 
 export async function changeLeverage(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol: string,
   leverage: number
@@ -188,7 +194,7 @@ export async function changeLeverage(
 }
 
 export async function changeMarginType(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol: string,
   marginType: MarginType
@@ -200,7 +206,7 @@ export async function changeMarginType(
 }
 
 export async function changePositionMargin(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol: string,
   amount: string,
@@ -217,7 +223,7 @@ export async function changePositionMargin(
 }
 
 export async function getLeverageBracket(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol?: string
 ): Promise<SymbolLeverageBracket[]> {
@@ -236,7 +242,7 @@ export async function getLeverageBracket(
 }
 
 export async function getIncomeHistory(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   params: GetIncomeHistoryParams = {},
   signal?: AbortSignal
@@ -251,7 +257,7 @@ export async function getIncomeHistory(
 }
 
 export async function changeMultiAssetsMargin(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   multiAssetsMargin: boolean
 ): Promise<{ code: number; msg: string }> {
@@ -261,7 +267,7 @@ export async function changeMultiAssetsMargin(
 }
 
 export async function getMultiAssetsMargin(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string
 ): Promise<{ multiAssetsMargin: boolean }> {
   return signedRequest(
@@ -277,7 +283,7 @@ export async function getMultiAssetsMargin(
 }
 
 export async function getPositionMode(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string
 ): Promise<{ dualSidePosition: boolean }> {
   return signedRequest(
@@ -293,7 +299,7 @@ export async function getPositionMode(
 }
 
 export async function changePositionMode(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   dualSidePosition: boolean
 ): Promise<{ code: number; msg: string }> {
@@ -303,7 +309,7 @@ export async function changePositionMode(
 }
 
 export async function getUserTrades(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   symbol?: string,
   opts: { startTime?: number; endTime?: number; limit?: number; fromId?: number } = {},
@@ -455,7 +461,7 @@ export async function getWithdrawAssets(
 }
 
 export async function getUserWithdrawInfo(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   accountType: 'spot' | 'perp' = 'perp'
 ): Promise<UserWithdrawInfo> {
@@ -473,7 +479,7 @@ export async function getUserWithdrawInfo(
 }
 
 export async function getDepositWithdrawHistory(
-  signer: Signer,
+  signer: Signer | IAsterSigner,
   userAddr: string,
   opts: {
     type?: 'DEPOSIT' | 'WITHDRAW';
@@ -525,29 +531,31 @@ export async function submitWithdraw(
   const baseUrl = params.accountType === 'spot' ? getAsterSpotRestUrl() : getAsterRestUrl();
   const serverTime = await getSyncedServerTime(baseUrl);
 
-  const corePayload: Record<string, string> = {
+  const allParams: Record<string, string> = {
     user: checksummedUser,
     signer: checksummedUser,
     chainId: String(params.chainId),
+    signatureChainId: String(params.chainId),
     asset: params.asset,
     amount: params.amount,
     fee: params.fee,
     receiver: checksummedReceiver,
     userNonce: params.userNonce,
+    userSignature: params.userSignature,
     nonce: params.userNonce,
+    timestamp: String(serverTime),
+    recvWindow: '5000',
   };
 
-  const sortedCoreQs = buildSortedQueryString(corePayload);
-  const msgToSign = `${sortedCoreQs}&userSignature=${params.userSignature}`;
-
-  const requestTypedData = buildTypedData(msgToSign, ASTER_CHAIN_ID);
+  const sortedQs = buildSortedQueryString(allParams);
+  const requestTypedData = buildTypedData(sortedQs, params.chainId);
   const requestSignature = await userWalletSigner.signTypedData(
     requestTypedData.domain,
     EIP712_TYPES,
     requestTypedData.message
   );
 
-  const finalBody = `${msgToSign}&signature=${requestSignature}&timestamp=${serverTime}&recvWindow=5000`;
+  const finalBody = `${sortedQs}&signature=${requestSignature}`;
 
   const data = await asterHttpClient.request<{ success: boolean; id?: string; msg?: string }>(
     `${baseUrl}${ASTER_ENDPOINTS.ASTER_USER_WITHDRAW}`,
@@ -598,4 +606,30 @@ export async function getMigrateUserHistory(
     undefined,
     50
   );
+}
+
+export interface AsterAssetIndexItem {
+  symbol: string;
+  time?: number;
+  index: string;
+  bidBuffer: string;
+  askBuffer: string;
+  bidRate?: string;
+  askRate?: string;
+}
+
+export async function getAsterAssetIndex(): Promise<AsterAssetIndexItem[]> {
+  try {
+    const restUrl = getAsterRestUrl();
+    const url = `${restUrl}${ASTER_ENDPOINTS.ASSET_INDEX}`;
+    const data = await asterHttpClient.request<AsterAssetIndexItem[]>(url, {
+      method: 'GET',
+      weight: 1,
+      ttlMs: 30_000,
+    });
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn('[Aster] Failed to fetch /fapi/v3/assetIndex:', e);
+    return [];
+  }
 }

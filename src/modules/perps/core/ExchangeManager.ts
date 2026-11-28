@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 
 import { useWalletStore } from '../../walletconnect/store/walletConnectStore';
 import type { ExchangeName, PerpNetwork } from './config/networks';
+import { resetPerpStores } from './stores/resetPerpStores';
 
 export type { PerpNetwork, ExchangeName };
 
@@ -32,8 +33,14 @@ export const useExchangeManager = create<ExchangeManagerState>()(
       currentNetwork: getInitialNetwork(),
       isSwitching: false,
       switchMessage: undefined,
-      setExchange: exchange => set({ currentExchange: exchange }),
-      setNetwork: network => set({ currentNetwork: network }),
+      setExchange: exchange => {
+        resetPerpStores();
+        set({ currentExchange: exchange });
+      },
+      setNetwork: network => {
+        resetPerpStores();
+        set({ currentNetwork: network });
+      },
       setIsSwitching: (isSwitching, message) => set({ isSwitching, switchMessage: message }),
     }),
     {

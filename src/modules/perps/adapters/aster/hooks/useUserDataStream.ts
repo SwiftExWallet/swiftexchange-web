@@ -12,6 +12,7 @@ import { useOrderStore } from '../../../core/stores/orderStore';
 import { usePositionStore } from '../../../core/stores/positionStore';
 import { useTickerStore } from '../../../core/stores/tickerStore';
 import { getAsterWsUrl } from '../constants';
+import type { IAsterSigner } from '../types/signer';
 import { fetchAsterSnapshot } from './useAsterDataSync';
 import { useListenKey } from './useListenKey';
 
@@ -32,7 +33,7 @@ export interface MarginCallEvent {
   positions: MarginCallPosition[];
 }
 
-export function useUserDataStream(signer: Signer | null, userAddr: string | null) {
+export function useUserDataStream(signer: Signer | IAsterSigner | null, userAddr: string | null) {
   const { listenKey, refresh } = useListenKey(signer, userAddr);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);

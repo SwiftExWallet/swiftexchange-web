@@ -6,6 +6,8 @@ import {
   getSymbolAthl,
   getSymbolDetail,
 } from '../../adapters/aster/api/funding';
+import { getHyperliquidFundingRate } from '../../adapters/hyperliquid/api/funding';
+import { useExchangeManager } from '../../core/ExchangeManager';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { safeFormatNumber } from '../../utils/precision';
 import { CoinIcon } from '../ui/CoinIcon';
@@ -276,6 +278,7 @@ const LeverageMarginView: React.FC<{ symbol: string }> = ({ symbol }) => {
 };
 
 const FundingHistoryView: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const currentExchange = useExchangeManager(state => state.currentExchange);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [now, setNow] = useState(Date.now());
@@ -285,9 +288,24 @@ const FundingHistoryView: React.FC<{ symbol: string }> = ({ symbol }) => {
     const fetchFunding = async () => {
       setLoading(true);
       try {
-        const asterSymbol = symbol.replace('-', '');
-        const res = await getRealTimeFundingRate(asterSymbol);
-        setData(res);
+        if (currentExchange === 'hyperliquid') {
+          const res = await getHyperliquidFundingRate(symbol);
+          if (res) {
+            setData({
+              symbol: res.symbol,
+              fundingIntervalHours: res.fundingIntervalHours,
+              nextFundingTime: res.nextFundingTime,
+              lastFundingRate: res.lastFundingRate,
+              interestRate: '0',
+              fundingFeeCap: 0.0075,
+              fundingFeeFloor: -0.0075,
+            });
+          }
+        } else {
+          const asterSymbol = symbol.replace('-', '');
+          const res = await getRealTimeFundingRate(asterSymbol);
+          setData(res);
+        }
       } catch (e) {
         console.error('Failed to fetch real-time funding', e);
       } finally {
@@ -295,7 +313,7 @@ const FundingHistoryView: React.FC<{ symbol: string }> = ({ symbol }) => {
       }
     };
     fetchFunding();
-  }, [symbol]);
+  }, [symbol, currentExchange]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);

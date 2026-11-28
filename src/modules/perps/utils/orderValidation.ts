@@ -46,7 +46,10 @@ export function validateOrder(
   attachedTpEnabled?: boolean,
   attachedTpPrice?: string,
   attachedSlEnabled?: boolean,
-  attachedSlPrice?: string
+  attachedSlPrice?: string,
+  exchange?: 'hyperliquid' | 'aster',
+  availableBalance?: number,
+  estimatedCost?: number
 ): ValidationResult {
   if (!market) {
     return { isValid: false };
@@ -82,6 +85,23 @@ export function validateOrder(
         return {
           isValid: false,
           error: `Price must be a multiple of ${market.tickSize} ${quoteAsset}`,
+          errorField: 'price',
+        };
+      }
+    }
+
+    if (orderType === 'POST_ONLY' && bnPrice.gt(0) && bnCurrentPrice.gt(0)) {
+      if (_side === 'BUY' && bnPrice.gte(bnCurrentPrice)) {
+        return {
+          isValid: false,
+          error: `Post-only BUY price (${bnPrice.toString()}) crosses market (${bnCurrentPrice.toString()}) and would be rejected as taker`,
+          errorField: 'price',
+        };
+      }
+      if (_side === 'SELL' && bnPrice.lte(bnCurrentPrice)) {
+        return {
+          isValid: false,
+          error: `Post-only SELL price (${bnPrice.toString()}) crosses market (${bnCurrentPrice.toString()}) and would be rejected as taker`,
           errorField: 'price',
         };
       }
@@ -272,7 +292,10 @@ export function validateOrder(
   const stepStr = market.stepSize ? String(market.stepSize) : '';
   const baseDecimals = stepStr.includes('.') ? stepStr.split('.')[1].length : 4;
 
-  const bnMinNotional = new BigNumber(market.minNotional || 0);
+  const defaultExchangeMin = exchange === 'hyperliquid' ? 10 : 5;
+  const effectiveMinNotionalVal =
+    market.minNotional && market.minNotional > 0 ? market.minNotional : defaultExchangeMin;
+  const bnMinNotional = new BigNumber(effectiveMinNotionalVal);
   const bnMinOrderSize = new BigNumber(market.minOrderSize || 0);
   const bnMaxPossibleSize = new BigNumber(maxPossibleSize || 0);
 
@@ -324,6 +347,16 @@ export function validateOrder(
       return {
         isValid: false,
         error: `Exceeds max available size of ${bnMaxPossibleSize.toFixed(baseDecimals)} ${baseAsset}`,
+        errorField: 'size',
+      };
+    }
+  }
+
+  if (availableBalance !== undefined && estimatedCost !== undefined && estimatedCost > 0) {
+    if (availableBalance < estimatedCost) {
+      return {
+        isValid: false,
+        error: `Insufficient available margin ($${availableBalance.toFixed(2)}) for order cost ($${estimatedCost.toFixed(2)})`,
         errorField: 'size',
       };
     }

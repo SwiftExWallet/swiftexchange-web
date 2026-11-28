@@ -124,6 +124,7 @@ export const ASTER_ENDPOINTS = {
   FUNDING_RATE: '/fapi/v3/fundingRate',
   FUNDING_INFO: '/fapi/v3/fundingInfo',
   OPEN_INTEREST: '/fapi/v3/openInterest',
+  ASSET_INDEX: '/fapi/v3/assetIndex',
 
   // Account & Auth
   LISTEN_KEY: '/fapi/v3/listenKey',

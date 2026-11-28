@@ -4,6 +4,8 @@ import React, { memo, useMemo, useState } from 'react';
 import BigNumber from 'bignumber.js';
 
 import { ConfirmationModal } from '../../../../../components/common/ConfirmationModal';
+import { useNotificationStore } from '../../../../../store/notificationStore';
+import { useExchangeManager } from '../../../core/ExchangeManager';
 import { useAccountStore } from '../../../core/stores/accountStore';
 import { useLeverageStore } from '../../../core/stores/leverageStore';
 import { useMarketStore } from '../../../core/stores/marketStore';
@@ -77,12 +79,7 @@ const PositionRow = memo(
         state.assetCtxByMarket[position.symbol.replace('-', '')] ||
         state.assetCtxByMarket[position.symbol.replace('USDT', '-USDT')]
     );
-    const {
-      isReady,
-      loading: isProcessing,
-      closePosition,
-      reversePosition,
-    } = useUnifiedExecution();
+    const { isReady, closePosition, reversePosition } = useUnifiedExecution();
 
     const market = useMarketStore(
       state =>
@@ -95,10 +92,32 @@ const PositionRow = memo(
       try {
         const isLong = parseFloat(position.size) > 0;
         const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
-        await closePosition(position.symbol, position.size, isLong, curPx);
+        const res: any = await closePosition(position.symbol, position.size, isLong, curPx);
         setCloseModalOpen(false);
-      } catch (err) {
+        if (res && res.fullyClosed === false && res.remainingSize > 0) {
+          useNotificationStore.getState().showToast({
+            type: 'SYSTEM',
+            status: 'warning',
+            title: 'Partially Closed',
+            message: `Filled market liquidity. Remaining size: ${res.remainingSize} ${position.symbol.replace('-', '')}`,
+          });
+        } else {
+          useNotificationStore.getState().showToast({
+            type: 'SYSTEM',
+            status: 'success',
+            title: 'Position Closed',
+            message: `Closed ${position.symbol.replace('-', '')} position successfully`,
+          });
+        }
+      } catch (err: any) {
         console.error('Failed to close position:', err);
+        const errMsg = err?.message || 'Failed to close position';
+        useNotificationStore.getState().showToast({
+          type: 'SYSTEM',
+          status: 'error',
+          title: 'Close Position Failed',
+          message: errMsg,
+        });
       } finally {
         setIsClosingThis(false);
       }
@@ -112,8 +131,21 @@ const PositionRow = memo(
         const curPx = parseFloat(assetCtx?.markPx || position.markPrice || '0') || undefined;
         await reversePosition(position.symbol, position.size, isLong, curPx);
         setReverseModalOpen(false);
-      } catch (err) {
+        useNotificationStore.getState().showToast({
+          type: 'SYSTEM',
+          status: 'success',
+          title: 'Position Reversed',
+          message: `Reversed ${position.symbol.replace('-', '')} position successfully`,
+        });
+      } catch (err: any) {
         console.error('Failed to reverse position:', err);
+        const errMsg = err?.message || 'Failed to reverse position';
+        useNotificationStore.getState().showToast({
+          type: 'SYSTEM',
+          status: 'error',
+          title: 'Reverse Position Failed',
+          message: errMsg,
+        });
       } finally {
         setIsReversingThis(false);
       }
@@ -182,10 +214,16 @@ const PositionRow = memo(
       });
     }, [officialLiq, position, leverage, allPositions, balances, isMultiAsset, bracketsBySymbol]);
 
+    const currentExchange = useExchangeManager(s => s.currentExchange);
+    const quoteAsset = currentExchange === 'hyperliquid' ? 'USDC' : 'USDT';
     const tickSize = market?.tickSize;
     const tickDecimals =
       tickSize && String(tickSize).includes('.') ? String(tickSize).split('.')[1].length : 1;
-    const baseSymbol = position.symbol.replace('-USDT', '').replace('USDT', '');
+    const baseSymbol = position.symbol
+      .replace('-USDC', '')
+      .replace('USDC', '')
+      .replace('-USDT', '')
+      .replace('USDT', '');
 
     return (
       <tr className="border-b border-color hover:bg-hover transition-colors">
@@ -205,7 +243,7 @@ const PositionRow = memo(
         >
           <div className="flex flex-col">
             <span className="font-medium">
-              {safeFormatNumber(bnNotional.toNumber(), 2, 2)} USDT
+              {safeFormatNumber(bnNotional.toNumber(), 2, 2)} {quoteAsset}
             </span>
             <span className="text-[10px] text-secondary">
               {absSize} {baseSymbol}
@@ -220,7 +258,9 @@ const PositionRow = memo(
         </td>
         <td className="px-2.5 py-1.5 text-primary font-mono-tabular">
           <div className="flex flex-col">
-            <span>{safeFormatNumber(marginCalc, 2, 2)} USDT</span>
+            <span>
+              {safeFormatNumber(marginCalc, 2, 2)} {quoteAsset}
+            </span>
             <span className="text-[10px] text-secondary">
               ({position.marginType === 'isolated' ? 'Isolated' : 'Cross'})
             </span>
@@ -238,7 +278,7 @@ const PositionRow = memo(
           <div className="flex flex-col">
             <span className="font-medium">
               {pnlVal > 0 ? '+' : ''}
-              {safeFormatNumber(pnlVal, 2, 2)} USDT
+              {safeFormatNumber(pnlVal, 2, 2)} {quoteAsset}
             </span>
             <span className="text-[10px]">
               {roe > 0 ? '+' : ''}
@@ -286,21 +326,21 @@ const PositionRow = memo(
         <td className="px-2.5 py-1.5">
           <button
             onClick={() => setReverseModalOpen(true)}
-            disabled={isProcessing || !isReady}
+            disabled={isReversingThis || !isReady}
             className="text-warning hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed text-[11px] font-medium cursor-pointer"
             title={!isReady ? 'Trading session not active' : 'Reverse position'}
           >
-            Reverse
+            {isReversingThis ? '...' : 'Reverse'}
           </button>
         </td>
         <td className="px-2.5 py-1.5 text-right">
           <button
             onClick={() => setCloseModalOpen(true)}
-            disabled={isProcessing || !isReady}
+            disabled={isClosingThis || !isReady}
             className="text-secondary hover:text-danger hover:bg-danger/10 p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center cursor-pointer"
             title={!isReady ? 'Trading session not active' : 'Close Position'}
           >
-            {isProcessing ? (
+            {isClosingThis ? (
               <span className="text-[10px]">...</span>
             ) : (
               <svg
@@ -359,7 +399,7 @@ const PositionRow = memo(
                     className={`font-mono ${pnlVal > 0 ? 'text-success' : pnlVal < 0 ? 'text-danger' : 'text-primary'}`}
                   >
                     {pnlVal > 0 ? '+' : ''}
-                    {pnlVal.toFixed(2)} USDT
+                    {pnlVal.toFixed(2)} {quoteAsset}
                   </span>
                 </div>
               </div>
@@ -472,8 +512,21 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
     try {
       await closeAllPositions(positionList);
       setCloseAllModalOpen(false);
-    } catch (err) {
+      useNotificationStore.getState().showToast({
+        type: 'SYSTEM',
+        status: 'success',
+        title: 'All Positions Closed',
+        message: 'All open positions were closed successfully',
+      });
+    } catch (err: any) {
       console.error('Failed to close all positions:', err);
+      const errMsg = err?.message || 'Failed to close all positions';
+      useNotificationStore.getState().showToast({
+        type: 'SYSTEM',
+        status: 'error',
+        title: 'Close All Positions Failed',
+        message: errMsg,
+      });
     } finally {
       setIsClosingAllLocal(false);
     }
@@ -481,16 +534,18 @@ export const PositionsTab: React.FC<Props> = ({ signer, userAddr }) => {
 
   if (positionList.length === 0) {
     return (
-      <TabEmptyState
-        icon={Layers}
-        title="No open positions"
-        description="You currently have no open positions."
-      />
+      <div className="w-full h-full flex flex-col justify-between bg-secondary">
+        <TabEmptyState
+          icon={Layers}
+          title="No open positions"
+          description="You currently have no open positions."
+        />
+      </div>
     );
   }
 
   return (
-    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none">
+    <div className="w-full h-full overflow-x-auto overflow-y-auto scrollbar-none bg-secondary">
       <table className="w-full text-[11px] text-left whitespace-nowrap">
         <thead className="text-secondary border-b border-color sticky top-0 bg-secondary z-10">
           <tr>

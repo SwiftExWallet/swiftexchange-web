@@ -1,15 +1,19 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import type { Wallet } from 'ethers';
 import { create } from 'zustand';
 
+import { useNotificationStore } from '../../../../../store/notificationStore';
 import {
+  HyperliquidIsolatedSigner,
   deriveHyperliquidAgentKey,
+  emergencyPurgeLocalAgent,
   encryptAndStoreAgentKey,
   getStoredAgentAddress,
   hasStoredAgentKey,
   purgeAgentKey,
   restoreAgentWallet,
+  revokeHyperliquidAgentKey,
 } from '../../../../walletconnect/services/hyperliquidAgentKeyManager';
 import { walletService } from '../../../../walletconnect/services/walletService';
 import { useWalletStore } from '../../../../walletconnect/store/walletConnectStore';
@@ -18,18 +22,30 @@ import { useExchangeManager } from '../../../core/ExchangeManager';
 export type DeriveState = 'idle' | 'signing' | 'ready' | 'error';
 
 interface HyperliquidAgentStoreState {
-  hyperliquidSigner: Wallet | null;
+  hyperliquidSigner: HyperliquidIsolatedSigner | Wallet | null;
   agentAddress: string | null;
   deriveState: DeriveState;
   error: Error | null;
   isRestoring: boolean;
-  setHyperliquidSigner: (signer: Wallet | null, address?: string | null) => void;
+  isRevoking: boolean;
+  setHyperliquidSigner: (
+    signer: HyperliquidIsolatedSigner | Wallet | null,
+    address?: string | null
+  ) => void;
   setDeriveState: (state: DeriveState) => void;
   setError: (error: Error | null) => void;
-  deriveAgentKey: (userAddr: string) => Promise<{ agentAddress: string; wallet: Wallet }>;
-  restoreKey: () => Promise<Wallet | null>;
+  deriveAgentKey: (
+    userAddr: string
+  ) => Promise<{ agentAddress: string; wallet: HyperliquidIsolatedSigner | Wallet }>;
+  revokeSession: () => Promise<void>;
+  emergencyPurgeSession: () => Promise<void>;
+  restoreKey: () => Promise<HyperliquidIsolatedSigner | Wallet | null>;
   purge: () => void;
 }
+
+let activeHlRestorePromise: Promise<any> | null = null;
+let lastFailedHlRestoreKey = '';
+let lastFailedHlRestoreTime = 0;
 
 export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set, get) => ({
   hyperliquidSigner: null,
@@ -37,6 +53,7 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
   deriveState: 'idle',
   error: null,
   isRestoring: false,
+  isRevoking: false,
 
   setHyperliquidSigner: (signer, address) =>
     set({
@@ -48,37 +65,130 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
   setDeriveState: deriveState => set({ deriveState }),
   setError: error => set({ error }),
 
+  revokeSession: async () => {
+    const userAddr = useWalletStore.getState().connectedWallets.evm?.address;
+    if (!userAddr) throw new Error('EVM wallet not connected');
+    if (get().isRevoking) return;
+
+    set({ isRevoking: true, error: null });
+    try {
+      const provider =
+        walletService.getProvider('evm') ||
+        (typeof window !== 'undefined' ? (window as any).ethereum : null);
+      if (!provider) throw new Error('EVM provider not available');
+
+      const isTestnet = useWalletStore.getState().network === 'testnet';
+      await revokeHyperliquidAgentKey(userAddr, provider, isTestnet);
+
+      set({
+        hyperliquidSigner: null,
+        agentAddress: null,
+        deriveState: 'idle',
+        isRevoking: false,
+        error: null,
+      });
+
+      useNotificationStore.getState().showToast({
+        type: 'SYSTEM',
+        title: 'Session Revoked',
+        message: 'Hyperliquid 1-click session has been revoked and purged.',
+        status: 'success',
+      });
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      set({ error: err, isRevoking: false });
+      throw err;
+    }
+  },
+
+  emergencyPurgeSession: async () => {
+    const isTestnet = useWalletStore.getState().network === 'testnet';
+    await emergencyPurgeLocalAgent(isTestnet);
+    set({
+      hyperliquidSigner: null,
+      agentAddress: null,
+      deriveState: 'idle',
+      isRevoking: false,
+      error: null,
+    });
+    useNotificationStore.getState().showToast({
+      type: 'SYSTEM',
+      title: 'Session Purged',
+      message: 'Local Hyperliquid trading session has been purged.',
+      status: 'info',
+    });
+  },
+
   restoreKey: async () => {
     const isTestnet = useWalletStore.getState().network === 'testnet';
     if (!hasStoredAgentKey(isTestnet)) {
-      set({ hyperliquidSigner: null, agentAddress: null, deriveState: 'idle' });
+      if (
+        get().hyperliquidSigner !== null ||
+        get().agentAddress !== null ||
+        get().deriveState !== 'idle'
+      ) {
+        set({ hyperliquidSigner: null, agentAddress: null, deriveState: 'idle' });
+      }
       return null;
     }
 
     const current = get().hyperliquidSigner;
     const currentStoredAddr = getStoredAgentAddress(isTestnet);
-    if (current && get().agentAddress === currentStoredAddr) return current;
+    if (
+      current &&
+      (get().agentAddress || '').toLowerCase() === (currentStoredAddr || '').toLowerCase()
+    ) {
+      return current;
+    }
 
-    if (get().isRestoring) return null;
+    const restoreKeyId = `${isTestnet}_${currentStoredAddr}`;
+    if (lastFailedHlRestoreKey === restoreKeyId && Date.now() - lastFailedHlRestoreTime < 5000) {
+      return null;
+    }
+
+    if (activeHlRestorePromise) return activeHlRestorePromise;
 
     set({ isRestoring: true });
-    try {
-      const wallet = await restoreAgentWallet(isTestnet);
-      if (wallet) {
-        set({
-          hyperliquidSigner: wallet,
-          agentAddress: wallet.address,
-          deriveState: 'ready',
-          isRestoring: false,
-          error: null,
-        });
-        return wallet;
+    activeHlRestorePromise = (async () => {
+      try {
+        const wallet = await restoreAgentWallet(isTestnet);
+        if (wallet) {
+          lastFailedHlRestoreKey = '';
+          set({
+            hyperliquidSigner: wallet,
+            agentAddress: wallet.address,
+            deriveState: 'ready',
+            isRestoring: false,
+            error: null,
+          });
+          return wallet;
+        }
+      } catch (e) {
+        console.error('[HyperliquidAgentStore] Failed to restore agent wallet:', e);
+      } finally {
+        activeHlRestorePromise = null;
       }
-    } catch (e) {
-      console.error('[HyperliquidAgentStore] Failed to restore agent wallet:', e);
-    }
-    set({ isRestoring: false, hyperliquidSigner: null, agentAddress: null, deriveState: 'idle' });
-    return null;
+
+      lastFailedHlRestoreKey = restoreKeyId;
+      lastFailedHlRestoreTime = Date.now();
+      if (
+        get().hyperliquidSigner !== null ||
+        get().agentAddress !== null ||
+        get().deriveState !== 'idle'
+      ) {
+        set({
+          isRestoring: false,
+          hyperliquidSigner: null,
+          agentAddress: null,
+          deriveState: 'idle',
+        });
+      } else {
+        set({ isRestoring: false });
+      }
+      return null;
+    })();
+
+    return activeHlRestorePromise;
   },
 
   deriveAgentKey: async (userAddr: string) => {
@@ -97,7 +207,7 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
 
       const isTestnet = useWalletStore.getState().network === 'testnet';
       const result = await deriveHyperliquidAgentKey(userAddr, provider, isTestnet);
-      await encryptAndStoreAgentKey(result.wallet.privateKey, isTestnet);
+      await encryptAndStoreAgentKey(result.agentAddress, isTestnet);
 
       set({
         hyperliquidSigner: result.wallet,
@@ -122,17 +232,21 @@ export const useHyperliquidAgentStore = create<HyperliquidAgentStoreState>((set,
       deriveState: 'idle',
       error: null,
       isRestoring: false,
+      isRevoking: false,
     });
   },
 }));
 
 export interface UseHyperliquidAgentResult {
-  hyperliquidSigner: Wallet | null;
+  hyperliquidSigner: HyperliquidIsolatedSigner | Wallet | null;
   userAddr: string | null;
   agentAddress: string | null;
   deriveState: DeriveState;
   error: Error | null;
   deriveAgentKey: () => Promise<void>;
+  revokeSession: () => Promise<void>;
+  emergencyPurgeSession: () => void;
+  isRevoking: boolean;
   purge: () => void;
   isReady: boolean;
 }
@@ -148,20 +262,43 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
   const agentAddress = useHyperliquidAgentStore(s => s.agentAddress);
   const deriveState = useHyperliquidAgentStore(s => s.deriveState);
   const error = useHyperliquidAgentStore(s => s.error);
+  const isRevoking = useHyperliquidAgentStore(s => s.isRevoking);
 
   const restoreKey = useHyperliquidAgentStore(s => s.restoreKey);
   const deriveAgentKeyStore = useHyperliquidAgentStore(s => s.deriveAgentKey);
+  const revokeSessionStore = useHyperliquidAgentStore(s => s.revokeSession);
+  const emergencyPurgeSessionStore = useHyperliquidAgentStore(s => s.emergencyPurgeSession);
   const purgeStore = useHyperliquidAgentStore(s => s.purge);
 
+  const lastRestoredKeyRef = useRef<string | null>(null);
+
+  // Stable refs for store actions to avoid adding them to useEffect deps
+  const restoreKeyRef = useRef(restoreKey);
+  const purgeStoreRef = useRef(purgeStore);
+  restoreKeyRef.current = restoreKey;
+  purgeStoreRef.current = purgeStore;
+
   useEffect(() => {
+    if (currentExchange !== 'hyperliquid') {
+      lastRestoredKeyRef.current = null;
+      return;
+    }
+
+    const key = `${userAddr}_${network}_${currentExchange}`;
     if (userAddr) {
-      restoreKey();
+      if (lastRestoredKeyRef.current !== key) {
+        lastRestoredKeyRef.current = key;
+        restoreKeyRef.current();
+      }
     } else {
-      if (hyperliquidSigner) {
-        purgeStore();
+      lastRestoredKeyRef.current = null;
+      // Read via store snapshot — avoids adding hyperliquidSigner to deps
+      if (useHyperliquidAgentStore.getState().hyperliquidSigner) {
+        purgeStoreRef.current();
       }
     }
-  }, [userAddr, network, currentExchange, restoreKey, purgeStore]);
+    // hyperliquidSigner intentionally NOT in deps — prevents signer set → re-run loop
+  }, [userAddr, network, currentExchange]);
 
   const deriveAgentKey = useCallback(async () => {
     if (!userAddr) throw new Error('EVM wallet not connected');
@@ -177,6 +314,9 @@ export function useHyperliquidAgent(): UseHyperliquidAgentResult {
     deriveState,
     error,
     deriveAgentKey,
+    revokeSession: revokeSessionStore,
+    emergencyPurgeSession: emergencyPurgeSessionStore,
+    isRevoking,
     purge: purgeStore,
     isReady,
   };

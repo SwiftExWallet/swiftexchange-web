@@ -1,3 +1,5 @@
+import BigNumber from 'bignumber.js';
+
 import type { Market, OrderBook, OrderBookLevel, Ticker } from '../../core/models';
 
 // Hyperliquid Internal Types
@@ -62,15 +64,19 @@ export class HyperliquidMapper {
       const quoteAsset = 'USDC';
       const baseAsset = item.name;
       const sizePrecision = item.szDecimals;
-      const pricePrecision = 4;
+      // Hyperliquid perps enforce: max price decimals = Math.max(0, 6 - szDecimals)
+      const maxPriceDecimals = Math.max(0, 6 - sizePrecision);
+      const tickSize = new BigNumber(10).pow(-maxPriceDecimals).toNumber();
+      const stepSize = new BigNumber(10).pow(-sizePrecision).toNumber();
 
       return {
         symbol: `${baseAsset}-${quoteAsset}`,
         baseAsset: baseAsset,
         quoteAsset: quoteAsset,
-        tickSize: Math.pow(10, -pricePrecision),
-        stepSize: Math.pow(10, -sizePrecision),
-        minOrderSize: Math.pow(10, -sizePrecision), // Simple heuristic for now
+        tickSize,
+        stepSize,
+        minOrderSize: stepSize,
+        minNotional: 10,
         maxLeverage: item.maxLeverage,
       };
     });

@@ -1,6 +1,7 @@
 import { Check, ChevronDown } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
+import { useExchangeManager } from '../../core/ExchangeManager';
 import type { OrderType } from '../../core/stores/orderEntryStore';
 
 interface OrderTypeSelectorProps {
@@ -8,7 +9,7 @@ interface OrderTypeSelectorProps {
   onChange: (type: OrderType) => void;
 }
 
-const ADVANCED_TYPES: { label: string; value: OrderType }[] = [
+const ASTER_ADVANCED_TYPES: { label: string; value: OrderType }[] = [
   { label: 'Stop Limit', value: 'STOP' },
   { label: 'Stop Market', value: 'STOP_MARKET' },
   { label: 'Trailing Stop', value: 'TRAILING_STOP_MARKET' },
@@ -17,9 +18,28 @@ const ADVANCED_TYPES: { label: string; value: OrderType }[] = [
   { label: 'Chase Order', value: 'CHASE' },
 ];
 
+const HYPERLIQUID_ADVANCED_TYPES: { label: string; value: OrderType }[] = [
+  { label: 'Stop Limit', value: 'STOP' },
+  { label: 'Stop Market', value: 'STOP_MARKET' },
+  { label: 'Post Only', value: 'POST_ONLY' },
+];
+
 export const OrderTypeSelector: React.FC<OrderTypeSelectorProps> = ({ activeType, onChange }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const currentExchange = useExchangeManager(s => s.currentExchange);
+
+  const advancedTypes =
+    currentExchange === 'hyperliquid' ? HYPERLIQUID_ADVANCED_TYPES : ASTER_ADVANCED_TYPES;
+
+  useEffect(() => {
+    if (currentExchange === 'hyperliquid') {
+      const allowed = ['MARKET', 'LIMIT', ...HYPERLIQUID_ADVANCED_TYPES.map(t => t.value)];
+      if (!allowed.includes(activeType)) {
+        onChange('LIMIT');
+      }
+    }
+  }, [currentExchange, activeType, onChange]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -31,8 +51,8 @@ export const OrderTypeSelector: React.FC<OrderTypeSelectorProps> = ({ activeType
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const isAdvancedActive = ADVANCED_TYPES.some(t => t.value === activeType);
-  const activeAdvancedObj = ADVANCED_TYPES.find(t => t.value === activeType);
+  const isAdvancedActive = advancedTypes.some(t => t.value === activeType);
+  const activeAdvancedObj = advancedTypes.find(t => t.value === activeType);
   const dropdownDisplayLabel = activeAdvancedObj ? activeAdvancedObj.label : 'Stop Limit';
 
   return (
@@ -77,7 +97,7 @@ export const OrderTypeSelector: React.FC<OrderTypeSelectorProps> = ({ activeType
 
         {isOpen && (
           <div className="absolute right-0 top-full mt-1 w-[150px] bg-secondary border border-color rounded-md shadow-2xl overflow-hidden z-50 py-1">
-            {ADVANCED_TYPES.map(type => {
+            {advancedTypes.map(type => {
               const isSelected = activeType === type.value;
               return (
                 <button

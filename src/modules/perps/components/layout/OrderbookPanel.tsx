@@ -21,9 +21,9 @@ interface OrderbookRowProps {
   displaySize: number;
   displayCumTotal: number;
   isAsk: boolean;
-  isUsdtUnit: boolean;
+  isQuoteUnit: boolean;
   formatPrice: (v: number) => string;
-  formatVal: (v: number, isUsdt: boolean) => string;
+  formatVal: (v: number, isQuote: boolean) => string;
 }
 
 const OrderbookRow = memo(function OrderbookRow({
@@ -31,27 +31,30 @@ const OrderbookRow = memo(function OrderbookRow({
   displaySize,
   displayCumTotal,
   isAsk,
-  isUsdtUnit,
+  isQuoteUnit,
   formatPrice,
   formatVal,
 }: OrderbookRowProps) {
+  const rowRef = useRef<HTMLDivElement>(null);
   const prevSizeRef = useRef(displaySize);
-  const [flash, setFlash] = useState<'ob-flash-green' | 'ob-flash-red' | null>(null);
 
   useEffect(() => {
     if (prevSizeRef.current !== displaySize) {
-      setFlash(isAsk ? 'ob-flash-red' : 'ob-flash-green');
       prevSizeRef.current = displaySize;
-      const timer = setTimeout(() => setFlash(null), 350);
-      return () => clearTimeout(timer);
+      const el = rowRef.current;
+      if (el) {
+        const cls = isAsk ? 'ob-flash-red' : 'ob-flash-green';
+        el.classList.remove('ob-flash-red', 'ob-flash-green');
+        void el.offsetWidth;
+        el.classList.add(cls);
+      }
     }
   }, [displaySize, isAsk]);
 
   return (
     <div
-      className={`flex justify-between items-center px-2 py-0.5 my-[0.5px] hover:bg-hover/80 cursor-pointer relative leading-none shrink-0 group select-none transition-colors duration-100 ${
-        flash || ''
-      }`}
+      ref={rowRef}
+      className="flex justify-between items-center px-2 py-0.5 my-[0.5px] hover:bg-hover/80 cursor-pointer relative leading-none shrink-0 group select-none transition-colors duration-100"
       onClick={() => useOrderEntryStore.getState().applyOrderbookPrice(price.toString())}
     >
       <div
@@ -67,18 +70,18 @@ const OrderbookRow = memo(function OrderbookRow({
         style={{ width: `calc((var(--row-size) / var(--max-size)) * 100%)` }}
       />
       <span
-        className={`font-mono-tabular text-[11px] font-medium z-10 ${
+        className={`font-mono-tabular text-[12px] font-medium z-10 ${
           isAsk ? 'text-danger' : 'text-success'
         }`}
       >
         {formatPrice(price)}
       </span>
       <div className="flex items-center z-10">
-        <span className="font-mono-tabular text-[11px] text-primary opacity-85 w-[68px] text-right">
-          {formatVal(displaySize, isUsdtUnit)}
+        <span className="font-mono-tabular text-[12px] text-primary opacity-90 w-[72px] text-right">
+          {formatVal(displaySize, isQuoteUnit)}
         </span>
-        <span className="font-mono-tabular text-[11px] text-secondary w-[68px] text-right">
-          {formatVal(displayCumTotal, isUsdtUnit)}
+        <span className="font-mono-tabular text-[12px] text-secondary w-[72px] text-right">
+          {formatVal(displayCumTotal, isQuoteUnit)}
         </span>
       </div>
     </div>
@@ -155,7 +158,7 @@ function buildCumulative(levels: { price: string; size: string }[]) {
 export const OrderbookPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'Book' | 'Trades'>('Book');
   const [viewMode, setViewMode] = useState<'both' | 'bids' | 'asks'>('both');
-  const [unit, setUnit] = useState<'USDT' | 'BASE'>('USDT');
+  const [unit, setUnit] = useState<'QUOTE' | 'BASE'>('QUOTE');
   const [isUnitOpen, setIsUnitOpen] = useState(false);
   const [isPrecisionOpen, setIsPrecisionOpen] = useState(false);
 
@@ -164,9 +167,21 @@ export const OrderbookPanel: React.FC = () => {
 
   const orderbook = useOrderbook();
   const trades = useTrades();
-  const market = useMarketStore(state => state.markets[state.selectedSymbol]);
   const symbol = useMarketStore(state => state.selectedSymbol);
-  const [base, quote] = symbol.split('-');
+  const cleanSymbol = symbol.includes('-')
+    ? symbol
+    : symbol.endsWith('USDC')
+      ? symbol.replace(/USDC$/, '-USDC')
+      : symbol.endsWith('USDT')
+        ? symbol.replace(/USDT$/, '-USDT')
+        : `${symbol}-USDC`;
+  const market = useMarketStore(
+    state =>
+      state.markets[symbol] || state.markets[cleanSymbol] || state.markets[symbol.replace('-', '')]
+  );
+  const [base, quote] = (cleanSymbol.includes('-') ? cleanSymbol : `${cleanSymbol}-USDC`).split(
+    '-'
+  );
 
   const tickSize = market?.tickSize || 0.1;
   const precisionOptions = useMemo(() => {
@@ -184,7 +199,7 @@ export const OrderbookPanel: React.FC = () => {
   useOnClickOutside(unitDropdownRef, () => setIsUnitOpen(false));
   useOnClickOutside(precisionDropdownRef, () => setIsPrecisionOpen(false));
 
-  const rowsPerSide = viewMode === 'both' ? 14 : 35;
+  const rowsPerSide = viewMode === 'both' ? 11 : 30;
 
   const rawAsks = useMemo(() => {
     const sliced = (orderbook.asks || []).slice(0, viewMode === 'bids' ? 0 : rowsPerSide * 2);
@@ -201,21 +216,21 @@ export const OrderbookPanel: React.FC = () => {
   const askRows = useMemo(() => buildCumulative(rawAsks).reverse(), [rawAsks]);
   const bidRows = useMemo(() => buildCumulative(rawBids), [rawBids]);
 
-  const isUsdtUnit = unit === 'USDT';
+  const isQuoteUnit = unit === 'QUOTE';
 
   const maxAskCum =
-    askRows.length > 0 ? (isUsdtUnit ? askRows[0].cumTotalQuote : askRows[0].cumTotalBase) : 1;
+    askRows.length > 0 ? (isQuoteUnit ? askRows[0].cumTotalQuote : askRows[0].cumTotalBase) : 1;
   const maxBidCum =
     bidRows.length > 0
-      ? isUsdtUnit
+      ? isQuoteUnit
         ? bidRows[bidRows.length - 1].cumTotalQuote
         : bidRows[bidRows.length - 1].cumTotalBase
       : 1;
   const maxCumTotal = Math.max(maxAskCum, maxBidCum, 1);
 
   const maxRowSize = Math.max(
-    ...askRows.map(r => (isUsdtUnit ? r.quoteSize : r.size)),
-    ...bidRows.map(r => (isUsdtUnit ? r.quoteSize : r.size)),
+    ...askRows.map(r => (isQuoteUnit ? r.quoteSize : r.size)),
+    ...bidRows.map(r => (isQuoteUnit ? r.quoteSize : r.size)),
     1
   );
 
@@ -347,7 +362,7 @@ export const OrderbookPanel: React.FC = () => {
                 )}
               </div>
 
-              {/* Unit Dropdown (USDT vs BASE) */}
+              {/* Unit Dropdown (QUOTE vs BASE) */}
               <div className="relative" ref={unitDropdownRef}>
                 <button
                   type="button"
@@ -357,7 +372,7 @@ export const OrderbookPanel: React.FC = () => {
                   }}
                   className="flex items-center gap-0.5 text-[11px] text-secondary hover:text-primary transition-colors cursor-pointer px-1 py-0.5 rounded hover:bg-hover/60"
                 >
-                  <span className="font-medium">{unit === 'USDT' ? quote : base}</span>
+                  <span className="font-medium">{unit === 'QUOTE' ? quote : base}</span>
                   <ChevronDown size={10} strokeWidth={2} className="opacity-70" />
                 </button>
 
@@ -377,15 +392,15 @@ export const OrderbookPanel: React.FC = () => {
                     </button>
                     <button
                       onClick={() => {
-                        setUnit('USDT');
+                        setUnit('QUOTE');
                         setIsUnitOpen(false);
                       }}
                       className={`w-full text-left px-2 py-1 text-[11px] flex items-center justify-between hover:bg-hover transition-colors cursor-pointer ${
-                        unit === 'USDT' ? 'text-brand font-semibold' : 'text-primary'
+                        unit === 'QUOTE' ? 'text-brand font-semibold' : 'text-primary'
                       }`}
                     >
                       <span>{quote}</span>
-                      {unit === 'USDT' && <Check size={10} className="text-brand" />}
+                      {unit === 'QUOTE' && <Check size={10} className="text-brand" />}
                     </button>
                   </div>
                 )}
@@ -394,29 +409,31 @@ export const OrderbookPanel: React.FC = () => {
           </div>
 
           {/* Bid/Ask Imbalance Ratio Indicator */}
-          <div className="flex h-[2px] w-full shrink-0">
+          <div className="flex h-[3px] w-full shrink-0">
             <div
-              className="bg-danger/60 transition-all duration-300"
+              className="bg-danger/80 transition-all duration-300"
               style={{ width: `${askPercent}%` }}
               title={`Asks: ${askPercent}%`}
             />
             <div
-              className="bg-success/60 transition-all duration-300"
+              className="bg-success/80 transition-all duration-300"
               style={{ width: `${bidPercent}%` }}
               title={`Bids: ${bidPercent}%`}
             />
           </div>
 
-          {/* Column Headers */}
           <div className="flex items-center justify-between px-2 py-1 text-[10px] text-secondary/70 font-medium shrink-0 h-[20px]">
-            <span>Price({quote})</span>
+            <span>Price({quote || 'USDC'})</span>
             <div className="flex">
-              <span className="w-[68px] text-right">Size({unit === 'USDT' ? quote : base})</span>
-              <span className="w-[68px] text-right">Total({unit === 'USDT' ? quote : base})</span>
+              <span className="w-[72px] text-right">
+                Size({unit === 'QUOTE' ? quote || 'USDC' : base})
+              </span>
+              <span className="w-[72px] text-right">
+                Total({unit === 'QUOTE' ? quote || 'USDC' : base})
+              </span>
             </div>
           </div>
 
-          {/* Orderbook Rows Container */}
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             {viewMode !== 'bids' && (
               <div
@@ -436,17 +453,17 @@ export const OrderbookPanel: React.FC = () => {
                       key={`ask-${row.price}`}
                       style={
                         {
-                          '--cum-total': isUsdtUnit ? row.cumTotalQuote : row.cumTotalBase,
-                          '--row-size': isUsdtUnit ? row.quoteSize : row.size,
+                          '--cum-total': isQuoteUnit ? row.cumTotalQuote : row.cumTotalBase,
+                          '--row-size': isQuoteUnit ? row.quoteSize : row.size,
                         } as React.CSSProperties
                       }
                     >
                       <OrderbookRow
                         price={row.price}
-                        displaySize={isUsdtUnit ? row.quoteSize : row.size}
-                        displayCumTotal={isUsdtUnit ? row.cumTotalQuote : row.cumTotalBase}
+                        displaySize={isQuoteUnit ? row.quoteSize : row.size}
+                        displayCumTotal={isQuoteUnit ? row.cumTotalQuote : row.cumTotalBase}
                         isAsk={true}
-                        isUsdtUnit={isUsdtUnit}
+                        isQuoteUnit={isQuoteUnit}
                         formatPrice={formatPrice}
                         formatVal={formatVal}
                       />
@@ -456,8 +473,7 @@ export const OrderbookPanel: React.FC = () => {
               </div>
             )}
 
-            {/* Dynamic Mid-Market Price & Spread Row */}
-            <div className="flex items-center justify-between px-2 py-0.5 border-y border-color shrink-0 h-[26px] bg-tertiary/20">
+            <div className="flex items-center justify-between px-2.5 py-1.5 shrink-0 select-none">
               <div
                 className="flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={() =>
@@ -467,27 +483,33 @@ export const OrderbookPanel: React.FC = () => {
                 title="Click to fill price"
               >
                 <span
-                  className={`font-mono-tabular text-[12px] font-bold ${
+                  className={`font-mono-tabular text-[14px] font-bold ${
                     isPriceUp ? 'text-success' : 'text-danger'
                   }`}
                 >
                   {lastPrice > 0 ? formatPrice(lastPrice) : '—'}
                 </span>
                 {isPriceUp ? (
-                  <ArrowUp size={11} strokeWidth={2.5} className="text-success" />
+                  <ArrowUp size={13} strokeWidth={2.5} className="text-success" />
                 ) : (
-                  <ArrowDown size={11} strokeWidth={2.5} className="text-danger" />
+                  <ArrowDown size={13} strokeWidth={2.5} className="text-danger" />
                 )}
               </div>
 
-              <div className="flex items-center gap-1 text-[10px]">
-                <span className="text-secondary/70">Spread</span>
-                <span className="font-mono-tabular text-primary font-medium">
-                  {spread > 0 ? formatPrice(spread) : '—'}
-                </span>
-                <span className="font-mono-tabular text-secondary/60">
-                  ({spreadPct.toFixed(2)}%)
-                </span>
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className="text-secondary/60">Spread</span>
+                {spread > 0 ? (
+                  <>
+                    <span className="font-mono-tabular text-secondary/80 font-medium">
+                      {formatPrice(spread)}
+                    </span>
+                    <span className="font-mono-tabular text-secondary/50">
+                      ({spreadPct.toFixed(2)}%)
+                    </span>
+                  </>
+                ) : (
+                  <span className="font-mono-tabular text-secondary/50">—</span>
+                )}
               </div>
             </div>
 
@@ -509,17 +531,17 @@ export const OrderbookPanel: React.FC = () => {
                       key={`bid-${row.price}`}
                       style={
                         {
-                          '--cum-total': isUsdtUnit ? row.cumTotalQuote : row.cumTotalBase,
-                          '--row-size': isUsdtUnit ? row.quoteSize : row.size,
+                          '--cum-total': isQuoteUnit ? row.cumTotalQuote : row.cumTotalBase,
+                          '--row-size': isQuoteUnit ? row.quoteSize : row.size,
                         } as React.CSSProperties
                       }
                     >
                       <OrderbookRow
                         price={row.price}
-                        displaySize={isUsdtUnit ? row.quoteSize : row.size}
-                        displayCumTotal={isUsdtUnit ? row.cumTotalQuote : row.cumTotalBase}
+                        displaySize={isQuoteUnit ? row.quoteSize : row.size}
+                        displayCumTotal={isQuoteUnit ? row.cumTotalQuote : row.cumTotalBase}
                         isAsk={false}
-                        isUsdtUnit={isUsdtUnit}
+                        isQuoteUnit={isQuoteUnit}
                         formatPrice={formatPrice}
                         formatVal={formatVal}
                       />
@@ -536,7 +558,7 @@ export const OrderbookPanel: React.FC = () => {
           <div className="flex items-center justify-between px-2 py-1 text-[10px] text-secondary/70 font-medium border-b border-color shrink-0 h-[24px]">
             <span>Price({quote})</span>
             <div className="flex">
-              <span className="w-[75px] text-right">Size(USDT)</span>
+              <span className="w-[75px] text-right">Size({quote || 'USDT'})</span>
               <span className="w-[65px] text-right">Time</span>
             </div>
           </div>
@@ -552,7 +574,7 @@ export const OrderbookPanel: React.FC = () => {
                   const isBuy = trade.side === 'buy';
                   const d = new Date(trade.timestamp);
                   const t = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
-                  const usdtVal = px * sz;
+                  const quoteVal = px * sz;
 
                   return (
                     <div
@@ -571,10 +593,10 @@ export const OrderbookPanel: React.FC = () => {
                       </span>
                       <div className="flex">
                         <span className="font-mono-tabular text-[11px] text-primary opacity-80 w-[75px] text-right">
-                          {usdtVal >= 1000
-                            ? safeFormatNumber(usdtVal, 2, 2)
-                            : Number.isFinite(usdtVal)
-                              ? usdtVal.toFixed(4)
+                          {quoteVal >= 1000
+                            ? safeFormatNumber(quoteVal, 2, 2)
+                            : Number.isFinite(quoteVal)
+                              ? quoteVal.toFixed(4)
                               : '--'}
                         </span>
                         <span className="font-mono-tabular text-[11px] text-secondary w-[65px] text-right">

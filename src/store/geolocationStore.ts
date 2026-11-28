@@ -21,15 +21,18 @@ export const useGeolocationStore = create<GeolocationState>((set, get) => ({
   fetchLocation: async () => {
     const { isLoading, fetchedAt, location } = get();
     if (isLoading) return;
-    if (location && fetchedAt && Date.now() - fetchedAt < TTL_MS) return;
+    // 15 min cache on success, 60s cooldown on failure so error states never loop
+    const cooldownMs = location ? TTL_MS : 60 * 1000;
+    if (fetchedAt && Date.now() - fetchedAt < cooldownMs) return;
 
     set({ isLoading: true, isError: false });
     try {
       const data = await fetchGeolocation();
       set({ location: data, isLoading: false, isError: false, fetchedAt: Date.now() });
     } catch (err) {
-      console.log(err, 'gelocation error');
-      set({ location: null, isLoading: false, isError: true, fetchedAt: null });
+      console.warn('[geolocationStore] Failed to fetch geolocation:', err);
+      // Set fetchedAt to Date.now() to ensure failure cooldown is strictly enforced
+      set({ location: null, isLoading: false, isError: true, fetchedAt: Date.now() });
     }
   },
   reset: () => set({ location: null, isLoading: false, isError: false, fetchedAt: null }),

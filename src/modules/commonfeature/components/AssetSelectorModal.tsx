@@ -4,6 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { FixedSizeList } from 'react-window';
 
+import { POPULAR } from '@/modules/rwa/data/groups';
+import { useRwaAvailability } from '@/modules/rwa/hooks/useRwaAvailability';
+import type { RwaCategory } from '@/modules/rwa/types/rwa.types';
+
 import {
   type NearIntentToken,
   fetchNearIntentTokens,
@@ -68,6 +72,14 @@ const AssetSelectorModal: FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [registryVersion, setRegistryVersion] = useState(0);
   const [nearTokens, setNearTokens] = useState<NearIntentToken[]>([]);
+  const { rwaVisible, assets: rwaAssets } = useRwaAvailability();
+  const [assetCategory, setAssetCategory] = useState<'tokens' | 'rwa'>('tokens');
+  const [rwaSubCategory, setRwaSubCategory] = useState<'all' | RwaCategory>('all');
+
+  const rwaNetworkIds = useMemo(() => {
+    const stellarId = getStellarConfig(currentNetwork).chainId;
+    return new Set(rwaAssets.map(a => String(a.chain === 'XLM' ? stellarId : a.chainId)));
+  }, [rwaAssets, currentNetwork]);
 
   useEffect(() => {
     if (currentNetwork === 'mainnet') {
@@ -87,6 +99,8 @@ const AssetSelectorModal: FC = () => {
     if (isOpen) {
       setSelectedNetwork(forceNetwork || defaultNetwork || 'all');
       setSearchQuery('');
+      setAssetCategory('tokens');
+      setRwaSubCategory('all');
     }
   }, [isOpen, defaultNetwork, forceNetwork]);
 
@@ -156,6 +170,70 @@ const AssetSelectorModal: FC = () => {
   const filteredAssets = useMemo(() => {
     let result: any[] = [];
     const stellarConfig = getStellarConfig(currentNetwork);
+    const showRwaFilter =
+      rwaVisible &&
+      currentNetwork === 'mainnet' &&
+      (effectiveActionType === 'SWAP' || effectiveActionType === 'BRIDGE');
+
+    if (showRwaFilter && assetCategory === 'rwa') {
+      result = rwaAssets
+        .filter(a => rwaSubCategory === 'all' || a.category === rwaSubCategory)
+        .map(a => {
+          const cid = a.chain === 'XLM' ? stellarConfig.chainId : a.chainId!;
+          const addr = a.chain === 'XLM' ? a.stellarIssuer : a.address;
+          const bal =
+            walletAssets.find(
+              w =>
+                String(w.chainId) === String(cid) &&
+                ((addr && w.address?.toLowerCase() === addr.toLowerCase()) ||
+                  (a.chain === 'XLM' &&
+                    w.symbol === a.code &&
+                    (w as any).issuer === a.stellarIssuer))
+            )?.balance || 0;
+          return {
+            id: `rwa-${a.id}`,
+            symbol: a.symbol,
+            name: a.name,
+            image: a.logo,
+            logoURI: a.logo,
+            chainId: cid,
+            address: addr,
+            contract: a.chain === 'XLM' ? a.stellarIssuer : a.address,
+            issuer: a.stellarIssuer,
+            decimals: a.decimals,
+            isNative: false,
+            isRwa: true,
+            rwaAsset: a,
+            balance: bal,
+          };
+        });
+
+      if (selectedNetwork !== 'all') {
+        result = result.filter(a => String(a.chainId) === String(selectedNetwork));
+      }
+      if (debouncedSearch.trim()) {
+        const q = debouncedSearch.toLowerCase();
+        result = result.filter(
+          a =>
+            a.symbol.toLowerCase().includes(q) ||
+            a.name.toLowerCase().includes(q) ||
+            (a.rwaAsset?.underlying || '').toLowerCase().includes(q) ||
+            (a.address && a.address.toLowerCase().includes(q))
+        );
+      }
+      return result.sort((a, b) => {
+        const ta = String(a.rwaAsset?.underlying || a.symbol).toUpperCase();
+        const tb = String(b.rwaAsset?.underlying || b.symbol).toUpperCase();
+        const ia = POPULAR.findIndex(p => p.toUpperCase() === ta);
+        const ib = POPULAR.findIndex(p => p.toUpperCase() === tb);
+        if (ia !== -1 || ib !== -1) {
+          return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+        }
+        return (
+          (Number(b.balance) || 0) - (Number(a.balance) || 0) || a.symbol.localeCompare(b.symbol)
+        );
+      });
+    }
 
     if (effectiveActionType === 'SEND') {
       // SEND: show only portfolio tokens (user must have balance to send)
@@ -446,6 +524,10 @@ const AssetSelectorModal: FC = () => {
     showAllStellarAssets,
     registryVersion,
     nearTokens,
+    rwaVisible,
+    rwaAssets,
+    assetCategory,
+    rwaSubCategory,
   ]);
 
   const handleSelect = useCallback(
@@ -542,6 +624,11 @@ const AssetSelectorModal: FC = () => {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-[15px] font-bold text-text-primary">{asset.symbol}</span>
+                  {asset.isRwa && asset.rwaAsset?.issuer && (
+                    <span className="text-[10px] bg-brand-primary/15 text-brand-primary px-1.5 py-0.5 rounded-md font-bold uppercase">
+                      {asset.rwaAsset.issuer}
+                    </span>
+                  )}
                   {asset.isNative ? (
                     <span className="text-[10px] bg-primary text-brand-primary px-1.5 py-1 rounded-md font-black uppercase">
                       Native
@@ -593,119 +680,251 @@ const AssetSelectorModal: FC = () => {
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-sm">
       <div className="absolute inset-0" onClick={closeAssetSelector} />
-      <div className="relative w-full max-w-lg bg-bg-secondary rounded-t-[28px] shadow-2xl flex flex-col h-[75vh] border border-divider border-b-0 animate-slide-up">
+      <div
+        className={`relative w-full ${
+          !forceNetwork ? 'sm:max-w-2xl max-w-lg' : 'max-w-lg'
+        } bg-bg-secondary rounded-t-[24px] shadow-2xl flex flex-col h-[85vh] sm:h-[78vh] border border-divider border-b-0 animate-slide-up overflow-hidden`}
+      >
         <div className="flex justify-center pt-3 pb-1">
           <div className="w-9 h-1 rounded-full bg-bg-tertiary" />
         </div>
 
-        <div className="px-5 pt-3 pb-3 flex items-center justify-between">
-          <h2 className="text-base font-bold text-text-primary uppercase tracking-widest">
-            {effectiveActionType}
-          </h2>
-          <button
-            onClick={closeAssetSelector}
-            className="w-9 h-9 flex items-center justify-center bg-bg-tertiary rounded-full text-text-secondary hover:text-text-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="px-5 pb-3">
-          <div className="relative">
-            <Search
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"
-              size={16}
-            />
-            <input
-              type="text"
-              placeholder="Search tokens"
-              className="w-full bg-bg-primary border-none pl-11 pr-4 py-2.5 rounded-xl text-sm focus:ring-1 focus:ring-brand-primary/20 transition-all"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-            />
-          </div>
-        </div>
-        {!forceNetwork && (
-          <div className="pb-3 flex items-center border-b border-divider">
-            <div className="pl-5 pr-3 flex-shrink-0">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div className="px-5 pt-2 pb-3 flex items-center justify-between">
+              <h2 className="text-base font-bold text-text-primary uppercase tracking-widest">
+                {effectiveActionType}
+              </h2>
               <button
-                onClick={() => setSelectedNetwork(allNetworkOption.id)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all"
-                style={
-                  selectedNetwork === 'all'
-                    ? {
-                        backgroundColor: '#3b4fd9',
-                        color: '#fff',
-                        boxShadow: '0 4px 12px #3b4fd940',
-                      }
-                    : undefined
-                }
+                onClick={closeAssetSelector}
+                className="sm:hidden w-8 h-8 flex items-center justify-center bg-bg-tertiary rounded-full text-text-secondary hover:text-text-primary transition-colors"
               >
-                All
+                <X size={16} />
               </button>
             </div>
 
-            <div className="w-px self-stretch bg-divider flex-shrink-0 my-1" />
-            <div
-              className="flex gap-2 px-3 flex-1 hide-scrollbar"
-              style={{ overflowX: 'auto', minWidth: 0 }}
-            >
-              {chainNetworks.map(net => (
-                <button
-                  key={net.id}
-                  onClick={() => setSelectedNetwork(net.id)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex-shrink-0"
-                  style={
-                    selectedNetwork === net.id
-                      ? {
-                          backgroundColor: '#3b4fd9',
-                          color: '#fff',
-                          boxShadow: '0 4px 12px #3b4fd940',
-                        }
-                      : undefined
+            <div className="px-5 pb-3 space-y-2.5">
+              <div className="relative">
+                <Search
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"
+                  size={16}
+                />
+                <input
+                  type="text"
+                  placeholder={
+                    assetCategory === 'rwa'
+                      ? 'Search stocks, ETFs, gold, treasuries…'
+                      : 'Search by name, symbol, or address'
                   }
+                  className="w-full bg-bg-primary border-none pl-11 pr-4 py-2.5 rounded-xl text-sm focus:ring-1 focus:ring-brand/30 transition-all"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
+
+              {rwaVisible &&
+                currentNetwork === 'mainnet' &&
+                (effectiveActionType === 'SWAP' || effectiveActionType === 'BRIDGE') && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-5 border-b border-divider/60 px-1">
+                      <button
+                        type="button"
+                        onClick={() => setAssetCategory('tokens')}
+                        className={`pb-2 text-xs font-bold border-b-2 transition-all ${
+                          assetCategory === 'tokens'
+                            ? 'border-brand text-text-primary'
+                            : 'border-transparent text-text-muted hover:text-text-primary'
+                        }`}
+                      >
+                        Tokens
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAssetCategory('rwa');
+                          if (
+                            selectedNetwork !== 'all' &&
+                            !rwaNetworkIds.has(String(selectedNetwork))
+                          ) {
+                            setSelectedNetwork('all');
+                          }
+                        }}
+                        className={`pb-2 text-xs font-bold border-b-2 transition-all ${
+                          assetCategory === 'rwa'
+                            ? 'border-brand text-text-primary'
+                            : 'border-transparent text-text-muted hover:text-text-primary'
+                        }`}
+                      >
+                        Stocks &amp; RWA
+                      </button>
+                    </div>
+
+                    {assetCategory === 'rwa' && (
+                      <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pt-0.5">
+                        {(
+                          [
+                            ['all', 'All'],
+                            ['stock', 'Stocks'],
+                            ['etf', 'ETFs'],
+                            ['gold', 'Gold'],
+                            ['treasury', 'Treasuries'],
+                          ] as const
+                        ).map(([key, label]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setRwaSubCategory(key)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+                              rwaSubCategory === key
+                                ? 'bg-brand/20 text-brand border border-brand/40'
+                                : 'bg-bg-tertiary text-text-secondary hover:text-text-primary'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {assetCategory === 'rwa' &&
+                      pairedChainId &&
+                      selectedNetwork !== 'all' &&
+                      String(selectedNetwork) !== String(pairedChainId) && (
+                        <p className="text-[11px] text-text-muted">
+                          Same-chain swap: selecting an asset here switches the pair to{' '}
+                          <span className="font-semibold text-text-primary">
+                            {getChainById(selectedNetwork)?.name || 'this network'}
+                          </span>
+                          .
+                        </p>
+                      )}
+                  </div>
+                )}
+            </div>
+
+            {!forceNetwork && (
+              <div className="sm:hidden pb-3 px-4 flex items-center gap-1.5 border-b border-divider overflow-x-auto hide-scrollbar">
+                <button
+                  onClick={() => setSelectedNetwork(allNetworkOption.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex-shrink-0 ${
+                    selectedNetwork === 'all'
+                      ? 'bg-white/10 text-text-primary border border-white/15'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
                 >
-                  {net.logo && <img src={net.logo} alt="" className="w-4 h-4 rounded-full" />}
-                  {net.name}
+                  All
                 </button>
-              ))}
+                {chainNetworks
+                  .filter(net => assetCategory !== 'rwa' || rwaNetworkIds.has(String(net.id)))
+                  .map(net => (
+                    <button
+                      key={net.id}
+                      onClick={() => setSelectedNetwork(net.id)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex-shrink-0 ${
+                        selectedNetwork === net.id
+                          ? 'bg-white/10 text-text-primary border border-white/15'
+                          : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      {net.logo && <img src={net.logo} alt="" className="w-4 h-4 rounded-full" />}
+                      {net.name}
+                    </button>
+                  ))}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-hidden">
+              {filteredAssets.length > 0 ? (
+                <AutoSizer
+                  renderProp={({ height, width }) => (
+                    <FixedSizeList
+                      height={height || 0}
+                      itemCount={filteredAssets.length}
+                      itemSize={ROW_HEIGHT}
+                      width={width || 0}
+                    >
+                      {AssetRow}
+                    </FixedSizeList>
+                  )}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center px-10">
+                  <div className="w-16 h-16 bg-bg-tertiary rounded-full flex items-center justify-center mb-4">
+                    <SearchX size={32} className="text-text-muted opacity-25" />
+                  </div>
+                  <h3 className="text-base font-bold text-text-primary mb-1">No assets found</h3>
+                  <p className="text-sm text-text-secondary leading-relaxed">
+                    {searchQuery
+                      ? `No results for "${searchQuery}" on this network.`
+                      : 'No assets available on this network.'}
+                  </p>
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="mt-6 text-brand font-bold text-xs uppercase tracking-widest hover:underline"
+                    >
+                      Clear search
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
-        )}
 
-        <div className="flex-1 overflow-hidden">
-          {filteredAssets.length > 0 ? (
-            <AutoSizer
-              renderProp={({ height, width }) => (
-                <FixedSizeList
-                  height={height || 0}
-                  itemCount={filteredAssets.length}
-                  itemSize={ROW_HEIGHT}
-                  width={width || 0}
-                >
-                  {AssetRow}
-                </FixedSizeList>
-              )}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center px-10">
-              <div className="w-16 h-16 bg-bg-tertiary rounded-full flex items-center justify-center mb-4">
-                <SearchX size={32} className="text-text-muted opacity-25" />
-              </div>
-              <h3 className="text-base font-bold text-text-primary mb-1">No assets found</h3>
-              <p className="text-sm text-text-secondary leading-relaxed">
-                {searchQuery
-                  ? `No results for "${searchQuery}" on this network.`
-                  : 'No assets available on this network.'}
-              </p>
-              {searchQuery && (
+          {!forceNetwork && (
+            <div className="hidden sm:flex sm:w-52 border-l border-divider flex-col bg-bg-primary/40">
+              <div className="px-4 pt-2.5 pb-3 flex items-center justify-between border-b border-divider/60">
+                <span className="text-xs font-bold text-text-primary uppercase tracking-wider">
+                  Select network
+                </span>
                 <button
-                  onClick={() => setSearchQuery('')}
-                  className="mt-6 text-brand-primary font-bold text-xs uppercase tracking-widest hover:underline"
+                  onClick={closeAssetSelector}
+                  className="w-7 h-7 flex items-center justify-center bg-bg-tertiary rounded-full text-text-secondary hover:text-text-primary transition-colors"
                 >
-                  Clear search
+                  <X size={15} />
                 </button>
-              )}
+              </div>
+              <div className="flex-1 overflow-y-auto px-2.5 py-2 space-y-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedNetwork(allNetworkOption.id)}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                    selectedNetwork === 'all'
+                      ? 'bg-white/10 text-text-primary'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-white/5'
+                  }`}
+                >
+                  <span>All networks</span>
+                  {selectedNetwork === 'all' && (
+                    <Check size={14} className="shrink-0 text-text-primary" />
+                  )}
+                </button>
+                {chainNetworks
+                  .filter(net => assetCategory !== 'rwa' || rwaNetworkIds.has(String(net.id)))
+                  .map(net => {
+                    const active = String(selectedNetwork) === String(net.id);
+                    return (
+                      <button
+                        key={net.id}
+                        type="button"
+                        onClick={() => setSelectedNetwork(net.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                          active
+                            ? 'bg-white/10 text-text-primary'
+                            : 'text-text-secondary hover:text-text-primary hover:bg-white/5'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {net.logo && (
+                            <img src={net.logo} alt="" className="w-4 h-4 rounded-full shrink-0" />
+                          )}
+                          <span className="truncate">{net.name}</span>
+                        </div>
+                        {active && <Check size={14} className="shrink-0 text-text-primary" />}
+                      </button>
+                    );
+                  })}
+              </div>
             </div>
           )}
         </div>

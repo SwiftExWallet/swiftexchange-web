@@ -2,6 +2,8 @@ import { ChevronDown } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { useAsterAgent } from '../../adapters/aster/hooks/useAsterAgent';
+import { useHyperliquidAgent } from '../../adapters/hyperliquid/hooks/useHyperliquidAgent';
+import { useExchangeManager } from '../../core/ExchangeManager';
 import { useMarketStore } from '../../core/stores/marketStore';
 import { useOrderStore } from '../../core/stores/orderStore';
 import { usePositionStore } from '../../core/stores/positionStore';
@@ -10,6 +12,7 @@ import DepthChart from '../chart/DepthChart';
 import { DetailsTab } from '../chart/DetailsTab';
 import { ExchangeTopBar } from './ExchangeTopBar';
 import { AssetsTab } from './tabs/AssetsTab';
+import { FundingHistoryTab } from './tabs/FundingHistoryTab';
 import { OpenOrdersTab } from './tabs/OpenOrdersTab';
 import { OrderHistoryTab } from './tabs/OrderHistoryTab';
 import { PositionsTab } from './tabs/PositionsTab';
@@ -55,18 +58,30 @@ export const ExchangePositionsPanel: React.FC = () => {
   const selectedSymbol = useMarketStore(state => state.selectedSymbol);
   const asterSymbol = selectedSymbol.replace('-', '');
 
-  const { asterSigner, userAddr } = useAsterAgent();
+  const { asterSigner, userAddr: asterUserAddr } = useAsterAgent();
+  const { hyperliquidSigner, userAddr: hlUserAddr } = useHyperliquidAgent();
+  const currentExchange = useExchangeManager(state => state.currentExchange);
+  const userAddr = currentExchange === 'hyperliquid' ? hlUserAddr : asterUserAddr;
+  const activeSigner = currentExchange === 'hyperliquid' ? hyperliquidSigner : asterSigner;
+
+  React.useEffect(() => {
+    if (currentExchange === 'hyperliquid' && activeTab === 'Transaction History') {
+      setActiveTab('Funding History');
+    } else if (currentExchange === 'aster' && activeTab === 'Funding History') {
+      setActiveTab('Transaction History');
+    }
+  }, [currentExchange, activeTab]);
 
   const renderTabContent = () => {
     switch (activeTab) {
       case 'Assets':
         return <AssetsTab />;
       case 'Positions':
-        return <PositionsTab signer={asterSigner} userAddr={userAddr!} />;
+        return <PositionsTab signer={activeSigner} userAddr={userAddr!} />;
       case 'Open Orders':
         return (
           <OpenOrdersTab
-            signer={asterSigner}
+            signer={activeSigner}
             userAddr={userAddr!}
             hideOtherSymbols={hideOtherSymbols}
             currentSymbol={selectedSymbol}
@@ -75,7 +90,7 @@ export const ExchangePositionsPanel: React.FC = () => {
       case 'Order History':
         return (
           <OrderHistoryTab
-            signer={asterSigner}
+            signer={activeSigner}
             userAddr={userAddr!}
             asterSymbol={asterSymbol}
             timeRange={historyTimeRange}
@@ -86,7 +101,7 @@ export const ExchangePositionsPanel: React.FC = () => {
       case 'Trade History':
         return (
           <TradeHistoryTab
-            signer={asterSigner}
+            signer={activeSigner}
             userAddr={userAddr!}
             asterSymbol={asterSymbol}
             timeRange={historyTimeRange}
@@ -94,9 +109,10 @@ export const ExchangePositionsPanel: React.FC = () => {
           />
         );
       case 'Transaction History':
+        return <TransactionHistoryTab signer={activeSigner} userAddr={userAddr!} />;
+      case 'Funding History':
         return (
-          <TransactionHistoryTab
-            signer={asterSigner}
+          <FundingHistoryTab
             userAddr={userAddr!}
             timeRange={historyTimeRange}
             hideOtherSymbols={hideOtherSymbols}
@@ -134,14 +150,26 @@ export const ExchangePositionsPanel: React.FC = () => {
     }
   };
 
-  const tabs = [
-    'Open Orders',
-    'Positions',
-    'Assets',
-    'Order History',
-    'Trade History',
-    'Transaction History',
-  ];
+  const tabs = React.useMemo(() => {
+    if (currentExchange === 'hyperliquid') {
+      return [
+        'Open Orders',
+        'Positions',
+        'Assets',
+        'Order History',
+        'Trade History',
+        'Funding History',
+      ];
+    }
+    return [
+      'Open Orders',
+      'Positions',
+      'Assets',
+      'Order History',
+      'Trade History',
+      'Transaction History',
+    ];
+  }, [currentExchange]);
 
   return (
     <div className="flex flex-col h-full relative min-w-0">
@@ -178,11 +206,13 @@ export const ExchangePositionsPanel: React.FC = () => {
         {(activeTab === 'Open Orders' ||
           activeTab === 'Order History' ||
           activeTab === 'Trade History' ||
-          activeTab === 'Transaction History') && (
+          activeTab === 'Transaction History' ||
+          activeTab === 'Funding History') && (
           <div className="flex items-center gap-3 shrink-0 text-[11px]">
             {(activeTab === 'Order History' ||
               activeTab === 'Trade History' ||
-              activeTab === 'Transaction History') && (
+              activeTab === 'Transaction History' ||
+              activeTab === 'Funding History') && (
               <div className="relative inline-flex items-center">
                 <select
                   value={historyTimeRange}

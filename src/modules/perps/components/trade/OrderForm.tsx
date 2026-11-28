@@ -142,7 +142,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       store.attachedTpEnabled,
       store.attachedTpPrice,
       store.attachedSlEnabled,
-      store.attachedSlPrice
+      store.attachedSlPrice,
+      currentExchange,
+      calcWalletBalance,
+      orderCost
     );
 
     if (!result.isValid) {
