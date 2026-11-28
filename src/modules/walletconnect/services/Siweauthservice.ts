@@ -496,20 +496,5 @@ export async function restoreAuthSession(address?: string): Promise<StoredAuthSe
 }
 
 export async function logoutServer(address?: string): Promise<void> {
-  const API_URL = getAuthApiBaseUrl();
-  const tokenToRevoke = currentToken?.accessToken || getStoredSession(address)?.accessToken;
-  if (API_URL && tokenToRevoke) {
-    try {
-      await fetch(`${API_URL}/auth/logout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${tokenToRevoke}`,
-        },
-      });
-    } catch {
-      // ignore
-    }
-  }
   clearAccessToken(address);
 }

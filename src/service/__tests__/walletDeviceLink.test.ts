@@ -9,6 +9,8 @@ import {
 } from '../apiConfig';
 import {
   ensureWalletLinkedToDevice,
+  fetchApiResponseFromProxy,
+  getWalletGasInfo,
   isWalletLinkedToDevice,
   registerWalletToDevice,
 } from '../apiService';
@@ -166,6 +168,18 @@ describe('Wallet to Device Token Linking', () => {
       expect(res1).toBe(true);
       expect(res2).toBe(true);
       expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips proxy and gas API calls when no auth token is available', async () => {
+      const mockFetch = vi.fn();
+      global.fetch = mockFetch;
+
+      await expect(fetchApiResponseFromProxy('/swap/quote', 'POST', {})).rejects.toThrow(
+        'Authentication required'
+      );
+      const gasInfo = await getWalletGasInfo('eth', '0x1234567890123456789012345678901234567890');
+      expect(gasInfo).toBeNull();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 });

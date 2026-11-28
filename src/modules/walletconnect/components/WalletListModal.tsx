@@ -226,9 +226,10 @@ export const WalletListModal: React.FC = () => {
       setConnectingWallet(null);
 
       const currentWallets = useWalletStore.getState().connectedWallets;
-      if (useWalletStore.getState().isModalOpen && currentWallets.evm?.address) {
-        setViewMode('onboarding');
-      } else if (currentWallets.stellar?.address) {
+      if (
+        useWalletStore.getState().isModalOpen &&
+        (currentWallets.evm?.address || currentWallets.stellar?.address)
+      ) {
         if (!useWalletStore.getState().isAuthenticated) {
           setViewMode('onboarding');
         } else {
@@ -259,9 +260,10 @@ export const WalletListModal: React.FC = () => {
       setConnectingWallet(null);
 
       const currentWallets = useWalletStore.getState().connectedWallets;
-      if (useWalletStore.getState().isModalOpen && currentWallets.evm?.address) {
-        setViewMode('onboarding');
-      } else if (currentWallets.stellar?.address) {
+      if (
+        useWalletStore.getState().isModalOpen &&
+        (currentWallets.evm?.address || currentWallets.stellar?.address)
+      ) {
         if (!useWalletStore.getState().isAuthenticated) {
           setViewMode('onboarding');
         } else {
@@ -301,9 +303,10 @@ export const WalletListModal: React.FC = () => {
           return;
         }
 
-        if (wallet.type === 'evm' && isEvmReady) {
-          setViewMode('onboarding');
-        } else if (wallet.type === 'stellar' && isStellarReady) {
+        if (
+          (wallet.type === 'evm' && isEvmReady) ||
+          (wallet.type === 'stellar' && isStellarReady)
+        ) {
           if (!useWalletStore.getState().isAuthenticated) {
             setViewMode('onboarding');
           } else {

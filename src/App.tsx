@@ -11,9 +11,7 @@ import {
   useWalletStore,
 } from './modules/walletconnect/store/walletConnectStore';
 import router from './routes';
-import { getValidDeviceToken, setDeviceToken } from './service/apiConfig';
-import { ensureWalletLinkedToDevice } from './service/apiService';
-import { registerDevice } from './service/deviceService';
+import { ensureSwiftExDeviceAuth } from './service/deviceService';
 import { useAppAvailabilityStore } from './store/appAvailabilityStore';
 import { useGeolocationStore } from './store/geolocationStore';
 
@@ -44,27 +42,9 @@ const printSecurityWarning = () => {
 
 printSecurityWarning();
 
-const isValidDevicePayload = (payload: unknown): boolean => {
-  if (!payload || typeof payload !== 'object') return false;
-  const p = payload as Record<string, unknown>;
-  return (
-    typeof p.uniqueId === 'string' &&
-    p.uniqueId.trim() !== '' &&
-    typeof p.fcmToken === 'string' &&
-    p.fcmToken.trim() !== ''
-  );
-};
-
-const isSwiftExPeer = (peerMeta?: any): boolean => {
-  if (!peerMeta) return false;
-  const name = typeof peerMeta.name === 'string' ? peerMeta.name.toLowerCase() : '';
-  const url = typeof peerMeta.url === 'string' ? peerMeta.url.toLowerCase() : '';
-  return name.includes('swiftex') || url.includes('swiftexchange.io');
-};
-
 const App = () => {
   const session = useWalletStore(state => state.session);
-  const devicePayload = session?.peer?.metadata?.userDevice;
+  const peerMeta = session?.peer?.metadata;
 
   useEffect(() => {
     printSecurityWarning();
@@ -75,30 +55,8 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    const storedToken = getValidDeviceToken();
-    if (storedToken) {
-      ensureWalletLinkedToDevice(undefined, storedToken).catch(() => {});
-      return;
-    }
-
-    if (!isSwiftExPeer(session?.peer?.metadata)) {
-      return;
-    }
-
-    if (!isValidDevicePayload(devicePayload)) {
-      return;
-    }
-
-    registerDevice(devicePayload)
-      .then(res => {
-        const token = res.token || res.data?.token || res.deviceToken;
-        if (token) {
-          setDeviceToken(token);
-          ensureWalletLinkedToDevice(undefined, token).catch(() => {});
-        }
-      })
-      .catch(() => {});
-  }, [devicePayload, session?.peer?.metadata]);
+    void ensureSwiftExDeviceAuth(peerMeta);
+  }, [peerMeta]);
 
   return (
     <ErrorBoundary>

@@ -2,6 +2,17 @@ import { BrowserProvider, getAddress, hexlify, toUtf8Bytes } from 'ethers';
 
 import { sendCustomNotification } from '../../../../service/notificationService';
 
+async function ensureRelayerTransportOpen(provider: any): Promise<void> {
+  try {
+    const relayer = provider?.client?.core?.relayer;
+    if (relayer && !relayer.connected && typeof relayer.transportOpen === 'function') {
+      await relayer.transportOpen();
+    }
+  } catch (err) {
+    console.warn('[WalletService] Relayer transportOpen before sign failed:', err);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Production Timeout & Cancellation Wrapper
 // ---------------------------------------------------------------------------
@@ -162,6 +173,7 @@ export async function signSiweMessage(
     };
 
     if (wcProvider?.client && wcProvider?.session?.topic) {
+      await ensureRelayerTransportOpen(wcProvider);
       const topic = wcProvider.session.topic;
       const sessionChains: string[] = wcProvider.session.namespaces?.eip155?.chains || [];
       const sessionAccounts: string[] = wcProvider.session.namespaces?.eip155?.accounts || [];
@@ -420,6 +432,7 @@ export async function signStellarPayload(
     let signedXdr: string | undefined;
 
     try {
+      await ensureRelayerTransportOpen(prov);
       const result: any = await prov.client.request({
         topic: prov.session.topic,
         chainId,
